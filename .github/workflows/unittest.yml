@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches:
+    - main
+    tags:
+    - 'v*'
+  pull_request:
+
+jobs:
+
+  context-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJSON(github) }}
+        run: echo "$GITHUB_CONTEXT"
+      - name: Repo info
+        run: |
+          curl -s \
+          --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+          --header "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}
+  UnitTest:
+    strategy:
+      matrix:
+        go-version: [1.17.x]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      ITEST_IMAGE_TAG: rc-${{ github.event.number }}
+
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Prepare
+      run: make vars tools generate
+
+    - name: UnitTest
+      run: make build covtest
+
+    - name: coveralls
+      #if: github.event_name == 'pull_request'
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: make coveralls-github
