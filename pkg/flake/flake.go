@@ -14,7 +14,7 @@ import (
 	"github.com/go-phorce/dolly/xlog"
 )
 
-var logger = xlog.NewPackageLogger("github.com/martinisecurity/trusty/pkg", "flake")
+var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "flake")
 
 // IDGenerator defines an interface to generate unique ID accross the cluster
 type IDGenerator interface {

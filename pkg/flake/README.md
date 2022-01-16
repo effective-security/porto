@@ -6,7 +6,7 @@ A fork from https://github.com/sony/sonyflake
 Flake is a distributed unique ID generator inspired by [Twitter's Snowflake](https://blog.twitter.com/2010/announcing-snowflake).  
 
 Differences from the original Sonyflake:
-- panic instead of returning errors, as these errors are mostly non actionable and should never occur
+- panic instead of returning errors, as these errors are mostly non actionable and should never occur: `NextID() uint64`
 - time units are 1 msec instead of 10
 - 16 bits for a machine id,
 - 6  bits for a sequence number (64 per 1 ms)
@@ -22,7 +22,7 @@ Installation
 ------------
 
 ```
-go get github.com/ekspand/porto/pkg/flake
+go get github.com/effective-security/porto/pkg/flake
 ```
 
 Usage
