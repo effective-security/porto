@@ -1,0 +1,9 @@
+---
+region : test-override
+
+list:
+  - ${USER}
+  - ${NORMALIZED_USER}
+  - ${ENVIRONMENT}
+  - ${HOSTNAME}/${NODENAME}
+  - ${USER}@${HOSTNAME}:${LOCALIP}
