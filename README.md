@@ -1,6 +1,6 @@
 # porto
 
-[![Coverage Status](https://coveralls.io/repos/github/ekspand/porto/badge.svg?branch=main)](https://coveralls.io/github/ekspand/porto?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/effective-security/porto/badge.svg?branch=main)](https://coveralls.io/github/effective-security/porto?branch=main)
 
 Go packages
 

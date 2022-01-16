@@ -1,6 +1,6 @@
 #!/bin/bash
 source .project/yaml.sh
-create_variables ./config.yml
+create_variables .project/config.yml
 
 ORG_NAME=$project_org
 

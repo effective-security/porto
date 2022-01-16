@@ -1,4 +1,4 @@
-module github.com/ekspand/porto
+module github.com/effective-security/porto
 
 go 1.17
 
