@@ -165,8 +165,7 @@ func TestIdGenerator(t *testing.T) {
 			wg.Add(1)
 
 			for c := 0; c < maxIds; c++ {
-
-				id := sf.NextID()
+				id := DefaultIDGenerator.NextID()
 				err := useCode(id)
 				assert.NoError(t, err)
 				if err != nil {
@@ -177,11 +176,12 @@ func TestIdGenerator(t *testing.T) {
 	}
 	wg.Wait()
 
+	dsf := DefaultIDGenerator.(*Flake)
 	t.Logf("number of id: %d", set.Cardinality())
 	t.Logf("max id per go: %d", maxIds)
-	t.Logf("max sequence: %d", sf.maxSequence)
+	t.Logf("max sequence: %d", dsf.maxSequence)
 
-	assert.GreaterOrEqual(t, int(sf.maxSequence), int(MaskSequence16))
+	assert.GreaterOrEqual(t, int(dsf.maxSequence), int(MaskSequence16))
 	assert.Equal(t, uint64(maxRoutines*maxIds), totalCount)
 }
 
