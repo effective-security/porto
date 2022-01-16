@@ -31,8 +31,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       ITEST_IMAGE_TAG: rc-${{ github.event.number }}
-      ORG_NAME: effective-security
-      PROJECT_NAME: porto
       COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
       RUN_ID: ${{ github.run_id }}
       PULL_NUMBER: ${{ github.event.pull_request.number }}
@@ -42,10 +40,10 @@ jobs:
     - name: Create code coverage status for the current commit
       if: github.event_name == 'pull_request'
       run: |
-        curl "https://{GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${ORG_NAME}/${PROJECT_NAME}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${ORG_NAME}/${PROJECT_NAME}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
+        curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
       env:
         GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-        GIT_USER: dissoupov
+        GIT_USER: ${{ secrets.GIT_USER }}
 
     - name: Install Go
       uses: actions/setup-go@v2
@@ -70,10 +68,10 @@ jobs:
         total=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
         echo "total cov: $total"
         (( $(echo "$total > ${MIN_TESTCOV}" | bc -l) )) && STATE=success || STATE=failure
-        curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${ORG_NAME}/${PROJECT_NAME}/statuses/${COMMIT_SHA}" -d "{\"state\": \"${STATE}\",\"target_url\": \"https://github.com/${ORG_NAME}/${PROJECT_NAME}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"${total}%\",\"context\": \"code cov\"}"
+        curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"${STATE}\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"${total}%\",\"context\": \"code cov\"}"
       env:
         GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-        GIT_USER: dissoupov
+        GIT_USER: ${{ secrets.GIT_USER }}
 
     - name: coveralls
       #if: github.event_name == 'pull_request'
