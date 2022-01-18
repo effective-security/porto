@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-phorce/dolly/xlog"
+	"github.com/effective-security/xlog"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "flake")
