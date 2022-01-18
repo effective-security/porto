@@ -6,6 +6,7 @@ require (
 	github.com/deckarep/golang-set v1.7.1
 	github.com/effective-security/xlog v0.0.0-20220117152117-b33834702782
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
+	github.com/go-phorce/dolly v0.9.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/goveralls v0.0.11
 	github.com/oleiade/reflections v1.0.1
@@ -22,7 +23,6 @@ require (
 require (
 	github.com/BurntSushi/toml v1.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.6.1 // indirect
 	github.com/yuin/goldmark v1.4.1 // indirect
