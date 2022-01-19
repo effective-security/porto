@@ -90,14 +90,14 @@ func Test_FromContext(t *testing.T) {
 	handler := NewContextHandler(http.HandlerFunc(h), GuestIdentityMapper)
 
 	t.Run("default_extractor", func(t *testing.T) {
-		r, err := http.NewRequest(http.MethodGet, "/dolly", nil)
+		r, err := http.NewRequest(http.MethodGet, "/test", nil)
 		require.NoError(t, err)
 
 		r.TLS = &tls.ConnectionState{
 			PeerCertificates: []*x509.Certificate{
 				{
 					Subject: pkix.Name{
-						CommonName:   "dolly",
+						CommonName:   "es",
 						Organization: []string{"org"},
 					},
 				},
@@ -114,7 +114,7 @@ func Test_FromContext(t *testing.T) {
 		rn := &roleName{}
 		require.NoError(t, marshal.Decode(resp.Body, rn))
 		assert.Equal(t, GuestRoleName, rn.Role)
-		assert.Equal(t, "dolly", rn.Name)
+		assert.Equal(t, "es", rn.Name)
 	})
 }
 
@@ -176,14 +176,14 @@ func Test_RequestorIdentity(t *testing.T) {
 
 	t.Run("default_extractor", func(t *testing.T) {
 		handler := NewContextHandler(http.HandlerFunc(h), GuestIdentityMapper)
-		r, err := http.NewRequest(http.MethodGet, "/dolly", nil)
+		r, err := http.NewRequest(http.MethodGet, "/test", nil)
 		require.NoError(t, err)
 
 		r.TLS = &tls.ConnectionState{
 			PeerCertificates: []*x509.Certificate{
 				{
 					Subject: pkix.Name{
-						CommonName:   "dolly",
+						CommonName:   "es",
 						Organization: []string{"org"},
 					},
 				},
@@ -200,19 +200,19 @@ func Test_RequestorIdentity(t *testing.T) {
 		rn := &roleName{}
 		require.NoError(t, marshal.Decode(resp.Body, rn))
 		assert.Equal(t, GuestRoleName, rn.Role)
-		assert.Equal(t, "dolly", rn.Name)
+		assert.Equal(t, "es", rn.Name)
 	})
 
 	t.Run("cn_extractor", func(t *testing.T) {
 		handler := NewContextHandler(http.HandlerFunc(h), identityMapperFromCN)
-		r, err := http.NewRequest(http.MethodGet, "/dolly", nil)
+		r, err := http.NewRequest(http.MethodGet, "/test", nil)
 		require.NoError(t, err)
 
 		r.TLS = &tls.ConnectionState{
 			PeerCertificates: []*x509.Certificate{
 				{
 					Subject: pkix.Name{
-						CommonName:   "cn-dolly",
+						CommonName:   "cn-es",
 						Organization: []string{"org"},
 					},
 				},
@@ -227,13 +227,13 @@ func Test_RequestorIdentity(t *testing.T) {
 
 		rn := &roleName{}
 		require.NoError(t, marshal.Decode(resp.Body, rn))
-		assert.Equal(t, "cn-dolly", rn.Role)
-		assert.Equal(t, "cn-dolly", rn.Name)
+		assert.Equal(t, "cn-es", rn.Role)
+		assert.Equal(t, "cn-es", rn.Name)
 	})
 
 	t.Run("cn_extractor_must", func(t *testing.T) {
 		handler := NewContextHandler(http.HandlerFunc(h), identityMapperFromCNMust)
-		r, err := http.NewRequest(http.MethodGet, "/dolly", nil)
+		r, err := http.NewRequest(http.MethodGet, "/test", nil)
 		require.NoError(t, err)
 
 		w := httptest.NewRecorder()
@@ -243,7 +243,7 @@ func Test_RequestorIdentity(t *testing.T) {
 		assert.Equal(t, `{"code":"unauthorized","message":"request denied for this identity"}`, w.Body.String())
 	})
 	t.Run("ForRequest", func(t *testing.T) {
-		r, err := http.NewRequest(http.MethodGet, "/dolly", nil)
+		r, err := http.NewRequest(http.MethodGet, "/test", nil)
 		require.NoError(t, err)
 
 		ctx := FromRequest(r)

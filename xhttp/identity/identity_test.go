@@ -38,7 +38,7 @@ func Test_extractIdentityFromRequest(t *testing.T) {
 			PeerCertificates: []*x509.Certificate{
 				{
 					Subject: pkix.Name{
-						CommonName:   "dolly",
+						CommonName:   "test",
 						Organization: []string{"org"},
 					},
 				},
@@ -46,7 +46,7 @@ func Test_extractIdentityFromRequest(t *testing.T) {
 		}
 
 		idn, _ := GuestIdentityMapper(r)
-		assert.Equal(t, "guest/dolly", idn.String())
+		assert.Equal(t, "guest/test", idn.String())
 	})
 }
 
