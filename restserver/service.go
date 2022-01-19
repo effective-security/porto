@@ -1,4 +1,4 @@
-package rest
+package restserver
 
 // Service provides a way for subservices to be registered so they get added to the http API.
 type Service interface {

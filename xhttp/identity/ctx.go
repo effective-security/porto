@@ -59,7 +59,7 @@ func FromContext(ctx context.Context) *RequestContext {
 	return ret
 }
 
-//AddToContext returns a new golang context that adds `rq` as the dolly request context.
+// AddToContext returns a new golang context that adds `rq` as the request context.
 func AddToContext(ctx context.Context, rq *RequestContext) context.Context {
 	return context.WithValue(ctx, keyContext, rq)
 }

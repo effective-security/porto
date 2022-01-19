@@ -79,7 +79,7 @@ func (c identity) UserInfo() interface{} {
 // String returns the identity as a single string value
 // in the format of role/name
 func (c identity) String() string {
-	if c.role != c.name {
+	if c.role != c.name && c.name != "" {
 		return c.role + "/" + c.name
 	}
 	return c.role
