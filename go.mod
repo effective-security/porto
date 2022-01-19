@@ -7,6 +7,7 @@ require (
 	github.com/effective-security/xlog v0.0.0-20220117152117-b33834702782
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
 	github.com/go-phorce/dolly v0.9.0
+	github.com/jinzhu/copier v0.3.2
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/goveralls v0.0.11
 	github.com/oleiade/reflections v1.0.1
