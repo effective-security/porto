@@ -39,12 +39,7 @@ type KeypairReloader struct {
 }
 
 // NewKeypairReloader return an instance of the TLS cert loader
-func NewKeypairReloader(certPath, keyPath string, checkInterval time.Duration) (*KeypairReloader, error) {
-	return NewKeypairReloaderWithLabel("", certPath, keyPath, checkInterval)
-}
-
-// NewKeypairReloaderWithLabel return an instance of the TLS cert loader
-func NewKeypairReloaderWithLabel(label, certPath, keyPath string, checkInterval time.Duration) (*KeypairReloader, error) {
+func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Duration) (*KeypairReloader, error) {
 	if label == "" {
 		label = path.Base(certPath)
 	}
@@ -123,22 +118,20 @@ func (k *KeypairReloader) Reload() error {
 
 	k.inProgress = true
 	defer func() {
-		if k.inProgress {
-			k.inProgress = false
-			k.lock.Unlock()
-		}
+		k.inProgress = false
+		k.lock.Unlock()
 	}()
 
 	oldModifiedAt := k.certModifiedAt
 
-	var newCert tls.Certificate
+	var newCert *tls.Certificate
 	var err error
 
 	for i := 0; i < 3; i++ {
 		// sleep a little as notification occurs right after process starts writing the file,
 		// so it needs to finish writing the file
 		time.Sleep(100 * time.Millisecond)
-		newCert, err = tls.LoadX509KeyPair(k.certPath, k.keyPath)
+		newCert, err = LoadX509KeyPairWithOCSP(k.certPath, k.keyPath)
 		if err == nil {
 			break
 		}
@@ -168,10 +161,8 @@ func (k *KeypairReloader) Reload() error {
 	logger.Noticef("label=%s, count=%d, cert=%q, modifiedAt=%q",
 		k.label, k.count, k.certPath, k.certModifiedAt.Format(time.RFC3339))
 
-	k.keypair = &newCert
+	k.keypair = newCert
 	keypair := k.tlsCert()
-	k.inProgress = false
-	k.lock.Unlock()
 
 	if oldModifiedAt != k.certModifiedAt {
 		// execute notifications outside of the lock
@@ -203,6 +194,8 @@ func (k *KeypairReloader) tlsCert() *tls.Certificate {
 // GetKeypairFunc is a callback for TLSConfig to provide TLS certificate and key pair for Server
 func (k *KeypairReloader) GetKeypairFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		k.lock.RLock()
+		defer k.lock.RUnlock()
 		return k.tlsCert(), nil
 	}
 }
@@ -210,6 +203,8 @@ func (k *KeypairReloader) GetKeypairFunc() func(*tls.ClientHelloInfo) (*tls.Cert
 // GetClientCertificateFunc is a callback for TLSConfig to provide TLS certificate and key pair for Client
 func (k *KeypairReloader) GetClientCertificateFunc() func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 	return func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		k.lock.RLock()
+		defer k.lock.RUnlock()
 		return k.tlsCert(), nil
 	}
 }
