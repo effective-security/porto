@@ -254,7 +254,7 @@ func createServerTLSInfo(cfg *tlsConfig) (*tls.Config, *tlsconfig.KeypairReloade
 			certFile, keyFile)
 	}
 
-	tlsloader, err := tlsconfig.NewKeypairReloader(certFile, keyFile, 5*time.Second)
+	tlsloader, err := tlsconfig.NewKeypairReloader("", certFile, keyFile, 5*time.Second)
 	if err != nil {
 		return nil, nil, errors.WithMessagef(err, "reason=NewKeypairReloader, cert=%q, key=%q",
 			certFile, keyFile)

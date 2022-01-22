@@ -32,7 +32,7 @@ func Test_KeypairReloader(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	k, err := tlsconfig.NewKeypairReloader(pemFile, keyFile, 100*time.Millisecond)
+	k, err := tlsconfig.NewKeypairReloader("", pemFile, keyFile, 100*time.Millisecond)
 	require.NoError(t, err)
 	require.NotNil(t, k)
 	defer k.Close()
@@ -104,7 +104,7 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
-	k, err := tlsconfig.NewKeypairReloader(pemFile, keyFile, 100*time.Millisecond)
+	k, err := tlsconfig.NewKeypairReloader("test", pemFile, keyFile, 100*time.Millisecond)
 	require.NoError(t, err)
 	require.NotNil(t, k)
 	defer k.Close()

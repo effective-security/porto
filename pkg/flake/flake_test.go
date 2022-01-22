@@ -160,9 +160,9 @@ func TestIdGenerator(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for i := 0; i < maxRoutines; i++ {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			wg.Add(1)
 
 			for c := 0; c < maxIds; c++ {
 				id := DefaultIDGenerator.NextID()

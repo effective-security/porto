@@ -21,7 +21,7 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "t
 // caBundle is optional.
 // rootsFile is optional, if not specified the standard OS CA roots will be used.
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
-	tlscert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -41,7 +41,7 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile string, clientauthType t
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		NextProtos:   []string{"h2", "http/1.1"},
-		Certificates: []tls.Certificate{tlscert},
+		Certificates: []tls.Certificate{*tlscert},
 		ClientAuth:   clientauthType,
 		ClientCAs:    roots,
 		RootCAs:      roots,
@@ -76,7 +76,7 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	}
 
 	if certFile != "" {
-		tlscert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -87,7 +87,7 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 			}
 		}
 
-		cfg.Certificates = []tls.Certificate{tlscert}
+		cfg.Certificates = []tls.Certificate{*tlscert}
 	}
 
 	return cfg, nil
@@ -100,7 +100,7 @@ func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval
 		return nil, nil, errors.WithStack(err)
 	}
 
-	tlsloader, err := NewKeypairReloader(certFile, keyFile, checkInterval)
+	tlsloader, err := NewKeypairReloader("", certFile, keyFile, checkInterval)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
@@ -126,7 +126,7 @@ func NewHTTPTransportWithReloader(
 		return nil, errors.WithStack(err)
 	}
 
-	tlsloader, err := NewKeypairReloader(certFile, keyFile, checkInterval)
+	tlsloader, err := NewKeypairReloader("", certFile, keyFile, checkInterval)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
