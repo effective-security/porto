@@ -17,7 +17,7 @@ import (
 
 func TestStartEmptyHTTP(t *testing.T) {
 	cfg := &gserver.Config{
-		ListenURLs: []string{testutils.CreateURLs("http", ""), testutils.CreateURLs("unix", "localhost")},
+		ListenURLs: []string{testutils.CreateURL("http", ""), testutils.CreateURL("unix", "localhost")},
 		Services:   []string{"test"},
 		KeepAlive: gserver.KeepAliveCfg{
 			MinTime:  time.Second,
@@ -52,7 +52,7 @@ func TestStartEmptyHTTP(t *testing.T) {
 
 func TestStartEmptyHTTPS(t *testing.T) {
 	cfg := &gserver.Config{
-		ListenURLs: []string{testutils.CreateURLs("https", ""), testutils.CreateURLs("unixs", "localhost")},
+		ListenURLs: []string{testutils.CreateURL("https", ""), testutils.CreateURL("unixs", "localhost")},
 		ServerTLS: &gserver.TLSInfo{
 			CertFile:      "testdata/test-server.pem",
 			KeyFile:       "testdata/test-server-key.pem",

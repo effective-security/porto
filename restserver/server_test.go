@@ -7,12 +7,10 @@ import (
 	"crypto/x509/pkix"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -21,6 +19,7 @@ import (
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	rest "github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/authz"
+	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
@@ -117,7 +116,7 @@ var tlsConnectionForClientFromOtherOrg = &tls.ConnectionState{
 
 func Test_NewServer(t *testing.T) {
 	cfg := &serverConfig{
-		BindAddr: getBindAddr(""),
+		BindAddr: testutils.CreateBindAddr(""),
 	}
 
 	server, err := rest.New("v1.0.123", "", cfg, nil)
@@ -170,7 +169,7 @@ func Test_NewServer(t *testing.T) {
 
 func Test_NewServerWithGracefulShutdownSet(t *testing.T) {
 	cfg := &serverConfig{
-		BindAddr: ":8081",
+		BindAddr: testutils.CreateBindAddr("127.0.0.1"),
 	}
 
 	server, err := rest.New("v1.0.123", "", cfg, nil)
@@ -209,7 +208,7 @@ func Test_NewServerWithGracefulShutdownSet(t *testing.T) {
 	assert.NotNil(t, server.HTTPConfig())
 	assert.Equal(t, cfg, server.HTTPConfig())
 
-	assert.Equal(t, fmt.Sprintf("http://%s:8081", server.HostName()), rest.GetServerBaseURL(server).String())
+	assert.Equal(t, fmt.Sprintf("%s://127.0.0.1:%s", server.Protocol(), server.Port()), rest.GetServerBaseURL(server).String())
 
 	//	assert.NotNil(t, server.AddService())
 	err = server.StartHTTP()
@@ -225,7 +224,7 @@ func Test_NewServerWithGracefulShutdownSet(t *testing.T) {
 
 func Test_NewServerWithCustomHandler(t *testing.T) {
 	cfg := &serverConfig{
-		BindAddr: ":8082",
+		BindAddr: testutils.CreateBindAddr("127.0.0.1"),
 	}
 
 	server, err := rest.New("v1.0.123", "", cfg, nil)
@@ -250,7 +249,7 @@ func Test_NewServerWithCustomHandler(t *testing.T) {
 	}
 	require.True(t, server.IsReady())
 
-	url := fmt.Sprintf("http://%s:8082/v1/test", server.HostName())
+	url := fmt.Sprintf("%s://127.0.0.1:%s/v1/test", server.Protocol(), server.Port())
 	resp, err := http.Get(url)
 	require.NoError(t, err)
 	body, err := ioutil.ReadAll(resp.Body)
@@ -408,7 +407,7 @@ func Test_Authz(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := &serverConfig{
-		BindAddr: getBindAddr(""),
+		BindAddr: testutils.CreateBindAddr(""),
 		Services: []string{"authztest"},
 	}
 	authz, err := authz.New(&authz.Config{
@@ -421,7 +420,7 @@ func Test_Authz(t *testing.T) {
 	require.NoError(t, err)
 
 	startServer := func(ready bool, idprov identity.ProviderFromRequest) (*rest.HTTPServer, *serviceX) {
-		cfg.BindAddr = getBindAddr("")
+		cfg.BindAddr = testutils.CreateBindAddr("")
 
 		server, err := rest.New("v1.0.123", "127.0.0.1", cfg, tlsCfg)
 		require.NoError(t, err)
@@ -654,13 +653,4 @@ func (s *serviceX) handle() rest.Handle {
 
 		marshal.WriteJSON(w, r, res)
 	}
-}
-
-var (
-	nextPort = int32(18081) + rand.Int31n(5000)
-)
-
-func getBindAddr(host string) string {
-	next := atomic.AddInt32(&nextPort, 1)
-	return fmt.Sprintf("%s:%d", host, next)
 }
