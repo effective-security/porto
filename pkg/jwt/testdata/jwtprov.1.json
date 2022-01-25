@@ -1,0 +1,14 @@
+{
+  "issuer" : "trusty1.com",
+  "kid" : "1",
+  "keys" : [
+    {
+      "id" : "0",
+      "seed" : "kjshkfrjhqlkjewflkewhrhvwjevwnerwercwkermcw"
+    },
+    {
+      "id" : "1",
+      "seed" : "eworvcwbevcwvczshdcwevkjnsdfkjvnlstvbserbvw"
+    }
+  ]
+}

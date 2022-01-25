@@ -1,0 +1,8 @@
+---
+issuer: trusty-dev.com
+kid: 0
+keys:
+  - id: 0
+    seed: kjshkfrjhqlkjewflkewhrhvwjevwnerwercwkermcw
+  - id: 1
+    seed: eworvcwbevcwvczshdcwevkjnsdfkjvnlstvbserbvw

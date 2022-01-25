@@ -14,8 +14,8 @@ import (
 
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/restserver"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
-	"github.com/go-phorce/dolly/xhttp/httperror"
 	"github.com/go-phorce/dolly/xhttp/retriable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -202,7 +202,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	marshal.WriteJSON(w, r, httperror.WithNotFound(r.URL.Path))
+	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
 }
 
 type verifier struct {

@@ -1,0 +1,14 @@
+{
+  "issuer" : "trusty2.com",
+  "kid" : "1",
+  "keys" : [
+    {
+      "id" : "0",
+      "seed" : "PEu61GjFZqbAYcwY"
+    },
+    {
+      "id" : "1",
+      "seed" : "ipBuOU96QCDHPads"
+    }
+  ]
+}
