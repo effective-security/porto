@@ -94,19 +94,19 @@ type GRPCAuthz interface {
 // Config contains configuration for the authorization module
 type Config struct {
 	// Allow will allow the specified roles access to this path and its children, in format: ${path}:${role},${role}
-	Allow []string
+	Allow []string `json:"allow" yaml:"allow"`
 
 	// AllowAny will allow any authenticated request access to this path and its children
-	AllowAny []string
+	AllowAny []string `json:"allow_any" yaml:"allow_any"`
 
 	// AllowAnyRole will allow any authenticated request that include a non empty role
-	AllowAnyRole []string
+	AllowAnyRole []string `json:"allow_any_role" yaml:"allow_any_role"`
 
 	// LogAllowedAny specifies to log allowed access to nodes in AllowAny list
-	LogAllowedAny bool
+	LogAllowedAny bool `json:"log_allowed_any" yaml:"log_allowed_any"`
 
 	// LogAllowed specifies to log allowed access
-	LogAllowed bool
+	LogAllowed bool `json:"log_allowed" yaml:"log_allowed"`
 
 	// LogDenied specifies to log denied access
 	LogDenied bool
