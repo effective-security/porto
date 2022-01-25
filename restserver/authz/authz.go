@@ -109,7 +109,7 @@ type Config struct {
 	LogAllowed bool `json:"log_allowed" yaml:"log_allowed"`
 
 	// LogDenied specifies to log denied access
-	LogDenied bool
+	LogDenied bool `json:"log_denied" yaml:"log_denied"`
 }
 
 // Provider represents an Authorization provider,

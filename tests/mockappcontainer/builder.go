@@ -25,8 +25,8 @@ func (b *Builder) Container() *dig.Container {
 }
 
 // WithConfig sets gserver.HTTPServerCfg
-func (b *Builder) WithConfig(c *gserver.HTTPServerCfg) *Builder {
-	b.container.Provide(func() *gserver.HTTPServerCfg {
+func (b *Builder) WithConfig(c *gserver.Config) *Builder {
+	b.container.Provide(func() *gserver.Config {
 		return c
 	})
 	return b

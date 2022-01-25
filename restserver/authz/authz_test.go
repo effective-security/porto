@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"gopkg.in/yaml.v2"
 )
 
 func Test_NewConfig(t *testing.T) {
@@ -119,6 +120,25 @@ func TestConfig_WalkTree(t *testing.T) {
 func checkAllowed(t *testing.T, c *Provider, path, role string, expectedAllowed bool) {
 	actual := c.isAllowed(path, role)
 	assert.Equal(t, expectedAllowed, actual, "isAllowed(%v, %v) returned unexpected results", path, role)
+}
+
+func TestConfigYaml(t *testing.T) {
+	yml := `---
+allow_any:
+  - /favicon.ico
+  - /v1
+allow_any_role:
+allow:
+log_allowed_any: false
+log_allowed: true
+log_denied: true
+`
+	var cfg Config
+	err := yaml.Unmarshal([]byte(yml), &cfg)
+	require.NoError(t, err)
+
+	assert.True(t, cfg.LogAllowed)
+	assert.True(t, cfg.LogDenied)
 }
 
 func TestConfig_Allow(t *testing.T) {

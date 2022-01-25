@@ -38,7 +38,7 @@ type serveCtx struct {
 
 	tlsInfo *transport.TLSInfo
 
-	cfg *HTTPServerCfg
+	cfg *Config
 
 	gopts    []grpc.ServerOption
 	serversC chan *servers
@@ -50,7 +50,7 @@ type servers struct {
 	http   *http.Server
 }
 
-func configureListeners(cfg *HTTPServerCfg) (sctxs map[string]*serveCtx, err error) {
+func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 	urls, err := cfg.ParseListenURLs()
 	if err != nil {
 		return nil, errors.WithStack(err)

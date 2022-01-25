@@ -17,8 +17,8 @@ type TLSInfoConfig interface {
 	GetClientCertAuth() *bool
 }
 
-// HTTPServerConfig contains the configuration of the HTTPS API Service
-type HTTPServerConfig interface {
+// Config provides interface for the server configurarion
+type Config interface {
 	// GetServerName provides name of the server: WebAPI|Admin etc
 	GetServerName() string
 	// GetBindAddr provides the address that the HTTPS server should be listening on

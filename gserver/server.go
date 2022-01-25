@@ -61,7 +61,7 @@ type Server struct {
 
 	di   *dig.Container
 	name string
-	cfg  HTTPServerCfg
+	cfg  Config
 
 	stopc     chan struct{}
 	errc      chan error
@@ -78,7 +78,7 @@ type Server struct {
 // Start returns running Server
 func Start(
 	name string,
-	cfg *HTTPServerCfg,
+	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
 ) (e *Server, err error) {
@@ -146,7 +146,7 @@ func Start(
 
 func newServer(
 	name string,
-	cfg *HTTPServerCfg,
+	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
 ) (*Server, error) {
@@ -306,7 +306,7 @@ func (e *Server) Name() string {
 }
 
 // Configuration of the server
-func (e *Server) Configuration() *HTTPServerCfg {
+func (e *Server) Configuration() *Config {
 	return &e.cfg
 }
 
