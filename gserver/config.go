@@ -11,8 +11,8 @@ import (
 	"github.com/effective-security/porto/x/netutil"
 )
 
-// HTTPServerCfg contains the configuration of the HTTP API Service
-type HTTPServerCfg struct {
+// Config contains the configuration of the server
+type Config struct {
 	// Description provides description of the server
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 
@@ -132,7 +132,7 @@ type CORS struct {
 }
 
 // ParseListenURLs constructs a list of listen peers URLs
-func (c *HTTPServerCfg) ParseListenURLs() ([]*url.URL, error) {
+func (c *Config) ParseListenURLs() ([]*url.URL, error) {
 	return netutil.ParseURLs(c.ListenURLs)
 }
 

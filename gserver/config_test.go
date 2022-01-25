@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseListenURLs(t *testing.T) {
-	cfg := &HTTPServerCfg{
+	cfg := &Config{
 		ListenURLs: []string{"https://trusty:2380"},
 	}
 

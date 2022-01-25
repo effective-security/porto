@@ -15,7 +15,7 @@ import (
 func ExampleServer() {
 	sigs := make(chan os.Signal, 2)
 
-	cfg := &gserver.HTTPServerCfg{
+	cfg := &gserver.Config{
 		ListenURLs: []string{"https://127.0.0.1:12345", "unix:///tmp/gserver_test.sock"},
 		Services:   []string{"test"},
 		KeepAlive: gserver.KeepAliveCfg{

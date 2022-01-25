@@ -62,7 +62,7 @@ type Server interface {
 	PublicURL() string
 	StartedAt() time.Time
 	Service(name string) Service
-	HTTPConfig() HTTPServerConfig
+	Config() Config
 	TLSConfig() *tls.Config
 
 	// IsReady indicates that all subservices are ready to serve
@@ -86,7 +86,7 @@ type HTTPServer struct {
 	Server
 	authz           authz.HTTPAuthz
 	identityMapper  identity.ProviderFromRequest
-	httpConfig      HTTPServerConfig
+	httpConfig      Config
 	tlsConfig       *tls.Config
 	httpServer      *http.Server
 	cors            *CORSOptions
@@ -108,7 +108,7 @@ type HTTPServer struct {
 func New(
 	version string,
 	ipaddr string,
-	httpConfig HTTPServerConfig,
+	httpConfig Config,
 	tlsConfig *tls.Config,
 ) (*HTTPServer, error) {
 	var err error
@@ -250,7 +250,7 @@ func (server *HTTPServer) Name() string {
 }
 
 // HTTPConfig returns HTTPServerConfig
-func (server *HTTPServer) HTTPConfig() HTTPServerConfig {
+func (server *HTTPServer) HTTPConfig() Config {
 	return server.httpConfig
 }
 
