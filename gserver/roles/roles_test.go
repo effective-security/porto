@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"testing"
 
-	jwtjwt "github.com/dgrijalva/jwt-go"
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
+	"github.com/effective-security/xpki/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/credentials"
@@ -32,8 +32,8 @@ func Test_Empty(t *testing.T) {
 
 func Test_All(t *testing.T) {
 	mock := mockJWT{
-		claims: &jwtjwt.StandardClaims{
-			Subject: "denis@trusty.com",
+		claims: jwt.Claims{
+			"sub": "denis@trusty.com",
 		},
 		err: nil,
 	}
@@ -219,10 +219,10 @@ func setAuthorizationHeader(r *http.Request, token string) {
 }
 
 type mockJWT struct {
-	claims *jwtjwt.StandardClaims
+	claims jwt.Claims
 	err    error
 }
 
-func (m mockJWT) ParseToken(authorization, audience string) (*jwtjwt.StandardClaims, error) {
+func (m mockJWT) ParseToken(authorization string, cfg *jwt.VerifyConfig) (jwt.Claims, error) {
 	return m.claims, m.err
 }

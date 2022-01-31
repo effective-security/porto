@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/go-phorce/dolly/testify"
+	"github.com/effective-security/xpki/testca"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func Test_BuildFromFiles(t *testing.T) {
-	pemCert, pemKey, err := testify.MakeSelfCertRSAPem(1)
+	pemCert, pemKey, err := testca.MakeSelfCertRSAPem(1)
 	require.NoError(t, err)
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)
@@ -59,7 +59,7 @@ func Test_BuildFromFiles(t *testing.T) {
 }
 
 func Test_RoundTripper(t *testing.T) {
-	pemCert, pemKey, err := testify.MakeSelfCertRSAPem(1)
+	pemCert, pemKey, err := testca.MakeSelfCertRSAPem(1)
 	require.NoError(t, err)
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)

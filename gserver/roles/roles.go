@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
-	"github.com/effective-security/porto/pkg/jwt"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/jwt"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -175,17 +175,20 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 }
 
 func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
-	token, err := p.jwt.ParseToken(auth, p.config.JWT.Audience)
+	cfg := &jwt.VerifyConfig{
+		ExpectedAudience: p.config.JWT.Audience,
+	}
+	claims, err := p.jwt.ParseToken(auth, cfg)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	role := p.jwtRoles[token.Subject]
+	subj := claims["sub"].(string)
+	role := p.jwtRoles[subj]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
-	logger.Debugf("role=%s, subject=%s, id=%s",
-		role, token.Subject, token.Id)
-	return identity.NewIdentity(role, token.Subject, token.Id), nil
+	logger.Debugf("role=%s, subject=%s", role, subj)
+	return identity.NewIdentity(role, subj, ""), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {

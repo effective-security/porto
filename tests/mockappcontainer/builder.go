@@ -3,7 +3,7 @@ package mockappcontainer
 import (
 	"github.com/effective-security/porto/gserver"
 	"github.com/effective-security/porto/pkg/discovery"
-	"github.com/effective-security/porto/pkg/jwt"
+	"github.com/effective-security/xpki/jwt"
 	"go.uber.org/dig"
 )
 
