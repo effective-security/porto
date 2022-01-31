@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/effective-security/porto/pkg/discovery"
-	"github.com/effective-security/porto/pkg/jwt"
+	"github.com/effective-security/xpki/jwt"
 	"github.com/stretchr/testify/require"
 )
 

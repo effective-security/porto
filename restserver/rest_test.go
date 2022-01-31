@@ -12,8 +12,8 @@ import (
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/x/guid"
 	"github.com/effective-security/xlog"
-	"github.com/go-phorce/dolly/testify/testca"
-	"github.com/go-phorce/dolly/xpki/certutil"
+	"github.com/effective-security/xpki/certutil"
+	"github.com/effective-security/xpki/testca"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/suite"
 )
