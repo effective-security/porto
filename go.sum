@@ -211,8 +211,8 @@ github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b h1:04WN
 github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b/go.mod h1:/ybrmYnI3g1zrYQFIx6QjzyX1H2616Q0xcQRGrJa4cU=
 github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04 h1:NGXqcD80sWnhYvWZ/NoeTsrs9ncB08iaISG25n59ByY=
 github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04/go.mod h1:LdIVUg2ZIJ8TR9/zPgX1vuBv1GC8Pl1PvNYdckVrrR0=
-github.com/effective-security/xpki v0.0.0-20220131132144-66483bdcf196 h1:5JIu7tBbQpFGzzReFH7iVNFdE3NIg2YxvOmwmKVeNSs=
-github.com/effective-security/xpki v0.0.0-20220131132144-66483bdcf196/go.mod h1:GYl6LKOAsMTnSqVrjLZsOmn4CcpiRb5uuPKcVdvhYMM=
+github.com/effective-security/xpki v0.0.0-20220202135708-16a81c8c796a h1:MyrlSTsaOa2EebSX6HqLaujwGcwcBOb2ixinYRK+wrs=
+github.com/effective-security/xpki v0.0.0-20220202135708-16a81c8c796a/go.mod h1:GYl6LKOAsMTnSqVrjLZsOmn4CcpiRb5uuPKcVdvhYMM=
 github.com/emirpasic/gods v1.12.0/go.mod h1:YfzfFFoVP/catgzJb4IKIqXjX78Ha8FMSDh3ymbK86o=
 github.com/envoyproxy/go-control-plane v0.6.9/go.mod h1:SBwIajubJHhxtWwsL9s8ss4safvEdbitLhGGK48rN6g=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
@@ -260,8 +260,6 @@ github.com/go-logfmt/logfmt v0.4.0/go.mod h1:3RMwSq7FuexP4Kalkev3ejPJsZTpXXBr9+V
 github.com/go-logfmt/logfmt v0.5.0/go.mod h1:wCYkCAKZfumFQihp8CzCvQ3paCTfi41vtzG1KdI/P7A=
 github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba h1:I45RdP92/rYpHoHrHBGRKl1Sp1xw5VFNUQJWHX2Tz/c=
 github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba/go.mod h1:UZQo6+h5O8HW6TPt7HaXd4Nc234FYx5aFvw9RKL2IUk=
-github.com/go-phorce/dolly v0.9.1-0.20220122125808-2c22785ea5c0 h1:RRj6mTdwRce4wOkkH/m0H9zXN/ste/93fRkgH/brNj4=
-github.com/go-phorce/dolly v0.9.1-0.20220122125808-2c22785ea5c0/go.mod h1:IAJG3wwnZ5GD4AMjBuNmS32zQTRBGPmqLEwvAUCur+s=
 github.com/go-redis/redis v6.15.9+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8wamY7mA7PouImQ2Jvg6kA=
 github.com/go-sql-driver/mysql v1.4.0/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/go-sql-driver/mysql v1.4.1/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
