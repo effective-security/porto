@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/effective-security/xpki/certutil"
 	"github.com/effective-security/xpki/testca"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -175,33 +174,18 @@ func TestX509WithOCSP(t *testing.T) {
 
 	tmpDir := filepath.Join(os.TempDir(), "test-keyocsp")
 	os.MkdirAll(tmpDir, os.ModePerm)
-	defer os.RemoveAll(tmpDir)
+	//defer os.RemoveAll(tmpDir)
 
 	ocspFile := filepath.Join(tmpDir, "test-server.ocsp")
 	serverCertFile := filepath.Join(tmpDir, "test-server.pem")
 	serverKeyFile := filepath.Join(tmpDir, "test-server-key.pem")
 	serverRootFile := filepath.Join(tmpDir, "test-server-rootca.pem")
 
-	//
-	// save keys
-	//
-	fkey, err := os.Create(serverKeyFile)
+	err := srv.SaveCertAndKey(serverCertFile, serverKeyFile, true)
 	require.NoError(t, err)
-	fkey.Write(testca.PrivKeyToPEM(srv.PrivateKey))
-	fkey.Close()
 
-	//
-	// save server certs
-	//
-	fcert, err := os.Create(serverCertFile)
+	err = ca1.SaveCertAndKey(serverRootFile, "", false)
 	require.NoError(t, err)
-	certutil.EncodeToPEM(fcert, true, srv.Certificate, inter1.Certificate)
-	fcert.Close()
-
-	fcert, err = os.Create(serverRootFile)
-	require.NoError(t, err)
-	certutil.EncodeToPEM(fcert, true, ca1.Certificate)
-	fcert.Close()
 
 	thisUpdate := time.Now().Truncate(time.Minute)
 	nextUpdate := thisUpdate.Add(time.Hour)

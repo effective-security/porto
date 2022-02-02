@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/effective-security/porto/pkg/retriable"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/xhttp/header"
-	"github.com/go-phorce/dolly/xhttp/retriable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
