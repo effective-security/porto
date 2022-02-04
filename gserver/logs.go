@@ -44,6 +44,9 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	}
 	responseType := info.FullMethod
 
+	idx := identity.FromContext(ctx)
+	role := idx.Identity().Role()
+
 	var code codes.Code
 	if err != nil {
 		switch err.(type) { //_resp := err.(type) {
@@ -61,6 +64,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 			}
 		default:
 			logger.KV(xlog.ERROR,
+				"ctx", idx.CorrelationID(),
 				"type", reflect.TypeOf(err),
 				"err", err.Error())
 		}
@@ -78,13 +82,10 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"res", responseType,
 		"remote", remote,
 		"duration", duration,
-		"code", code)
-
-	role := identity.GuestRoleName
-	idx := identity.FromContext(ctx)
-	if idx != nil {
-		role = idx.Identity().Role()
-	}
+		"code", code,
+		"ctx", idx.CorrelationID(),
+		"user", idx.Identity().String(),
+	)
 
 	tags := []metrics.Tag{
 		{Name: "method", Value: info.FullMethod},

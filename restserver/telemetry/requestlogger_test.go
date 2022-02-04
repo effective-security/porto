@@ -102,7 +102,7 @@ func TestHttp_RequestLogger(t *testing.T) {
 
 	logLine := tw.String()[prefixLength:]
 	// cid is random
-	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=400, bytes=11, time=0, remote="127.0.0.1:51500", agent="no-agent", correlation="`)
+	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=400, bytes=11, time=0, remote="127.0.0.1:51500", agent="no-agent", ctx="`)
 }
 
 func TestHttp_RequestLoggerDef(t *testing.T) {
@@ -116,7 +116,7 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	lg.ServeHTTP(w, r)
 	logLine := tw.String()[prefixLength:]
 	// cid is random
-	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=200, bytes=11, time=0, remote="", agent="no-agent", correlation="`)
+	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=200, bytes=11, time=0, remote="", agent="no-agent", ctx="`)
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {
