@@ -105,6 +105,6 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"time", dur.Nanoseconds()/l.cfg.granularity,
 		"remote", r.RemoteAddr,
 		"agent", agent,
-		"correlation", ctx.CorrelationID(),
+		"ctx", ctx.CorrelationID(),
 		"user", ctx.Identity().String())
 }
