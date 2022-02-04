@@ -6,11 +6,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/effective-security/porto/x/guid"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/certutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,7 +36,8 @@ type RequestContext struct {
 // NewRequestContext creates a request context with a specific identity.
 func NewRequestContext(id Identity) *RequestContext {
 	return &RequestContext{
-		identity: id,
+		identity:      id,
+		correlationID: certutil.RandomString(8),
 	}
 }
 
@@ -53,7 +54,8 @@ func FromContext(ctx context.Context) *RequestContext {
 	ret, _ := ctx.Value(keyContext).(*RequestContext)
 	if ret == nil {
 		ret = &RequestContext{
-			identity: guestIdentity,
+			identity:      guestIdentity,
+			correlationID: certutil.RandomString(8),
 		}
 	}
 	return ret
@@ -141,12 +143,22 @@ func (c *RequestContext) ClientIP() string {
 
 // extractCorrelationID will find or create a requestID for this http request.
 func extractCorrelationID(req *http.Request) string {
-	corID := req.Header.Get(header.XCorrelationID)
-	if corID == "" {
-		corID = req.Header.Get(header.XDeviceID)
+	// 8 random chars will have enough entropy
+	// to correlate requests,
+	// without the large footprint in the logs
+	corID := certutil.RandomString(8)
+
+	incomingID := req.Header.Get(header.XCorrelationID)
+	if incomingID == "" {
+		incomingID = req.Header.Get(header.XDeviceID)
 	}
-	if corID == "" {
-		corID = guid.MustCreate()
+
+	if incomingID != "" {
+		if len(incomingID) > 8 {
+			incomingID = incomingID[:8]
+		}
+		corID += "_" + incomingID
 	}
+
 	return corID
 }

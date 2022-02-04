@@ -6,6 +6,7 @@ import (
 	"crypto/x509/pkix"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/effective-security/porto/x/netutil"
@@ -70,7 +71,7 @@ func Test_WithDeviceID(t *testing.T) {
 	ctx := FromRequest(r)
 
 	assert.Equal(t, "role1/name1", ctx.Identity().String())
-	assert.Equal(t, "12345678", ctx.CorrelationID())
+	assert.True(t, strings.HasSuffix(ctx.CorrelationID(), "12345678"))
 }
 
 type userinfo struct {
