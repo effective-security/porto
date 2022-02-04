@@ -101,7 +101,8 @@ func TestHttp_RequestLogger(t *testing.T) {
 	require.NotEmpty(t, tw, "A request was processed, but nothing was logged")
 
 	logLine := tw.String()[prefixLength:]
-	assert.Equal(t, `http: src=ServeHTTP, method="GET", path="/foo", status=400, bytes=11, time=0, remote="127.0.0.1:51500", agent="no-agent", correlation="", user="guest"`+"\n", logLine)
+	// cid is random
+	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=400, bytes=11, time=0, remote="127.0.0.1:51500", agent="no-agent", correlation="`)
 }
 
 func TestHttp_RequestLoggerDef(t *testing.T) {
@@ -114,7 +115,8 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	lg := NewRequestLogger(handler, time.Millisecond, logger)
 	lg.ServeHTTP(w, r)
 	logLine := tw.String()[prefixLength:]
-	assert.Equal(t, `http: src=ServeHTTP, method="GET", path="/foo", status=200, bytes=11, time=0, remote="", agent="no-agent", correlation="", user="guest"`+"\n", logLine)
+	// cid is random
+	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=200, bytes=11, time=0, remote="", agent="no-agent", correlation="`)
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {

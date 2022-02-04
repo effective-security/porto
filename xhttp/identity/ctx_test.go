@@ -11,6 +11,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,6 +54,46 @@ func Test_ClientIP(t *testing.T) {
 	r.RemoteAddr = "10.0.0.1"
 
 	handler.ServeHTTP(rw, r)
+}
+
+func TestCorrelationID(t *testing.T) {
+	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		caller := FromRequest(r)
+		cid := caller.CorrelationID()
+		w.Header().Set(header.XCorrelationID, cid)
+	})
+
+	t.Run("no_from_client", func(t *testing.T) {
+		rw := httptest.NewRecorder()
+		handler := NewContextHandler(d, GuestIdentityMapper)
+		r, _ := http.NewRequest("GET", "/test", nil)
+
+		handler.ServeHTTP(rw, r)
+		cid := rw.Header().Get(header.XCorrelationID)
+		assert.Len(t, cid, 8)
+	})
+
+	t.Run("show_from_client", func(t *testing.T) {
+		rw := httptest.NewRecorder()
+		handler := NewContextHandler(d, GuestIdentityMapper)
+		r, _ := http.NewRequest("GET", "/test", nil)
+		r.Header.Set(header.XCorrelationID, "1234") // short incoming
+
+		handler.ServeHTTP(rw, r)
+		cid := rw.Header().Get(header.XCorrelationID)
+		assert.Len(t, cid, 8+5)
+	})
+
+	t.Run("long_from_client", func(t *testing.T) {
+		rw := httptest.NewRecorder()
+		handler := NewContextHandler(d, GuestIdentityMapper)
+		r, _ := http.NewRequest("GET", "/test", nil)
+		r.Header.Set(header.XCorrelationID, "1234jsehdrlcfkjwhelckjqhewlkcjhqwlekcjhqeq")
+
+		handler.ServeHTTP(rw, r)
+		cid := rw.Header().Get(header.XCorrelationID)
+		assert.Len(t, cid, 8+1+8)
+	})
 }
 
 func Test_AddToContext(t *testing.T) {
