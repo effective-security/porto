@@ -96,6 +96,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	dur := time.Since(start)
 
 	ctx := identity.FromRequest(r)
+	idn := ctx.Identity()
 
 	l.cfg.logger.KV(xlog.INFO,
 		"method", r.Method,
@@ -106,5 +107,6 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"remote", r.RemoteAddr,
 		"agent", agent,
 		"ctx", ctx.CorrelationID(),
-		"user", ctx.Identity().String())
+		"role", idn.Role(),
+		"user", idn.Name())
 }

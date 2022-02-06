@@ -84,7 +84,8 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"duration", duration,
 		"code", code,
 		"ctx", idx.CorrelationID(),
-		"user", idx.Identity().String(),
+		"role", role,
+		"user", idx.Identity().Name(),
 	)
 
 	tags := []metrics.Tag{
