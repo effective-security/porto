@@ -136,6 +136,16 @@ func BoolSlicesEqual(a, b []bool) bool {
 	return true
 }
 
+// StringsCoalesce returns the first non-empty string value
+func StringsCoalesce(str ...string) string {
+	for _, s := range str {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // NvlInt returns the first value from the supplied list that is not 0, or 0 if there are no values that are not zero
 func NvlInt(items ...int) int {
 	for _, x := range items {

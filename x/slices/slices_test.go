@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSlices_NvlString(t *testing.T) {
@@ -341,4 +343,11 @@ func testSlicesEquals(t *testing.T, funcName string, vals []interface{}, goodVal
 	if !equalsFunc(goodVal1, goodVal2) {
 		t.Errorf("Different slices with the same contents should return true for %vSlicesEqual (%v,%v)", funcName, goodVal1, goodVal2)
 	}
+}
+
+func TestSlices_StringsCoalesce(t *testing.T) {
+	assert.Equal(t, "", StringsCoalesce())
+	assert.Equal(t, "1", StringsCoalesce("1", "2", "3"))
+	assert.Equal(t, "2", StringsCoalesce("", "2", "3"))
+	assert.Equal(t, "3", StringsCoalesce("", "", "3"))
 }
