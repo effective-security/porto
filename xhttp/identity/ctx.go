@@ -83,7 +83,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			identity, err := identityMapper(r)
 			if err != nil {
 				logger.Warningf("reason=identityMapper, ip=%q, err=[%v]", clientIP, err.Error())
-				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity").WithCause(err))
+				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
 				return
 			}
 
