@@ -84,8 +84,13 @@ func Test_New(t *testing.T) {
 		TotalRetryLimit: 5,
 	}
 
+	mutateHook := retriable.WithBeforeSendRequest(func(r *http.Request) *http.Request {
+		r.Header.Set("X-Global", "WithBeforeSendRequest")
+		return r
+	})
+
 	// create without options
-	c := retriable.New().WithName("test")
+	c := retriable.New(mutateHook).WithName("test")
 	assert.NotNil(t, c)
 	assert.NotNil(t, c.WithPolicy(p))
 	assert.NotNil(t, c.WithTLS(nil))
@@ -178,6 +183,10 @@ func Test_Retriable_OK(t *testing.T) {
 		WithPolicy(&retriable.Policy{
 			TotalRetryLimit: 2,
 			RequestTimeout:  time.Second,
+		}).
+		WithBeforeSendRequest(func(r *http.Request) *http.Request {
+			r.Header.Set("X-Global", "WithBeforeSendRequest")
+			return r
 		})
 	require.NotNil(t, client)
 
@@ -193,6 +202,7 @@ func Test_Retriable_OK(t *testing.T) {
 		assert.Equal(t, http.StatusOK, status)
 		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
 		assert.Equal(t, "token1", h.Get("X-Test-Token"))
+		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
 	})
 
 	t.Run("PUT", func(t *testing.T) {
@@ -724,6 +734,7 @@ func makeTestHandler(t *testing.T, expURI string, status int, responseBody strin
 		}
 		w.Header().Add("X-Test-Header", "retriable")
 		w.Header().Add("X-Test-Token", r.Header.Get("X-Test-Token"))
+		w.Header().Add("X-Global", r.Header.Get("X-Global"))
 		w.WriteHeader(status)
 		io.WriteString(w, responseBody)
 	}
