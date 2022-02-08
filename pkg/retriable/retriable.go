@@ -79,6 +79,9 @@ type GenericHTTP interface {
 // aborted it is up to the caller to properly close any response body before returning.
 type ShouldRetry func(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string)
 
+// BeforeSendRequest allows to modify request before it's sent
+type BeforeSendRequest func(r *http.Request) *http.Request
+
 // Policy represents the retriable policy
 type Policy struct {
 
@@ -184,11 +187,20 @@ func WithDNSServer(dns string) ClientOption {
 	})
 }
 
+// WithBeforeSendRequest allows to specify a hook
+// to modify request before it's sent
+func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.beforeSend = hook
+	})
+}
+
 // Client is custom implementation of http.Client
 type Client struct {
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
 	headers    map[string]string
+	beforeSend BeforeSendRequest
 	Name       string
 	Policy     *Policy // Rery policy for http requests
 }
@@ -250,6 +262,15 @@ func (c *Client) WithPolicy(policy *Policy) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.Policy = policy
+	return c
+}
+
+// WithBeforeSendRequest allows to specify a hook
+// to modify request before it's sent
+func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c.beforeSend = hook
 	return c
 }
 
@@ -490,6 +511,10 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 		*/
 	}
 
+	if c.beforeSend != nil {
+		req = c.beforeSend(req)
+	}
+
 	return c.Do(req)
 }
 
@@ -648,6 +673,7 @@ var nonRetriableErrors = []string{
 	"x509: cannot validate certificate",
 	"server gave HTTP response to HTTPS client",
 	"dial tcp: lookup",
+	"peer reset",
 }
 
 // ShouldRetry returns if connection should be retried
