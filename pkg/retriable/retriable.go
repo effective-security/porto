@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,9 @@ type GenericHTTP interface {
 	// requestBody can be io.Reader, []byte, or an object to be JSON encoded
 	// responseBody can be io.Writer, or a struct to decode JSON into.
 	Request(ctx context.Context, method string, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+
+	// RequestURL is similar to Request but uses raw URL to one host
+	RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
 
 	// Head makes HEAD request against the specified hosts.
 	// The supplied hosts are tried in order until one succeeds.
@@ -351,6 +355,17 @@ func NewDefaultPolicy() *Policy {
 		},
 		TotalRetryLimit: 10,
 	}
+}
+
+// RequestURL is similar to Request but uses raw URL to one host
+func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, 0, errors.WithStack(err)
+	}
+	host := u.Scheme + "://" + u.Host
+	path := rawURL[len(host):]
+	return c.Request(ctx, method, []string{host}, path, requestBody, responseBody)
 }
 
 // Request sends request to the specified hosts.
