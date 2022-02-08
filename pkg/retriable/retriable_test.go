@@ -192,12 +192,33 @@ func Test_Retriable_OK(t *testing.T) {
 
 	hosts := []string{server.URL}
 
+	t.Run("GET", func(t *testing.T) {
+		w := bytes.NewBuffer([]byte{})
+
+		h, status, err := client.RequestURL(context.Background(),
+			http.MethodGet, server.URL+"/v1/test?qq#ff", nil, w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
+		assert.Equal(t, "token1", h.Get("X-Test-Token"))
+		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
+		// test handler modifies the request URL
+		//assert.Equal(t, server.URL+"/v1/test?qq#ff", h.Get("X-Request-URL"))
+	})
+
 	t.Run("GET WithTimeout", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
 		h, status, err := client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
+		assert.Equal(t, "token1", h.Get("X-Test-Token"))
+		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
+
+		h, status, err = client.RequestURL(ctx, http.MethodGet, server.URL+"/v1/test?qq#ff", nil, w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
@@ -735,6 +756,8 @@ func makeTestHandler(t *testing.T, expURI string, status int, responseBody strin
 		w.Header().Add("X-Test-Header", "retriable")
 		w.Header().Add("X-Test-Token", r.Header.Get("X-Test-Token"))
 		w.Header().Add("X-Global", r.Header.Get("X-Global"))
+		w.Header().Add("X-Request-URL", r.URL.String())
+		w.Header().Add("X-Request-Method", r.Method)
 		w.WriteHeader(status)
 		io.WriteString(w, responseBody)
 	}
