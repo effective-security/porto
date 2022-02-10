@@ -146,6 +146,14 @@ func StringsCoalesce(str ...string) string {
 	return ""
 }
 
+// StringUpto returns the beginning of the string up to `max`
+func StringUpto(str string, max int) string {
+	if len(str) > max {
+		return str[:max]
+	}
+	return str
+}
+
 // NvlInt returns the first value from the supplied list that is not 0, or 0 if there are no values that are not zero
 func NvlInt(items ...int) int {
 	for _, x := range items {
