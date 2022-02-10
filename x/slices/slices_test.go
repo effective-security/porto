@@ -351,3 +351,12 @@ func TestSlices_StringsCoalesce(t *testing.T) {
 	assert.Equal(t, "2", StringsCoalesce("", "2", "3"))
 	assert.Equal(t, "3", StringsCoalesce("", "", "3"))
 }
+
+func TestSlices_StringUpto(t *testing.T) {
+	assert.Equal(t, "", StringUpto("", 0))
+	assert.Equal(t, "", StringUpto("", 2))
+	assert.Equal(t, "", StringUpto("11", 0))
+	assert.Equal(t, "1", StringUpto("11", 1))
+	assert.Equal(t, "11", StringUpto("11", 2))
+	assert.Equal(t, "11", StringUpto("11", 3))
+}
