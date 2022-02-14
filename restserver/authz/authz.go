@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	"github.com/effective-security/porto/x/math"
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
@@ -377,7 +378,8 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 }
 
 // isAllowed returns true if access to 'path' is allowed for the specified role.
-func (c *Provider) isAllowed(path, role string) bool {
+func (c *Provider) isAllowed(ctx context.Context, path, role string) bool {
+	cid := correlation.ID(ctx)
 	node := c.walkPath(path, false)
 	allowAny := node.allowAny()
 	allowRole := false
@@ -387,15 +389,15 @@ func (c *Provider) isAllowed(path, role string) bool {
 	res := allowAny || allowRole
 	if res {
 		if allowRole && c.cfg.LogAllowed {
-			logger.Noticef("status=allowed, role=%q, path=%s, node=%s",
-				role, path, node.value)
+			logger.Noticef("status=allowed, role=%q, path=%s, node=%s, ctx=%s",
+				role, path, node.value, cid)
 		} else if c.cfg.LogAllowedAny {
-			logger.Infof("status=allowed, reason=AllowAny, role=%q, path=%s, node=%s",
-				role, path, node.value)
+			logger.Infof("status=allowed, reason=AllowAny, role=%q, path=%s, node=%s, ctx=%s",
+				role, path, node.value, cid)
 		}
 	} else if c.cfg.LogDenied {
-		logger.Noticef("status=denied, role=%q, path=%s, allowed_roles='%v', node=%s",
-			role, path, strings.Join(node.allowedRoleKeys(), ","), node.value)
+		logger.Noticef("status=denied, role=%q, path=%s, allowed_roles='%v', node=%s, ctx=%s",
+			role, path, strings.Join(node.allowedRoleKeys(), ","), node.value, cid)
 	}
 	return res
 }
@@ -411,7 +413,7 @@ func (c *Provider) checkAccess(r *http.Request) error {
 	if role == "" {
 		role = identity.GuestRoleName
 	}
-	if !c.isAllowed(r.URL.Path, role) {
+	if !c.isAllowed(r.Context(), r.URL.Path, role) {
 		return errors.Errorf("the %q role is not allowed", role)
 	}
 
@@ -460,7 +462,7 @@ func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 		if role == "" {
 			role = identity.GuestRoleName
 		}
-		if !c.isAllowed(info.FullMethod, role) {
+		if !c.isAllowed(ctx, info.FullMethod, role) {
 			return nil, status.Errorf(codes.PermissionDenied, "the %q role is not allowed", role)
 		}
 

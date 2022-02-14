@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
@@ -41,8 +42,6 @@ type RequestLogger struct {
 
 // NewRequestLogger create a new RequestLogger handler, requests are chained to the supplied handler.
 // The log includes the clock time to handle the request, with specified granularity (e.g. time.Millisecond).
-// The generated Log lines are in the format
-// <prefix>:<HTTP Method>:<ClientCertSubjectCN>:<Path>:<RemoteIP>:<RemotePort>:<StatusCode>:<HTTP Version>:<Response Body Size>:<Request Duration>:<Additional Fields>
 // skippath parameter allows to specify a list of paths to not log.
 func NewRequestLogger(
 	handler http.Handler,
@@ -106,7 +105,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"time", dur.Nanoseconds()/l.cfg.granularity,
 		"remote", r.RemoteAddr,
 		"agent", agent,
-		"ctx", ctx.CorrelationID(),
+		"ctx", correlation.ID(r.Context()),
 		"role", idn.Role(),
 		"user", idn.Name())
 }

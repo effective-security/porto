@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
@@ -97,6 +98,7 @@ func httpError(bv interface{}, r *http.Request) {
 			typ = "INTERNAL_ERROR"
 		}
 		logger.KV(sv,
+			"ctx", correlation.ID(r.Context()),
 			"type", typ,
 			"path", r.URL.Path,
 			"status", e.HTTPStatus,

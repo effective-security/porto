@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/x/slices"
+	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
@@ -451,15 +453,16 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	// NOTE: do not `defer cancel()` context as it will cause error
 	// when reading the body
 	ctx, _ = c.ensureContext(ctx, httpMethod, path)
-
+	ctx = correlation.WithID(ctx)
+	cid := correlation.ID(ctx)
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.Errorf("httpMethod=%q, host=%q, path=%q, err=[%+v]",
-				httpMethod, host, path, err)
+			logger.Errorf("httpMethod=%q, host=%q, path=%q, ctx=%s, err=[%+v]",
+				httpMethod, host, path, cid, err)
 		} else {
-			logger.Infof("httpMethod=%q, host=%q, path=%q, status=%v",
-				httpMethod, host, path, resp.StatusCode)
+			logger.Infof("httpMethod=%q, host=%q, path=%q, status=%v, ctx=%s",
+				httpMethod, host, path, resp.StatusCode, cid)
 		}
 
 		if !c.shouldTryDifferentHost(resp, err) {
@@ -529,7 +532,9 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 	if c.beforeSend != nil {
 		req = c.beforeSend(req)
 	}
-
+	if req.Header.Get(header.XCorrelationID) == "" {
+		req.Header.Add(header.XCorrelationID, correlation.ID(ctx))
+	}
 	return c.Do(req)
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
@@ -301,6 +302,8 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 		})
 		handler = co.Handler(handler)
 	}
+	// Add correlationID
+	handler = correlation.NewHandler(handler)
 
 	return handler
 }
@@ -333,6 +336,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	}
 
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
+		correlation.NewAuthUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		s.newLogUnaryInterceptor(),
 		grpc_prometheus.UnaryServerInterceptor,
