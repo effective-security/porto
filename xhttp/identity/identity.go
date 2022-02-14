@@ -105,9 +105,8 @@ func GuestIdentityForContext(ctx context.Context) (Identity, error) {
 func WithTestIdentity(r *http.Request, identity Identity) *http.Request {
 	ipaddr, _ := netutil.GetLocalIP()
 	ctx := &RequestContext{
-		identity:      identity,
-		correlationID: extractCorrelationID(r),
-		clientIP:      ipaddr,
+		identity: identity,
+		clientIP: ipaddr,
 	}
 	c := context.WithValue(r.Context(), keyContext, ctx)
 	return r.WithContext(c)

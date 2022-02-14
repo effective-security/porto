@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/effective-security/metrics"
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
@@ -64,7 +65,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 			}
 		default:
 			logger.KV(xlog.ERROR,
-				"ctx", idx.CorrelationID(),
+				"ctx", correlation.ID(ctx),
 				"type", reflect.TypeOf(err),
 				"err", err.Error())
 		}
@@ -83,7 +84,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"remote", remote,
 		"duration", duration,
 		"code", code,
-		"ctx", idx.CorrelationID(),
+		"ctx", correlation.ID(ctx),
 		"role", role,
 		"user", idx.Identity().Name(),
 	)

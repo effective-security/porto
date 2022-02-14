@@ -13,6 +13,7 @@ import (
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
@@ -433,6 +434,10 @@ func (server *HTTPServer) NewMux() http.Handler {
 	} else {
 		httpHandler = identity.NewContextHandler(httpHandler, identity.GuestIdentityMapper)
 	}
+
+	// Add correlationID
+	httpHandler = correlation.NewHandler(httpHandler)
+
 	return httpHandler
 }
 

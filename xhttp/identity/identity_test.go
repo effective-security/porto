@@ -6,11 +6,10 @@ import (
 	"crypto/x509/pkix"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/effective-security/porto/x/netutil"
-	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -59,19 +58,7 @@ func Test_WithTestIdentityDirect(t *testing.T) {
 	ctx := FromRequest(r)
 
 	assert.Equal(t, "role1/name1", ctx.Identity().String())
-	assert.NotEmpty(t, ctx.CorrelationID())
-}
-
-func Test_WithDeviceID(t *testing.T) {
-	r, err := http.NewRequest(http.MethodGet, "/", nil)
-	require.NoError(t, err)
-	r.Header.Set(header.XDeviceID, "12345678")
-
-	r = WithTestIdentity(r, NewIdentity("role1", "name1", ""))
-	ctx := FromRequest(r)
-
-	assert.Equal(t, "role1/name1", ctx.Identity().String())
-	assert.True(t, strings.HasSuffix(ctx.CorrelationID(), "12345678"))
+	assert.Empty(t, correlation.ID(r.Context()))
 }
 
 type userinfo struct {

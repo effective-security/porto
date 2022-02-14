@@ -6,11 +6,9 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
-	"github.com/effective-security/xpki/certutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,16 +26,14 @@ const (
 // RequestContext represents user contextual information about a request being processed by the server,
 // it includes identity, CorrelationID [for cross system request correlation].
 type RequestContext struct {
-	identity      Identity
-	correlationID string
-	clientIP      string
+	identity Identity
+	clientIP string
 }
 
 // NewRequestContext creates a request context with a specific identity.
 func NewRequestContext(id Identity) *RequestContext {
 	return &RequestContext{
-		identity:      id,
-		correlationID: certutil.RandomString(8),
+		identity: id,
 	}
 }
 
@@ -45,7 +41,6 @@ func NewRequestContext(id Identity) *RequestContext {
 // it includes identity, CorrelationID [for cross system request correlation].
 type Context interface {
 	Identity() Identity
-	CorrelationID() string
 	ClientIP() string
 }
 
@@ -54,8 +49,7 @@ func FromContext(ctx context.Context) *RequestContext {
 	ret, _ := ctx.Value(keyContext).(*RequestContext)
 	if ret == nil {
 		ret = &RequestContext{
-			identity:      guestIdentity,
-			correlationID: certutil.RandomString(8),
+			identity: guestIdentity,
 		}
 	}
 	return ret
@@ -88,16 +82,13 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			}
 
 			rctx = &RequestContext{
-				identity:      identity,
-				correlationID: extractCorrelationID(r),
-				clientIP:      clientIP,
+				identity: identity,
+				clientIP: clientIP,
 			}
 			r = r.WithContext(context.WithValue(r.Context(), keyContext, rctx))
 		} else {
 			rctx = v.(*RequestContext)
 		}
-
-		w.Header().Set(header.XCorrelationID, rctx.correlationID)
 
 		delegate.ServeHTTP(w, r)
 	}
@@ -130,35 +121,7 @@ func (c *RequestContext) Identity() Identity {
 	return c.identity
 }
 
-// CorrelationID returns request's CorrelationID, extracted from X-CorrelationID header.
-// If it was not provided by the client, the a random will be generated.
-func (c *RequestContext) CorrelationID() string {
-	return c.correlationID
-}
-
 // ClientIP returns request's IP
 func (c *RequestContext) ClientIP() string {
 	return c.clientIP
-}
-
-// extractCorrelationID will find or create a requestID for this http request.
-func extractCorrelationID(req *http.Request) string {
-	// 8 random chars will have enough entropy
-	// to correlate requests,
-	// without the large footprint in the logs
-	corID := certutil.RandomString(8)
-
-	incomingID := req.Header.Get(header.XCorrelationID)
-	if incomingID == "" {
-		incomingID = req.Header.Get(header.XDeviceID)
-	}
-
-	if incomingID != "" {
-		if len(incomingID) > 8 {
-			incomingID = incomingID[:8]
-		}
-		corID += "_" + incomingID
-	}
-
-	return corID
 }

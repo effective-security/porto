@@ -504,7 +504,7 @@ func Test_Authz(t *testing.T) {
 		r, _ := http.NewRequest(http.MethodGet, "/v1/allow", nil)
 		server.ServeHTTP(w, r)
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
-		assert.Empty(t, w.Header().Get(header.XCorrelationID))
+		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
