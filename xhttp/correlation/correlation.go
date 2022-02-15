@@ -3,6 +3,7 @@ package correlation
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
@@ -104,7 +105,12 @@ func extractCorrelationID(req *http.Request) string {
 	} else {
 		corID = certutil.RandomString(8)
 	}
-	logger.KV(xlog.TRACE, "ctx", corID, "incoming_ctx", incomingID)
+
+	l := xlog.DEBUG
+	if strings.Contains(req.Header.Get(header.Accept), "json") {
+		l = xlog.TRACE
+	}
+	logger.KV(l, "ctx", corID, "incoming_ctx", incomingID, "path", req.URL.Path)
 
 	return corID
 }
