@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/xpki/jwt"
 )
 
 // GuestRoleName is default role name for guest
@@ -12,11 +13,12 @@ const GuestRoleName = "guest"
 
 // Identity contains information about the identity of an API caller
 type Identity interface {
+	// String returns the identity as a single string value
+	// in the format of role/subject
 	String() string
-	UserID() string
 	Role() string
-	Name() string
-	UserInfo() interface{}
+	Subject() string
+	Claims() map[string]interface{}
 }
 
 // ProviderFromRequest returns Identity from supplied HTTP request
@@ -26,44 +28,32 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 type ProviderFromContext func(ctx context.Context) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
-func NewIdentity(role, name, userID string) Identity {
-	return identity{
-		role:   role,
-		name:   name,
-		userID: userID,
+func NewIdentity(role, subject string, claims map[string]interface{}) Identity {
+	id := identity{
+		role:    role,
+		subject: subject,
+		claims:  jwt.Claims{},
 	}
-}
-
-// NewIdentityWithUserInfo returns a new Identity instance with the indicated role and user info
-func NewIdentityWithUserInfo(role, name, userID string, userInfo interface{}) Identity {
-	return identity{
-		role:     role,
-		name:     name,
-		userID:   userID,
-		userInfo: userInfo,
+	if claims != nil {
+		id.claims.Add(claims)
 	}
+	return id
 }
 
 type identity struct {
-	// name of identity
-	// It can be CommonName extracted from certificate
-	name string
+	// subject of identity
+	// It can be CommonName extracted from certificate,
+	// or "sub" claim in JWT
+	subject string
 	// role of identity
 	role string
-	// ID of the user
-	userID string
 	// extra user info, specific to the application
-	userInfo interface{}
+	claims jwt.Claims
 }
 
-// UserID returns user ID
-func (c identity) UserID() string {
-	return c.userID
-}
-
-// Name returns the clients name
-func (c identity) Name() string {
-	return c.name
+// Subject returns the clients subject
+func (c identity) Subject() string {
+	return c.subject
 }
 
 // Role returns the clients role
@@ -71,16 +61,18 @@ func (c identity) Role() string {
 	return c.role
 }
 
-// UserInfo returns application specific user info
-func (c identity) UserInfo() interface{} {
-	return c.userInfo
+// Claims returns application specific user info
+func (c identity) Claims() map[string]interface{} {
+	res := jwt.Claims{}
+	res.Add(c.claims)
+	return res
 }
 
 // String returns the identity as a single string value
-// in the format of role/name
+// in the format of role/subject
 func (c identity) String() string {
-	if c.role != c.name && c.name != "" {
-		return c.role + "/" + c.name
+	if c.role != c.subject && c.subject != "" {
+		return c.role + "/" + c.subject
 	}
 	return c.role
 }
@@ -89,16 +81,16 @@ func (c identity) String() string {
 func GuestIdentityMapper(r *http.Request) (Identity, error) {
 	var name string
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		name = ClientIPFromRequest(r)
+		name = "ip:" + ClientIPFromRequest(r)
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
 	}
-	return NewIdentity(GuestRoleName, name, ""), nil
+	return NewIdentity(GuestRoleName, name, nil), nil
 }
 
 // GuestIdentityForContext always returns "guest" for the role
 func GuestIdentityForContext(ctx context.Context) (Identity, error) {
-	return NewIdentity(GuestRoleName, "", ""), nil
+	return NewIdentity(GuestRoleName, "", nil), nil
 }
 
 // WithTestIdentity is used in unit tests to set HTTP request identity

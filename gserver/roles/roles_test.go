@@ -64,8 +64,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
-		assert.Equal(t, "denis@trusty.com", id.Name())
-		assert.Empty(t, id.UserID())
+		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
@@ -76,8 +75,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
-		assert.Equal(t, "denis@trusty.com", id.Name())
-		assert.Empty(t, id.UserID())
+		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
 	t.Run("tls:trusty-client", func(t *testing.T) {
@@ -127,8 +125,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "guest", id.Role())
-		assert.NotEmpty(t, id.Name())
-		assert.Empty(t, id.UserID())
+		assert.NotEmpty(t, id.Subject())
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
@@ -139,8 +136,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err := p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "guest", id.Role())
-		assert.Empty(t, id.Name())
-		assert.Empty(t, id.UserID())
+		assert.Empty(t, id.Subject())
 	})
 
 	t.Run("tls:trusty-client", func(t *testing.T) {
