@@ -2,7 +2,9 @@ package marshal
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	goErrors "errors"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
+	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
 
@@ -118,4 +121,26 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, pri
 	if err := codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body); err != nil {
 		logger.Warningf("reason=encode, type=%T, err=[%v]", body, err.Error())
 	}
+}
+
+// NewRequest returns http.Request
+func NewRequest(method string, url string, req interface{}) (*http.Request, error) {
+	var body io.Reader
+
+	switch val := req.(type) {
+	case io.Reader:
+		body = val
+	case []byte:
+		body = bytes.NewReader(val)
+	case string:
+		body = strings.NewReader(val)
+	default:
+		js, err := json.Marshal(req)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		body = bytes.NewReader(js)
+	}
+
+	return http.NewRequest(method, url, body)
 }
