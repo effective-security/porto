@@ -95,7 +95,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 	return http.HandlerFunc(h)
 }
 
-var guestIdentity = NewIdentity(GuestRoleName, "", "")
+var guestIdentity = NewIdentity(GuestRoleName, "", nil)
 
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context

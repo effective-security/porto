@@ -107,5 +107,5 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"agent", agent,
 		"ctx", correlation.ID(r.Context()),
 		"role", idn.Role(),
-		"user", idn.Name())
+		"user", idn.Subject())
 }

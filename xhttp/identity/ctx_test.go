@@ -22,15 +22,14 @@ func TestMain(m *testing.M) {
 }
 
 func Test_Identity(t *testing.T) {
-	i := identity{role: "netmgmt", name: "Ekspand"}
+	i := identity{role: "netmgmt", subject: "Ekspand"}
 	assert.Equal(t, "netmgmt", i.Role())
-	assert.Equal(t, "Ekspand", i.Name())
+	assert.Equal(t, "Ekspand", i.Subject())
 	assert.Equal(t, "netmgmt/Ekspand", i.String())
 
-	id := NewIdentity("netmgmt", "Ekspand", "123456")
+	id := NewIdentity("netmgmt", "Ekspand", nil)
 	assert.Equal(t, "netmgmt", id.Role())
-	assert.Equal(t, "Ekspand", id.Name())
-	assert.Equal(t, "123456", id.UserID())
+	assert.Equal(t, "Ekspand", id.Subject())
 	assert.Equal(t, "netmgmt/Ekspand", id.String())
 }
 
@@ -57,16 +56,16 @@ func Test_ClientIP(t *testing.T) {
 func Test_AddToContext(t *testing.T) {
 	ctx := AddToContext(
 		context.Background(),
-		NewRequestContext(NewIdentity("r", "n", "u")),
+		NewRequestContext(NewIdentity("r", "n", map[string]interface{}{"email": "test"})),
 	)
 
 	rqCtx := FromContext(ctx)
 	require.NotNil(t, rqCtx)
 
 	identity := rqCtx.Identity()
-	require.Equal(t, "n", identity.Name())
+	require.Equal(t, "n", identity.Subject())
 	require.Equal(t, "r", identity.Role())
-	require.Equal(t, "u", identity.UserID())
+	require.Equal(t, "test", identity.Claims()["email"])
 }
 
 func Test_FromContext(t *testing.T) {
@@ -81,7 +80,7 @@ func Test_FromContext(t *testing.T) {
 		identity := ctx.Identity()
 		res := &roleName{
 			Role: identity.Role(),
-			Name: identity.Name(),
+			Name: identity.Subject(),
 		}
 		marshal.WriteJSON(w, r, res)
 	}
@@ -131,7 +130,7 @@ func Test_grpcFromContext(t *testing.T) {
 
 	t.Run("with_custom_id", func(t *testing.T) {
 		def := func(ctx context.Context) (Identity, error) {
-			return NewIdentity("test", "", ""), nil
+			return NewIdentity("test", "", nil), nil
 		}
 		unary := NewAuthUnaryInterceptor(def)
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
@@ -168,7 +167,7 @@ func Test_RequestorIdentity(t *testing.T) {
 		identity := ctx.Identity()
 		res := &roleName{
 			Role: identity.Role(),
-			Name: identity.Name(),
+			Name: identity.Subject(),
 		}
 		marshal.WriteJSON(w, r, res)
 	}
@@ -260,12 +259,12 @@ func identityMapperFromCN(r *http.Request) (Identity, error) {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
 		role = r.TLS.PeerCertificates[0].Subject.CommonName
 	}
-	return identity{name: name, role: role}, nil
+	return identity{subject: name, role: role}, nil
 }
 
 func identityMapperFromCNMust(r *http.Request) (Identity, error) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil, errors.New("missing client certificate")
 	}
-	return identity{name: r.TLS.PeerCertificates[0].Subject.CommonName, role: r.TLS.PeerCertificates[0].Subject.CommonName}, nil
+	return identity{subject: r.TLS.PeerCertificates[0].Subject.CommonName, role: r.TLS.PeerCertificates[0].Subject.CommonName}, nil
 }

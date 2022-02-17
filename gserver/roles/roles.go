@@ -188,7 +188,7 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
 	logger.Debugf("role=%s, subject=%s", role, subj)
-	return identity.NewIdentity(role, subj, ""), nil
+	return identity.NewIdentity(role, subj, claims), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {
@@ -200,7 +200,14 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 			role = p.config.TLS.DefaultAuthenticatedRole
 		}
 		logger.Debugf("spiffe=%s, role=%s", spiffe, role)
-		return identity.NewIdentity(role, peer.Subject.CommonName, ""), nil
+		claims := map[string]interface{}{
+			"sub": peer.Subject.String(),
+			"iss": peer.Issuer.String(),
+		}
+		if len(peer.EmailAddresses) > 0 {
+			claims["email"] = peer.EmailAddresses[0]
+		}
+		return identity.NewIdentity(role, peer.Subject.CommonName, claims), nil
 	}
 
 	logger.Debugf("spiffe=none, cn=%q", peer.Subject.CommonName)
