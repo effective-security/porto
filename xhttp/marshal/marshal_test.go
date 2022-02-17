@@ -1,15 +1,20 @@
 package marshal
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWritePlainJSON(t *testing.T) {
@@ -77,6 +82,32 @@ func TestWriteJSON_Error(t *testing.T) {
 			WriteJSON(w, r, tc.err)
 			assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
 			assert.Equal(t, tc.exp, w.Body.String())
+		})
+	}
+}
+
+func TestNewRequest(t *testing.T) {
+	m := map[string]string{
+		"key": "value",
+	}
+	tcases := []struct {
+		req interface{}
+		exp string
+	}{
+		{m, `{"key":"value"}`},
+		{"string", `string`},
+		{[]byte(`bytes`), `bytes`},
+		{bytes.NewReader([]byte(`bytes`)), `bytes`},
+		{strings.NewReader(`string`), `string`},
+	}
+
+	for _, tc := range tcases {
+		t.Run(reflect.TypeOf(tc.req).Name(), func(t *testing.T) {
+			r, err := NewRequest(http.MethodGet, "/test", tc.req)
+			require.NoError(t, err)
+			body, err := ioutil.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.exp, string(body))
 		})
 	}
 }
