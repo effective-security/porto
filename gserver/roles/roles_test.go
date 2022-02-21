@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xpki/jwt"
+	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/credentials"
@@ -34,6 +36,9 @@ func Test_All(t *testing.T) {
 	mock := mockJWT{
 		claims: jwt.Claims{
 			"sub": "denis@trusty.com",
+			"cnf": map[string]interface{}{
+				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4=",
+			},
 		},
 		err: nil,
 	}
@@ -53,6 +58,13 @@ func Test_All(t *testing.T) {
 				"trusty-client": {"denis@trusty.ca"},
 			},
 		},
+		DPoP: roles.JWTIdentityMap{
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "dpop_authenticated",
+			Roles: map[string][]string{
+				"trusty-admin": {"denis@trusty.ca"},
+			},
+		},
 	}, mock)
 	require.NoError(t, err)
 
@@ -64,6 +76,20 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "denis@trusty.com", id.Subject())
+	})
+
+	t.Run("default role dpop", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, "dpop_authenticated", id.Role())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -102,6 +128,83 @@ func Test_All(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+	})
+}
+
+func Test_DPoPInvalid(t *testing.T) {
+	t.Run("invaliddpop", func(t *testing.T) {
+		mock := mockJWT{
+			claims: jwt.Claims{
+				"sub": "denis@trusty.com",
+				"cnf": "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4=",
+			},
+			err: nil,
+		}
+
+		p, err := roles.New(&roles.IdentityMap{
+			TLS: roles.TLSIdentityMap{
+				Enabled: false,
+			},
+			JWT: roles.JWTIdentityMap{
+				Enabled: false,
+			},
+			DPoP: roles.JWTIdentityMap{
+				Enabled:                  true,
+				DefaultAuthenticatedRole: "dpop_authenticated",
+				Roles: map[string][]string{
+					"trusty-admin": {"denis@trusty.ca"},
+				},
+			},
+		}, mock)
+		require.NoError(t, err)
+
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		_, err = p.IdentityFromRequest(r)
+		require.EqualError(t, err, "dpop: invalid cnf claim")
+	})
+	t.Run("dpop_mismatch", func(t *testing.T) {
+		mock := mockJWT{
+			claims: jwt.Claims{
+				"sub": "denis@trusty.com",
+				"cnf": map[string]interface{}{
+					dpop.CnfThumbprint: "mismatch",
+				},
+			},
+			err: nil,
+		}
+
+		p, err := roles.New(&roles.IdentityMap{
+			TLS: roles.TLSIdentityMap{
+				Enabled: false,
+			},
+			JWT: roles.JWTIdentityMap{
+				Enabled: false,
+			},
+			DPoP: roles.JWTIdentityMap{
+				Enabled:                  true,
+				DefaultAuthenticatedRole: "dpop_authenticated",
+				Roles: map[string][]string{
+					"trusty-admin": {"denis@trusty.ca"},
+				},
+			},
+		}, mock)
+		require.NoError(t, err)
+
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		_, err = p.IdentityFromRequest(r)
+		require.EqualError(t, err, "dpop: thumbprint mismatch")
 	})
 }
 
@@ -212,6 +315,12 @@ func createPeerContext(ctx context.Context, TLS *tls.ConnectionState) context.Co
 // setAuthorizationHeader applies Authorization header
 func setAuthorizationHeader(r *http.Request, token string) {
 	r.Header.Set(header.Authorization, header.Bearer+" "+token)
+}
+
+// setAuthorizationDPoPHeader applies Authorization header
+func setAuthorizationDPoPHeader(r *http.Request, dpop, token string) {
+	r.Header.Set(header.DPoP, dpop)
+	r.Header.Set(header.Authorization, header.DPoP+" "+token)
 }
 
 type mockJWT struct {

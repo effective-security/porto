@@ -11,6 +11,7 @@ import (
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
+	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -28,6 +29,9 @@ const (
 
 	// JWTUserRoleName defines a generic role name for an authenticated user
 	JWTUserRoleName = "jwt_authenticated"
+
+	// DPoPUserRoleName defines a generic role name for an authenticated user
+	DPoPUserRoleName = "dpop_authenticated"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -45,21 +49,30 @@ type IdentityProvider interface {
 
 // Provider for identity
 type provider struct {
-	config   IdentityMap
-	jwtRoles map[string]string
-	tlsRoles map[string]string
-	jwt      jwt.Parser
+	config    IdentityMap
+	dpopRoles map[string]string
+	jwtRoles  map[string]string
+	tlsRoles  map[string]string
+	jwt       jwt.Parser
 }
 
 // New returns Authz provider instance
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	prov := &provider{
-		config:   *config,
-		jwtRoles: make(map[string]string),
-		tlsRoles: make(map[string]string),
-		jwt:      jwt,
+		config:    *config,
+		dpopRoles: make(map[string]string),
+		jwtRoles:  make(map[string]string),
+		tlsRoles:  make(map[string]string),
+		jwt:       jwt,
 	}
 
+	if config.DPoP.Enabled {
+		for role, users := range config.DPoP.Roles {
+			for _, user := range users {
+				prov.dpopRoles[user] = role
+			}
+		}
+	}
 	if config.JWT.Enabled {
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -80,9 +93,14 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 
 // ApplicableForRequest returns true if the provider is applicable for the request
 func (p *provider) ApplicableForRequest(r *http.Request) bool {
+	authHeader := strings.ToLower(r.Header.Get(header.Authorization))
+	if p.config.DPoP.Enabled {
+		if authHeader != "" && strings.HasPrefix(authHeader, "dpop") {
+			return true
+		}
+	}
 	if p.config.JWT.Enabled {
-		key := r.Header.Get(header.Authorization)
-		if key != "" && strings.HasPrefix(key, header.Bearer) {
+		if authHeader != "" && strings.HasPrefix(authHeader, "bearer") {
 			return true
 		}
 	}
@@ -118,14 +136,21 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
 	peers := getPeerCertAndCount(r)
 	logger.KV(xlog.DEBUG,
+		"dpop_enabled", p.config.DPoP.Enabled,
 		"jwt_enabled", p.config.JWT.Enabled,
 		"tls_enabled", p.config.TLS.Enabled,
 		"certs_present", peers)
 
+	authHeader := strings.ToLower(r.Header.Get(header.Authorization))
+	if p.config.DPoP.Enabled {
+		if authHeader != "" && strings.HasPrefix(authHeader, "dpop") {
+			return p.dpopIdentity(r, authHeader[5:])
+		}
+	}
+
 	if p.config.JWT.Enabled {
-		key := r.Header.Get(header.Authorization)
-		if key != "" && strings.HasPrefix(key, header.Bearer) {
-			return p.jwtIdentity(key[7:])
+		if authHeader != "" && strings.HasPrefix(authHeader, "bearer") {
+			return p.jwtIdentity(authHeader[7:])
 		}
 	}
 
@@ -172,6 +197,37 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 		}
 	}
 	return identity.GuestIdentityForContext(ctx)
+}
+
+func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity, error) {
+	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	cfg := &jwt.VerifyConfig{
+		ExpectedAudience: p.config.JWT.Audience,
+	}
+	claims, err := p.jwt.ParseToken(auth, cfg)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	m, ok := claims["cnf"].(map[string]interface{})
+	if !ok {
+		return nil, errors.Errorf("dpop: invalid cnf claim")
+	}
+	if tb, ok := m[dpop.CnfThumbprint].(string); !ok || tb != res.Thumbprint {
+		logger.Debugf("header=%s, claims=%s", m[dpop.CnfThumbprint], res.Thumbprint)
+		return nil, errors.Errorf("dpop: thumbprint mismatch")
+	}
+
+	subj := claims.String("sub")
+	role := p.jwtRoles[subj]
+	if role == "" {
+		role = p.config.DPoP.DefaultAuthenticatedRole
+	}
+	logger.Debugf("role=%s, subject=%s", role, subj)
+	return identity.NewIdentity(role, subj, claims), nil
 }
 
 func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {

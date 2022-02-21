@@ -6,6 +6,8 @@ type IdentityMap struct {
 	TLS TLSIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map
 	JWT JWTIdentityMap `json:"jwt" yaml:"jwt"`
+	// DPoP identity map
+	DPoP JWTIdentityMap `json:"jwt_dpop" yaml:"jwt_dpop"`
 }
 
 // TLSIdentityMap provides roles for TLS
@@ -22,7 +24,7 @@ type TLSIdentityMap struct {
 type JWTIdentityMap struct {
 	// DefaultAuthenticatedRole specifies role name for identity, if not found in maps
 	DefaultAuthenticatedRole string `json:"default_authenticated_role" yaml:"default_authenticated_role"`
-	// Enable TLS identities
+	// Enable JWT identities
 	Enabled bool `json:"enabled" yaml:"enabled"`
 	// Audience specifies the token audience
 	Audience string `json:"audience" yaml:"audience"`
