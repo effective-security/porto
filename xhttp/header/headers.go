@@ -19,6 +19,9 @@ const (
 	Authorization = "Authorization"
 	// Bearer is token type for "Authorization" header
 	Bearer = "Bearer"
+	// DPoP is token type for "Authorization" header,
+	// and header name for DPoP
+	DPoP = "DPoP"
 	// CacheControl is HTTP header for "Cache-Control"
 	CacheControl = "Cache-Control"
 	// ContentDisposition is HTTP header for "Content-Disposition"
