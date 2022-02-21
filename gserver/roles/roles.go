@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
@@ -93,16 +94,9 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 
 // ApplicableForRequest returns true if the provider is applicable for the request
 func (p *provider) ApplicableForRequest(r *http.Request) bool {
-	authHeader := strings.ToLower(r.Header.Get(header.Authorization))
-	if p.config.DPoP.Enabled {
-		if authHeader != "" && strings.HasPrefix(authHeader, "dpop") {
-			return true
-		}
-	}
-	if p.config.JWT.Enabled {
-		if authHeader != "" && strings.HasPrefix(authHeader, "bearer") {
-			return true
-		}
+	if (p.config.DPoP.Enabled || p.config.JWT.Enabled) &&
+		r.Header.Get(header.Authorization) != "" {
+		return true
 	}
 	if p.config.TLS.Enabled && r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		return true
@@ -113,6 +107,7 @@ func (p *provider) ApplicableForRequest(r *http.Request) bool {
 
 // ApplicableForContext returns true if the provider is applicable for context
 func (p *provider) ApplicableForContext(ctx context.Context) bool {
+	// TODO: DPoP over gRPC
 	if p.config.JWT.Enabled {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok && len(md["authorization"]) > 0 {
@@ -141,15 +136,15 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		"tls_enabled", p.config.TLS.Enabled,
 		"certs_present", peers)
 
-	authHeader := strings.ToLower(r.Header.Get(header.Authorization))
+	authHeader := r.Header.Get(header.Authorization)
 	if p.config.DPoP.Enabled {
-		if authHeader != "" && strings.HasPrefix(authHeader, "dpop") {
+		if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
 			return p.dpopIdentity(r, authHeader[5:])
 		}
 	}
 
 	if p.config.JWT.Enabled {
-		if authHeader != "" && strings.HasPrefix(authHeader, "bearer") {
+		if strings.ToLower(slices.StringUpto(authHeader, 7)) == "bearer " {
 			return p.jwtIdentity(authHeader[7:])
 		}
 	}
