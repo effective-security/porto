@@ -68,12 +68,49 @@ type GenericHTTP interface {
 	// RequestURL is similar to Request but uses raw URL to one host
 	RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
 
-	// Head makes HEAD request against the specified hosts.
+	// HeadTo makes HEAD request against the specified hosts.
 	// The supplied hosts are tried in order until one succeeds.
 	//
 	// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	Head(ctx context.Context, hosts []string, path string) (http.Header, int, error)
+	HeadTo(ctx context.Context, hosts []string, path string) (http.Header, int, error)
+}
+
+// HTTPClient defines a number of generalized HTTP request handling wrappers
+type HTTPClient interface {
+	// Head makes HEAD request.
+	// path should be an absolute URI path, i.e. /foo/bar/baz
+	// The client must be configured with the hosts list.
+	Head(ctx context.Context, path string) (http.Header, int, error)
+
+	// Get makes a GET request,
+	// path should be an absolute URI path, i.e. /foo/bar/baz
+	// the resulting HTTP body will be decoded into the supplied body parameter, and the
+	// http status code returned.
+	// The client must be configured with the hosts list.
+	Get(ctx context.Context, path string, body interface{}) (http.Header, int, error)
+
+	// Post makes an HTTP POST to the supplied path, serializing requestBody to json and sending
+	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
+	// code (and potentially an error) returned. It'll try and map errors (statusCode >= 300)
+	// into a go error, waits & retries for rate limiting errors will be applied based on the
+	// client config.
+	// path should be an absolute URI path, i.e. /foo/bar/baz
+	Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+
+	// Put makes an HTTP PUT to the supplied path, serializing requestBody to json and sending
+	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
+	// code (and potentially an error) returned. It'll try and map errors (statusCode >= 300)
+	// into a go error, waits & retries for rate limiting errors will be applied based on the
+	// client config.
+	// path should be an absolute URI path, i.e. /foo/bar/baz
+	Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+
+	// Delete makes a DELETE request,
+	// path should be an absolute URI path, i.e. /foo/bar/baz
+	// the resulting HTTP body will be decoded into the supplied body parameter, and the
+	// http status code returned.
+	Delete(ctx context.Context, path string, body interface{}) (http.Header, int, error)
 }
 
 // ShouldRetry specifies a policy for handling retries. It is called
@@ -110,9 +147,6 @@ type optionFunc func(*Client)
 
 func (f optionFunc) applyOption(opts *Client) { f(opts) }
 
-type clientOptions struct {
-}
-
 // WithName is a ClientOption that specifies client's name for logging purposes.
 //
 //   retriable.New(retriable.WithName("tlsclient"))
@@ -131,7 +165,7 @@ func WithName(name string) ClientOption {
 //
 // This option cannot be provided for constructors which produce result
 // objects.
-func WithPolicy(policy *Policy) ClientOption {
+func WithPolicy(policy Policy) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithPolicy(policy)
 	})
@@ -193,6 +227,17 @@ func WithDNSServer(dns string) ClientOption {
 	})
 }
 
+// WithHosts is a ClientOption that allows to set
+// the hosts list.
+//
+//   retriable.New(retriable.WithHosts(hosts))
+//
+func WithHosts(hosts []string) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.WithHosts(hosts)
+	})
+}
+
 // WithBeforeSendRequest allows to specify a hook
 // to modify request before it's sent
 func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
@@ -205,10 +250,11 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 type Client struct {
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
+	hosts      []string
 	headers    map[string]string
 	beforeSend BeforeSendRequest
 	Name       string
-	Policy     *Policy // Rery policy for http requests
+	Policy     Policy // Rery policy for http requests
 }
 
 // New creates a new Client
@@ -218,7 +264,7 @@ func New(opts ...ClientOption) *Client {
 		httpClient: &http.Client{
 			Timeout: time.Second * 30,
 		},
-		Policy: NewDefaultPolicy(),
+		Policy: DefaultPolicy(),
 	}
 
 	for _, opt := range opts {
@@ -264,10 +310,18 @@ func (c *Client) WithName(name string) *Client {
 }
 
 // WithPolicy modifies retriable policy.
-func (c *Client) WithPolicy(policy *Policy) *Client {
+func (c *Client) WithPolicy(policy Policy) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.Policy = policy
+	return c
+}
+
+// WithHosts sets the hosts list.
+func (c *Client) WithHosts(hosts []string) *Client {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c.hosts = hosts
 	return c
 }
 
@@ -340,22 +394,20 @@ func (c *Client) WithDNSServer(dns string) *Client {
 	return c
 }
 
-// NewDefaultPolicy returns default policy
-func NewDefaultPolicy() *Policy {
-	return &Policy{
+// DefaultPolicy returns default policy
+func DefaultPolicy() Policy {
+	return Policy{
 		Retries: map[int]ShouldRetry{
 			// 0 is connection related
-			0: shouldRetryFactory(5, time.Second*2, "connection"),
+			0: shouldRetryFactory(3, time.Second*2, "connection"),
 			// TooManyRequests (429) is returned when rate limit is exceeded
-			http.StatusTooManyRequests: shouldRetryFactory(3, time.Second, "rate-limit"),
-			// Unavailble (503) is returned when Cluster knows there's no leader or service is not ready yet
-			http.StatusServiceUnavailable: shouldRetryFactory(10, time.Second/2, "unavailable"),
-			// Bad Gateway (502) is returned when the node that gets the request thinks
-			// there's a leader, but that node is down, treat them both as an election
-			// in progress.
-			http.StatusBadGateway: shouldRetryFactory(10, time.Second/2, "gateway"),
+			http.StatusTooManyRequests: shouldRetryFactory(2, time.Second, "rate-limit"),
+			// Unavailble (503) is returned when is not ready yet
+			http.StatusServiceUnavailable: shouldRetryFactory(5, time.Second, "unavailable"),
+			// Bad Gateway (502)
+			http.StatusBadGateway: shouldRetryFactory(5, time.Second, "gateway"),
 		},
-		TotalRetryLimit: 10,
+		TotalRetryLimit: 5,
 	}
 }
 
@@ -416,36 +468,25 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 	return c.DecodeResponse(resp, responseBody)
 }
 
-// Head makes HEAD request against the specified hosts.
-// The supplied hosts are tried in order until one succeeds.
-//
-// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
-// path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Head(ctx context.Context, hosts []string, path string) (http.Header, int, error) {
-	resp, err := c.executeRequest(ctx, http.MethodHead, hosts, path, nil)
-	if err != nil {
-		return nil, 0, errors.WithStack(err)
-	}
-	defer resp.Body.Close()
-	return resp.Header, resp.StatusCode, nil
-}
-
 var noop context.CancelFunc = func() {}
 
 func (c *Client) ensureContext(ctx context.Context, httpMethod, path string) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
-		if c.Policy != nil && c.Policy.RequestTimeout > 0 {
-			logger.Debugf("method=%s, path=%s, timeout=%v",
-				httpMethod, path, c.Policy.RequestTimeout)
-			return context.WithTimeout(ctx, c.Policy.RequestTimeout)
-		}
 	}
-
+	if c.Policy.RequestTimeout > 0 {
+		logger.Debugf("method=%s, path=%s, timeout=%v",
+			httpMethod, path, c.Policy.RequestTimeout)
+		return context.WithTimeout(ctx, c.Policy.RequestTimeout)
+	}
 	return ctx, noop
 }
 
 func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []string, path string, body io.ReadSeeker) (*http.Response, error) {
+	if len(hosts) == 0 {
+		return nil, errors.Errorf("invalid parameter: hosts")
+	}
+
 	var many *httperror.ManyError
 	var err error
 	var resp *http.Response
@@ -715,10 +756,9 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		}
 
 		if r.TLS != nil {
-			logger.Errorf("host=%q, path=%q, complete=%t, mutual=%t, tls_peers=%d, tls_chains=%d",
+			logger.Errorf("host=%q, path=%q, complete=%t, tls_peers=%d, tls_chains=%d",
 				r.URL.Host, r.URL.Path,
 				resp.TLS.HandshakeComplete,
-				resp.TLS.NegotiatedProtocolIsMutual,
 				len(resp.TLS.PeerCertificates),
 				len(resp.TLS.VerifiedChains))
 			for i, c := range resp.TLS.PeerCertificates {
@@ -748,7 +788,7 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 	}
 
 	if resp.StatusCode != http.StatusTooManyRequests &&
-		resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		resp.StatusCode < 500 {
 		return false, 0, NonRetriableError
 	}
 

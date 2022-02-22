@@ -36,6 +36,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	//xlog.SetGlobalLogLevel(xlog.DEBUG)
 	ca1 := testca.NewEntity(
 		testca.Authority,
 		testca.Subject(pkix.Name{
@@ -80,7 +81,7 @@ func TestMain(m *testing.M) {
 }
 
 func Test_New(t *testing.T) {
-	p := &retriable.Policy{
+	p := retriable.Policy{
 		TotalRetryLimit: 5,
 	}
 
@@ -128,18 +129,18 @@ func TestDefaultPolicy(t *testing.T) {
 		// 429 is rate limit exceeded
 		{true, "rate-limit", 0, 429, nil},
 		{true, "rate-limit", 1, 429, nil},
-		{true, "rate-limit", 3, 429, nil},
+		{false, "rate-limit", 3, 429, nil},
 		{false, "rate-limit", 4, 429, nil},
 		// 503 is service unavailable, which is returned during leader elections
 		{true, "unavailable", 0, 503, nil},
 		{true, "unavailable", 1, 503, nil},
-		{true, "unavailable", 9, 503, nil},
-		{false, retriable.LimitExceeded, 10, 503, nil},
+		{true, "unavailable", 4, 503, nil},
+		{false, retriable.LimitExceeded, 5, 503, nil},
 		// 502 is bad gateway, which is returned during leader transitions
 		{true, "gateway", 0, 502, nil},
 		{true, "gateway", 1, 502, nil},
-		{true, "gateway", 9, 502, nil},
-		{false, retriable.LimitExceeded, 10, 502, nil},
+		{true, "gateway", 4, 502, nil},
+		{false, retriable.LimitExceeded, 5, 502, nil},
 		// regardless of config, other status codes shouldn't get retries
 		{false, "success", 0, 200, nil},
 		{false, retriable.NonRetriableError, 0, 400, nil},
@@ -151,14 +152,14 @@ func TestDefaultPolicy(t *testing.T) {
 		{false, retriable.NonRetriableError, 0, 500, nil},
 		// connection
 		{true, "connection", 0, 0, errors.New("some error")},
-		{true, "connection", 5, 0, errors.New("some error")},
-		{false, "connection", 6, 0, errors.New("some error")},
+		{true, "connection", 3, 0, errors.New("some error")},
+		{false, "connection", 4, 0, errors.New("some error")},
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "/test", nil)
 	require.NoError(t, err)
 
-	p := retriable.NewDefaultPolicy()
+	p := retriable.DefaultPolicy()
 	for _, tc := range tcases {
 		t.Run(fmt.Sprintf("%s: %d, %d, %t:", tc.reason, tc.retries, tc.statusCode, tc.expected), func(t *testing.T) {
 			res := &http.Response{StatusCode: tc.statusCode}
@@ -180,7 +181,7 @@ func Test_Retriable_OK(t *testing.T) {
 		WithHeaders(map[string]string{
 			"X-Test-Token": "token1",
 		}).
-		WithPolicy(&retriable.Policy{
+		WithPolicy(retriable.Policy{
 			TotalRetryLimit: 2,
 			RequestTimeout:  time.Second,
 		}).
@@ -190,13 +191,29 @@ func Test_Retriable_OK(t *testing.T) {
 		})
 	require.NotNil(t, client)
 
+	ctx := context.Background()
 	hosts := []string{server.URL}
+
+	client.WithHosts(hosts)
+
+	t.Run("GET_RequestURL", func(t *testing.T) {
+		w := bytes.NewBuffer([]byte{})
+
+		h, status, err := client.RequestURL(ctx,
+			http.MethodGet, server.URL+"/v1/test?qq#ff", nil, w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
+		assert.Equal(t, "token1", h.Get("X-Test-Token"))
+		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
+		// test handler modifies the request URL
+		//assert.Equal(t, server.URL+"/v1/test?qq#ff", h.Get("X-Request-URL"))
+	})
 
 	t.Run("GET", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
 
-		h, status, err := client.RequestURL(context.Background(),
-			http.MethodGet, server.URL+"/v1/test?qq#ff", nil, w)
+		h, status, err := client.Get(ctx, "/v1/test?qq#ff", w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
@@ -226,30 +243,40 @@ func Test_Retriable_OK(t *testing.T) {
 		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
 	})
 
+	t.Run("PUTto", func(t *testing.T) {
+		w := bytes.NewBuffer([]byte{})
+		_, status, err := client.Request(ctx, http.MethodPut, hosts, "/v1/test", []byte("{}"), w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
 	t.Run("PUT", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
-		_, status, err := client.Request(nil, http.MethodPut, hosts, "/v1/test", []byte("{}"), w)
+		_, status, err := client.Put(context.Background(), "/v1/test", []byte("{}"), w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 	})
-
+	t.Run("POSTto", func(t *testing.T) {
+		w := bytes.NewBuffer([]byte{})
+		_, status, err := client.Request(ctx, http.MethodPost, hosts, "/v1/test", []byte("{}"), w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+	})
 	t.Run("POST", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
-		_, status, err := client.Request(nil, http.MethodPost, hosts, "/v1/test", []byte("{}"), w)
+		_, status, err := client.Post(context.Background(), "/v1/test", []byte("{}"), w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 	})
-
 	t.Run("POST Empty body", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
-		_, status, err := client.Request(nil, http.MethodPost, hosts, "/v1/test", nil, w)
+		_, status, err := client.Request(ctx, http.MethodPost, hosts, "/v1/test", nil, w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 	})
 
-	t.Run("DELETE", func(t *testing.T) {
+	t.Run("DELETEto", func(t *testing.T) {
 		// override per cal headers
-		ctx := retriable.WithHeaders(nil, map[string]string{
+		ctx := retriable.WithHeaders(ctx, map[string]string{
 			"X-Test-Token": "token2",
 		})
 
@@ -259,14 +286,26 @@ func Test_Retriable_OK(t *testing.T) {
 		assert.Equal(t, http.StatusOK, status)
 		assert.Equal(t, "token2", h.Get("X-Test-Token"))
 	})
-
-	t.Run("HEAD", func(t *testing.T) {
+	t.Run("DELETE", func(t *testing.T) {
 		// override per cal headers
 		ctx := retriable.WithHeaders(nil, map[string]string{
 			"X-Test-Token": "token2",
 		})
 
-		h, status, err := client.Head(ctx, hosts, "/v1/test")
+		w := bytes.NewBuffer([]byte{})
+		h, status, err := client.Delete(ctx, "/v1/test", w)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "token2", h.Get("X-Test-Token"))
+	})
+
+	t.Run("HEAD", func(t *testing.T) {
+		// override per cal headers
+		ctx := retriable.WithHeaders(ctx, map[string]string{
+			"X-Test-Token": "token2",
+		})
+
+		h, status, err := client.HeadTo(ctx, hosts, "/v1/test")
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
 		assert.Equal(t, "token2", h.Get("X-Test-Token"))
@@ -476,7 +515,7 @@ func Test_RetriableMulti500Custom(t *testing.T) {
 }
 
 func Test_RetriableTimeout(t *testing.T) {
-	h := makeTestHandlerSlow(t, "/v1/test", http.StatusInternalServerError, 1*time.Second, `{
+	h := makeTestHandlerSlow(t, "/v1/test", http.StatusInternalServerError, time.Second, `{
 		"error": "bug!"
 	}`)
 	server1 := httptest.NewServer(h)
@@ -491,9 +530,9 @@ func Test_RetriableTimeout(t *testing.T) {
 	hosts := []string{server1.URL, server2.URL}
 
 	w := bytes.NewBuffer([]byte{})
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-
 	_, status, err := client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
 	require.Error(t, err)
 	assert.Equal(t, 0, status)
@@ -503,11 +542,11 @@ func Test_RetriableTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), server2.URL)
 
 	// set policy on the client
-	client.WithPolicy(&retriable.Policy{
+	client.WithPolicy(retriable.Policy{
 		TotalRetryLimit: 2,
 		RequestTimeout:  100 * time.Millisecond,
 	})
-	_, status, err = client.Request(nil, http.MethodGet, hosts, "/v1/test", nil, w)
+	_, _, err = client.Request(context.Background(), http.MethodGet, hosts, "/v1/test", nil, w)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected: Get ")
 	assert.Contains(t, err.Error(), "context deadline exceeded")
@@ -526,7 +565,7 @@ func Test_Retriable_WithReadTimeout(t *testing.T) {
 		WithHeaders(map[string]string{
 			"X-Test-Token": "token1",
 		}).
-		WithPolicy(&retriable.Policy{
+		WithPolicy(retriable.Policy{
 			TotalRetryLimit: 2,
 			RequestTimeout:  time.Second,
 		}).
@@ -563,7 +602,7 @@ func Test_Retriable_DoWithTimeout(t *testing.T) {
 	require.NoError(t, err)
 	req = req.WithContext(ctx)
 
-	client.WithPolicy(&retriable.Policy{
+	client.WithPolicy(retriable.Policy{
 		TotalRetryLimit: 2,
 		RequestTimeout:  100 * time.Millisecond,
 	})
@@ -596,7 +635,7 @@ func Test_Retriable_DoWithRetry(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, server1.URL+"/v1/test/do", strings.NewReader(`{"test":true}`))
 	require.NoError(t, err)
 
-	client.WithPolicy(&retriable.Policy{
+	client.WithPolicy(retriable.Policy{
 		TotalRetryLimit: 3,
 		RequestTimeout:  1 * time.Second,
 		Retries: map[int]retriable.ShouldRetry{
@@ -670,7 +709,7 @@ func Test_RetriableBody(t *testing.T) {
 
 	for _, tc := range tcases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := client.Request(nil, http.MethodPost, []string{server.URL}, "/", tc.req, tc.res)
+			_, _, err := client.Request(context.Background(), http.MethodPost, []string{server.URL}, "/", tc.req, tc.res)
 			require.NoError(t, err)
 			switch val := tc.res.(type) {
 			case *response:
@@ -719,13 +758,13 @@ func Test_DecodeResponse(t *testing.T) {
 	// if the body isn't valid json, we should get returned a json parser error, as well as the body
 	invalidResponse := `["foo"}`
 	res.Body = ioutil.NopCloser(bytes.NewBufferString(invalidResponse))
-	_, sc, err = c.DecodeResponse(&res, &body)
+	_, _, err = c.DecodeResponse(&res, &body)
 	require.Error(t, err)
 	assert.Equal(t, invalidResponse, err.Error())
 
 	// error body is valid json, but missing the error field
 	res.Body = ioutil.NopCloser(bytes.NewBufferString(`{"foo":"bar"}`))
-	_, sc, err = c.DecodeResponse(&res, &body)
+	_, _, err = c.DecodeResponse(&res, &body)
 	assert.Error(t, err)
 	assert.Equal(t, "{\"foo\":\"bar\"}", err.Error())
 
