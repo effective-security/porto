@@ -139,13 +139,25 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	authHeader := r.Header.Get(header.Authorization)
 	if p.config.DPoP.Enabled {
 		if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
-			return p.dpopIdentity(r, authHeader[5:])
+			token := authHeader[5:]
+			id, err := p.dpopIdentity(r, token)
+			if err != nil {
+				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
+				return nil, errors.WithStack(err)
+			}
+			return id, nil
 		}
 	}
 
 	if p.config.JWT.Enabled {
 		if strings.ToLower(slices.StringUpto(authHeader, 7)) == "bearer " {
-			return p.jwtIdentity(authHeader[7:])
+			token := authHeader[7:]
+			id, err := p.jwtIdentity(token)
+			if err != nil {
+				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
+				return nil, errors.WithStack(err)
+			}
+			return id, nil
 		}
 	}
 
