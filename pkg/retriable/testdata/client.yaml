@@ -1,0 +1,8 @@
+hosts:
+- https://localhost:4000
+request:
+  retry_limit: 3
+  timeout: 2s
+storage_folder: ~/.config/demo
+dpop_token_env_name: DEMO_DPOP_AUTH_KEY
+auth_token_env_name: DEMO_BEARER_AUTH_KEY

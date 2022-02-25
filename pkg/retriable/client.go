@@ -34,8 +34,8 @@ func (c *Client) Head(ctx context.Context, path string) (http.Header, int, error
 // into a go error, waits & retries for rate limiting errors will be applied based on the
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Post(ctx context.Context, path string, body []byte, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "POST", c.hosts, path, body, responseBody)
+func (c *Client) Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+	hdr, sc, err := c.Request(ctx, "POST", c.hosts, path, requestBody, responseBody)
 	return hdr, sc, err
 }
 
@@ -45,8 +45,8 @@ func (c *Client) Post(ctx context.Context, path string, body []byte, responseBod
 // into a go error, waits & retries for rate limiting errors will be applied based on the
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Put(ctx context.Context, path string, body []byte, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "PUT", c.hosts, path, body, responseBody)
+func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+	hdr, sc, err := c.Request(ctx, "PUT", c.hosts, path, requestBody, responseBody)
 	return hdr, sc, err
 }
 
@@ -54,8 +54,8 @@ func (c *Client) Put(ctx context.Context, path string, body []byte, responseBody
 // tried in order until one succeeds, or we run out]
 // each host should include all the protocol/host/port preamble, e.g. http://foo.bar:3444
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) PostTo(ctx context.Context, hosts []string, path string, body []byte, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "POST", hosts, path, body, responseBody)
+func (c *Client) PostTo(ctx context.Context, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+	hdr, sc, err := c.Request(ctx, "POST", hosts, path, requestBody, responseBody)
 	return hdr, sc, err
 }
 

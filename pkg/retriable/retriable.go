@@ -246,15 +246,32 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 	})
 }
 
+// WithStorageFolder allows to specify storage folder
+func WithStorageFolder(path string) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.StorageFolder = path
+	})
+}
+
+// WithEnvAuthTokenName allows to specify Env name for AuthToken
+func WithEnvAuthTokenName(env string) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.EnvAuthTokenName = env
+	})
+}
+
 // Client is custom implementation of http.Client
 type Client struct {
+	Name             string
+	Policy           Policy // Rery policy for http requests
+	StorageFolder    string
+	EnvAuthTokenName string
+
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
 	hosts      []string
 	headers    map[string]string
 	beforeSend BeforeSendRequest
-	Name       string
-	Policy     Policy // Rery policy for http requests
 }
 
 // New creates a new Client
@@ -271,6 +288,16 @@ func New(opts ...ClientOption) *Client {
 		opt.applyOption(c)
 	}
 	return c
+}
+
+// CurrentHost returns the current host
+func (c *Client) CurrentHost() string {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	if len(c.hosts) == 0 {
+		return ""
+	}
+	return c.hosts[0]
 }
 
 // WithHeaders adds additional headers to the request
@@ -621,8 +648,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			c.consumeResponseBody(resp)
 		}
 
-		logger.Warningf("name=%s, retries=%d, description=%q, reason=%q, sleep=[%v]",
-			c.Name, retries, desc, reason, sleepDuration.Seconds())
+		logger.Warningf("name=%s, retries=%d, description=%q, reason=%q, sleep=%v",
+			c.Name, retries, desc, reason, sleepDuration.String())
 		time.Sleep(sleepDuration)
 	}
 
@@ -698,14 +725,14 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 		if err := json.NewDecoder(bodyTee).Decode(e); err != nil || e.Code == "" {
 			io.Copy(ioutil.Discard, bodyTee) // ensure all of body is read
 			// Unable to parse as Error, then return body as error
-			return resp.Header, resp.StatusCode, errors.New(string(bodyCopy.Bytes()))
+			return resp.Header, resp.StatusCode, errors.New(bodyCopy.String())
 		}
 		return resp.Header, resp.StatusCode, e
 	}
 
-	switch body.(type) {
+	switch typ := body.(type) {
 	case io.Writer:
-		_, err := io.Copy(body.(io.Writer), resp.Body)
+		_, err := io.Copy(typ, resp.Body)
 		if err != nil {
 			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to read body response to (%T) type", body)
 		}
@@ -755,18 +782,19 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		default:
 		}
 
-		if r.TLS != nil {
-			logger.Errorf("host=%q, path=%q, complete=%t, tls_peers=%d, tls_chains=%d",
-				r.URL.Host, r.URL.Path,
-				resp.TLS.HandshakeComplete,
-				len(resp.TLS.PeerCertificates),
-				len(resp.TLS.VerifiedChains))
-			for i, c := range resp.TLS.PeerCertificates {
-				logger.Errorf("  [%d] CN: %s, Issuer: %s",
-					i, c.Subject.CommonName, c.Issuer.CommonName)
+		/*
+			if r.TLS != nil {
+				logger.Errorf("host=%q, path=%q, complete=%t, tls_peers=%d, tls_chains=%d",
+					r.URL.Host, r.URL.Path,
+					resp.TLS.HandshakeComplete,
+					len(resp.TLS.PeerCertificates),
+					len(resp.TLS.VerifiedChains))
+				for i, c := range resp.TLS.PeerCertificates {
+					logger.Errorf("  [%d] CN: %s, Issuer: %s",
+						i, c.Subject.CommonName, c.Issuer.CommonName)
+				}
 			}
-		}
-
+		*/
 		if slices.StringContainsOneOf(errStr, nonRetriableErrors) {
 			return false, 0, NonRetriableError
 		}
