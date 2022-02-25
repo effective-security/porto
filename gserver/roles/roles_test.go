@@ -12,6 +12,7 @@ import (
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
+	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/stretchr/testify/assert"
@@ -33,11 +34,13 @@ func Test_Empty(t *testing.T) {
 }
 
 func Test_All(t *testing.T) {
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+
 	mock := mockJWT{
 		claims: jwt.Claims{
 			"sub": "denis@trusty.com",
 			"cnf": map[string]interface{}{
-				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4=",
+				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 			},
 		},
 		err: nil,

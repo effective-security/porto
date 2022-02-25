@@ -35,6 +35,10 @@ var (
 	clientRootFile string
 )
 
+// ensure compiles
+var _ = interface{}(&retriable.Client{}).(retriable.HTTPClient)
+var _ = interface{}(&retriable.Client{}).(retriable.GenericHTTP)
+
 func TestMain(m *testing.M) {
 	//xlog.SetGlobalLogLevel(xlog.DEBUG)
 	ca1 := testca.NewEntity(
@@ -96,6 +100,7 @@ func Test_New(t *testing.T) {
 	assert.NotNil(t, c.WithPolicy(p))
 	assert.NotNil(t, c.WithTLS(nil))
 	assert.NotNil(t, c.WithTransport(nil))
+	assert.Empty(t, c.CurrentHost())
 
 	// create with options
 	c = retriable.New(
@@ -195,6 +200,7 @@ func Test_Retriable_OK(t *testing.T) {
 	hosts := []string{server.URL}
 
 	client.WithHosts(hosts)
+	assert.NotEmpty(t, client.CurrentHost())
 
 	t.Run("GET_RequestURL", func(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
@@ -288,7 +294,7 @@ func Test_Retriable_OK(t *testing.T) {
 	})
 	t.Run("DELETE", func(t *testing.T) {
 		// override per cal headers
-		ctx := retriable.WithHeaders(nil, map[string]string{
+		ctx := retriable.WithHeaders(context.Background(), map[string]string{
 			"X-Test-Token": "token2",
 		})
 
@@ -488,6 +494,9 @@ func Test_RetriableMulti500Error(t *testing.T) {
 }
 
 func Test_RetriableMulti500Custom(t *testing.T) {
+	// test with Debug request/response
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+	defer xlog.SetGlobalLogLevel(xlog.TRACE)
 	errResponse := `{
 	"error": "bug!"
 }`

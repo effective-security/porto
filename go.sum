@@ -212,10 +212,8 @@ github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b h1:04WN
 github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b/go.mod h1:/ybrmYnI3g1zrYQFIx6QjzyX1H2616Q0xcQRGrJa4cU=
 github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04 h1:NGXqcD80sWnhYvWZ/NoeTsrs9ncB08iaISG25n59ByY=
 github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04/go.mod h1:LdIVUg2ZIJ8TR9/zPgX1vuBv1GC8Pl1PvNYdckVrrR0=
-github.com/effective-security/xpki v0.0.0-20220221143831-5d0212d087f6 h1:pn1AzQH5syNdkEAp+d6yNNs570l/MwJCiMN0EB8mXTg=
-github.com/effective-security/xpki v0.0.0-20220221143831-5d0212d087f6/go.mod h1:aB0DAOkbV9jc9e2ZrjDlB96W9mW8J5WAMrdjnKokNww=
-github.com/effective-security/xpki v0.0.0-20220221170953-be8bdd908365 h1:/67bIBBODvRmu6e9lBtWPnUBApeRKud3twTIFNOIY9w=
-github.com/effective-security/xpki v0.0.0-20220221170953-be8bdd908365/go.mod h1:aB0DAOkbV9jc9e2ZrjDlB96W9mW8J5WAMrdjnKokNww=
+github.com/effective-security/xpki v0.1.2-0.20220225100654-a7075b42ef2a h1:q/JhdJ1YMucy7I/0ft2yc5jTy7ZBATg9rxj9RejEE0M=
+github.com/effective-security/xpki v0.1.2-0.20220225100654-a7075b42ef2a/go.mod h1:aB0DAOkbV9jc9e2ZrjDlB96W9mW8J5WAMrdjnKokNww=
 github.com/emirpasic/gods v1.12.0/go.mod h1:YfzfFFoVP/catgzJb4IKIqXjX78Ha8FMSDh3ymbK86o=
 github.com/envoyproxy/go-control-plane v0.6.9/go.mod h1:SBwIajubJHhxtWwsL9s8ss4safvEdbitLhGGK48rN6g=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
