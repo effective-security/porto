@@ -32,7 +32,7 @@ func NewIdentity(role, subject string, claims map[string]interface{}) Identity {
 	id := identity{
 		role:    role,
 		subject: subject,
-		claims:  jwt.Claims{},
+		claims:  jwt.MapClaims{},
 	}
 	if claims != nil {
 		id.claims.Add(claims)
@@ -48,7 +48,7 @@ type identity struct {
 	// role of identity
 	role string
 	// extra user info, specific to the application
-	claims jwt.Claims
+	claims jwt.MapClaims
 }
 
 // Subject returns the clients subject
@@ -63,7 +63,7 @@ func (c identity) Role() string {
 
 // Claims returns application specific user info
 func (c identity) Claims() map[string]interface{} {
-	res := jwt.Claims{}
+	res := jwt.MapClaims{}
 	res.Add(c.claims)
 	return res
 }

@@ -66,7 +66,7 @@ func Test_NewIdentityWithClaims(t *testing.T) {
 	r, err := http.NewRequest(http.MethodGet, "/", nil)
 	require.NoError(t, err)
 
-	u := jwt.Claims{"email": "denis@ekspand.com"}
+	u := jwt.MapClaims{"email": "denis@ekspand.com"}
 	r = WithTestIdentity(r, NewIdentity("role1", "name1", u))
 	ctx := FromRequest(r)
 	assert.Equal(t, "role1/name1", ctx.Identity().String())

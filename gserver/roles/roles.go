@@ -212,19 +212,21 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		return nil, errors.WithStack(err)
 	}
 
-	cfg := &jwt.VerifyConfig{
-		ExpectedAudience: p.config.JWT.Audience,
+	cfg := jwt.VerifyConfig{
+		ExpectedIssuer:   p.config.JWT.Issuer,
+		ExpectedAudience: []string{p.config.JWT.Audience},
 	}
 	claims, err := p.jwt.ParseToken(auth, cfg)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	m, ok := claims["cnf"].(map[string]interface{})
-	if !ok {
-		return nil, errors.Errorf("dpop: invalid cnf claim")
+
+	tb, err := dpop.GetCnfClaim(claims)
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
-	if tb, ok := m[dpop.CnfThumbprint].(string); !ok || tb != res.Thumbprint {
-		logger.Debugf("header=%s, claims=%s", m[dpop.CnfThumbprint], res.Thumbprint)
+	if tb != res.Thumbprint {
+		logger.Debugf("header=%s, claims=%s", tb, res.Thumbprint)
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
@@ -238,8 +240,9 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 }
 
 func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
-	cfg := &jwt.VerifyConfig{
-		ExpectedAudience: p.config.JWT.Audience,
+	cfg := jwt.VerifyConfig{
+		ExpectedIssuer:   p.config.JWT.Issuer,
+		ExpectedAudience: []string{p.config.JWT.Audience},
 	}
 	claims, err := p.jwt.ParseToken(auth, cfg)
 	if err != nil {

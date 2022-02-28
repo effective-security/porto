@@ -26,6 +26,8 @@ type JWTIdentityMap struct {
 	DefaultAuthenticatedRole string `json:"default_authenticated_role" yaml:"default_authenticated_role"`
 	// Enable JWT identities
 	Enabled bool `json:"enabled" yaml:"enabled"`
+	// Issuer specifies the token issuer
+	Issuer string `json:"issuer" yaml:"issuer"`
 	// Audience specifies the token audience
 	Audience string `json:"audience" yaml:"audience"`
 	// Roles is a map of role to JWT identity
