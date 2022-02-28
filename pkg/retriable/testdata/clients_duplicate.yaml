@@ -1,5 +1,5 @@
 clients:
-  local_https:
+  1:
     hosts:
     - https://localhost:4000
     request:
@@ -7,16 +7,9 @@ clients:
       timeout: 2s
     storage_folder: ~/.config/demo
     auth_token_env_name: DEMO_BEARER_AUTH_KEY
-  prod:
+  2:
     hosts:
-    - https://real.server.com
-    tls:
-      trusted_ca: /etc/pki/cabundle.pem
-    storage_folder: ~/.config/demo
-    auth_token_env_name: DEMO_BEARER_AUTH_KEY
-  local_http:
-    hosts:
-    - http://localhost:4001
+    - https://localhost:4000
     request:
       retry_limit: 3
       timeout: 2s

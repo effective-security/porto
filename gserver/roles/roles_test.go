@@ -37,7 +37,7 @@ func Test_All(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 
 	mock := mockJWT{
-		claims: jwt.Claims{
+		claims: jwt.MapClaims{
 			"sub": "denis@trusty.com",
 			"cnf": map[string]interface{}{
 				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
@@ -137,7 +137,7 @@ func Test_All(t *testing.T) {
 func Test_DPoPInvalid(t *testing.T) {
 	t.Run("invaliddpop", func(t *testing.T) {
 		mock := mockJWT{
-			claims: jwt.Claims{
+			claims: jwt.MapClaims{
 				"sub": "denis@trusty.com",
 				"cnf": "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4=",
 			},
@@ -173,7 +173,7 @@ func Test_DPoPInvalid(t *testing.T) {
 	})
 	t.Run("dpop_mismatch", func(t *testing.T) {
 		mock := mockJWT{
-			claims: jwt.Claims{
+			claims: jwt.MapClaims{
 				"sub": "denis@trusty.com",
 				"cnf": map[string]interface{}{
 					dpop.CnfThumbprint: "mismatch",
@@ -327,10 +327,10 @@ func setAuthorizationDPoPHeader(r *http.Request, dpop, token string) {
 }
 
 type mockJWT struct {
-	claims jwt.Claims
+	claims jwt.MapClaims
 	err    error
 }
 
-func (m mockJWT) ParseToken(authorization string, cfg *jwt.VerifyConfig) (jwt.Claims, error) {
+func (m mockJWT) ParseToken(authorization string, cfg jwt.VerifyConfig) (jwt.MapClaims, error) {
 	return m.claims, m.err
 }

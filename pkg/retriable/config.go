@@ -1,17 +1,29 @@
 package retriable
 
 import (
+	"crypto"
 	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/effective-security/porto/pkg/tlsconfig"
+	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/jwt/dpop"
+	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
+	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/yaml.v2"
+)
+
+const (
+	authTokenFileName = ".auth_token"
 )
 
 // Config of the client
 type Config struct {
-	Clients map[string]ClientConfig `json:"clients,omitempty" yaml:"clients,omitempty"`
+	Clients map[string]*ClientConfig `json:"clients,omitempty" yaml:"clients,omitempty"`
 }
 
 // ClientConfig of the client, per specific host
@@ -52,13 +64,25 @@ type TLSInfo struct {
 
 // Factory provides factory for retriable client for a specific host
 type Factory struct {
-	cfg Config
+	cfg     Config
+	perHost map[string]*ClientConfig
 }
 
 // NewFactory returns new Factory
 func NewFactory(cfg Config) (*Factory, error) {
+	perHost := map[string]*ClientConfig{}
+	for _, c := range cfg.Clients {
+		for _, host := range c.Hosts {
+			if perHost[host] != nil {
+				return nil, errors.Errorf("multiple entries for host: %s", host)
+			}
+			perHost[host] = c
+		}
+	}
+
 	return &Factory{
-		cfg: cfg,
+		cfg:     cfg,
+		perHost: perHost,
 	}, nil
 }
 
@@ -77,14 +101,26 @@ func LoadFactory(file string) (*Factory, error) {
 	return NewFactory(cfg)
 }
 
-// CreateClient return Client for a specified client name.
+// CreateClient returns Client for a specified client name.
 // If the name is not found in the configuration,
 // a client with default settings will be returned.
 func (f *Factory) CreateClient(clientName string) (*Client, error) {
 	if cfg, ok := f.cfg.Clients[clientName]; ok {
-		return Create(cfg)
+		return Create(*cfg)
 	}
 	return New(), nil
+}
+
+// ForHost returns Client for specified host name.
+// If the name is not found in the configuration,
+// a client with default settings will be returned.
+func (f *Factory) ForHost(hostname string) (*Client, error) {
+	if cfg, ok := f.perHost[hostname]; ok {
+		logger.KV(xlog.TRACE, "host", hostname, "cfg", cfg)
+		return Create(*cfg)
+	}
+	logger.KV(xlog.TRACE, "reason", "config_not_found", "host", hostname)
+	return New(WithHosts([]string{hostname})), nil
 }
 
 // LoadClient returns new Client
@@ -131,4 +167,85 @@ func Create(cfg ClientConfig) (*Client, error) {
 
 	client := New(opts...)
 	return client, nil
+}
+
+func loadAuthToken(dir string) (string, error) {
+	file := path.Join(dir, ".auth_token")
+	t, err := os.ReadFile(file)
+	if err != nil {
+		return "", errors.WithStack(err)
+	}
+	return string(t), nil
+}
+
+func (c *Client) storeFolder() string {
+	dir := c.StorageFolder
+	if dir == "" {
+		dirname, _ := os.UserHomeDir()
+		dir = path.Join(dirname, ".config", "httpclient")
+	}
+	dir, _ = homedir.Expand(dir)
+	return dir
+}
+
+// WithAuthorization sets Authorization token
+func (c *Client) WithAuthorization() error {
+	host := c.CurrentHost()
+	// Allow to use Bearer only over TLS connection
+	if !strings.HasPrefix(host, "https") &&
+		!strings.HasPrefix(host, "unixs") {
+		//return errors.Errorf("authorization header: tls required")
+		return nil
+	}
+	tk := os.Getenv(c.EnvAuthTokenName)
+	if tk == "" {
+		tk, _ = loadAuthToken(c.storeFolder())
+	}
+	if tk == "" {
+		return errors.Errorf("authorization: credentials not found")
+	}
+
+	ti := dpop.GetTokenInfo(tk)
+	if ti != nil && !ti.IsFresh {
+		return errors.Errorf("authorization: token expired")
+	}
+
+	// check for DPoP
+	if ti != nil && ti.CnfJkt != "" {
+		k, _, err := c.LoadKey(ti.CnfJkt)
+		if err != nil {
+			return errors.WithMessage(err, "unable to load key for DPoP")
+		}
+		c.AddHeader(header.Authorization, "DPoP "+tk)
+		c.signer, err = dpop.NewSigner(k.Key.(crypto.Signer))
+		if err != nil {
+			return errors.WithMessage(err, "unable to create signer")
+		}
+	} else {
+		c.AddHeader(header.Authorization, "Bearer "+tk)
+	}
+
+	return nil
+}
+
+// StoreAuthToken persists auth token
+func (c *Client) StoreAuthToken(token string) error {
+	folder := c.storeFolder()
+	os.MkdirAll(folder, 0755)
+	err := os.WriteFile(path.Join(folder, authTokenFileName), []byte(token), 0600)
+	if err != nil {
+		return errors.WithMessagef(err, "unable to store token")
+	}
+	return nil
+}
+
+// LoadKey returns *jose.JSONWebKey
+func (c *Client) LoadKey(label string) (*jose.JSONWebKey, string, error) {
+	path := path.Join(c.storeFolder(), label+".jwk")
+	return dpop.LoadKey(path)
+}
+
+// SaveKey saves the key to storage
+func (c *Client) SaveKey(k *jose.JSONWebKey) (string, error) {
+	return dpop.SaveKey(c.storeFolder(), k)
 }

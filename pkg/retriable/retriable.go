@@ -21,6 +21,8 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/jwt/dpop"
+	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
 
@@ -249,7 +251,7 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 // WithStorageFolder allows to specify storage folder
 func WithStorageFolder(path string) ClientOption {
 	return optionFunc(func(c *Client) {
-		c.StorageFolder = path
+		c.StorageFolder, _ = homedir.Expand(path)
 	})
 }
 
@@ -272,6 +274,7 @@ type Client struct {
 	hosts      []string
 	headers    map[string]string
 	beforeSend BeforeSendRequest
+	signer     dpop.Signer
 }
 
 // New creates a new Client
@@ -602,6 +605,14 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 	}
 	if req.Header.Get(header.XCorrelationID) == "" {
 		req.Header.Add(header.XCorrelationID, correlation.ID(ctx))
+	}
+
+	authHeader := req.Header.Get(header.Authorization)
+	if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
+		_, err = c.signer.ForRequest(req, nil)
+		if err != nil {
+			return nil, errors.WithMessage(err, "failed to sign DPoP")
+		}
 	}
 	return c.Do(req)
 }
