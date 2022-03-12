@@ -96,7 +96,7 @@ func TestWithAuthorization(t *testing.T) {
 	extra := jwt.MapClaims{}
 	dpop.SetCnfClaim(extra, dk.KeyID)
 
-	tk, _, err := js.SignToken("", "subj", []string{"test"}, time.Hour, extra)
+	tk, err := js.Sign(jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
 	require.NoError(t, err)
 
 	client, err := retriable.Create(retriable.ClientConfig{
