@@ -32,6 +32,7 @@ func ExampleServer() {
 
 	c := mockappcontainer.NewBuilder().
 		WithJwtParser(nil).
+		WithAccessToken(nil).
 		WithDiscovery(discovery.New()).
 		Container()
 
@@ -41,7 +42,7 @@ func ExampleServer() {
 	fmt.Println("starting server")
 	srv, err := gserver.Start("Empty", cfg, c, fact)
 	if err != nil {
-		panic("unable to start the server")
+		panic("unable to start the server: " + err.Error())
 	}
 
 	go func() {

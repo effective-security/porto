@@ -2,6 +2,7 @@ package mockappcontainer
 
 import (
 	"github.com/effective-security/porto/gserver"
+	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/xpki/jwt"
 	"go.uber.org/dig"
@@ -43,6 +44,14 @@ func (b *Builder) WithJwtSigner(j jwt.Signer) *Builder {
 // WithJwtParser sets JWT Parser
 func (b *Builder) WithJwtParser(j jwt.Parser) *Builder {
 	b.container.Provide(func() jwt.Parser {
+		return j
+	})
+	return b
+}
+
+// WithAccessToken sets Access Token provider
+func (b *Builder) WithAccessToken(j roles.AccessToken) *Builder {
+	b.container.Provide(func() roles.AccessToken {
 		return j
 	})
 	return b
