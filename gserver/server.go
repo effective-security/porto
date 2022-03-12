@@ -105,9 +105,11 @@ func Start(
 
 	err = container.Invoke(func(
 		d discovery.Discovery,
-		jwtParser jwt.Parser) error {
+		jwtParser jwt.Parser,
+		at roles.AccessToken,
+	) error {
 		e.disco = d
-		iden, err := roles.New(&cfg.IdentityMap, jwtParser)
+		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
 		if err != nil {
 			logger.Errorf("err=[%+v]", err)
 			return err
@@ -118,7 +120,7 @@ func Start(
 		return nil
 	})
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithMessagef(err, "unable to initialize identity provider")
 	}
 
 	if cfg.Authz != nil &&

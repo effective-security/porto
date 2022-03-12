@@ -48,6 +48,13 @@ type IdentityProvider interface {
 	IdentityFromContext(ctx context.Context) (identity.Identity, error)
 }
 
+// AccessToken provides interface for Access Token
+type AccessToken interface {
+	// Claims returns claims from the Access Token,
+	// or nil if `auth` is not Access Token
+	Claims(ctx context.Context, auth string) (jwt.MapClaims, error)
+}
+
 // Provider for identity
 type provider struct {
 	config    IdentityMap
@@ -55,16 +62,18 @@ type provider struct {
 	jwtRoles  map[string]string
 	tlsRoles  map[string]string
 	jwt       jwt.Parser
+	at        AccessToken
 }
 
 // New returns Authz provider instance
-func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
+func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider, error) {
 	prov := &provider{
 		config:    *config,
 		dpopRoles: make(map[string]string),
 		jwtRoles:  make(map[string]string),
 		tlsRoles:  make(map[string]string),
 		jwt:       jwt,
+		at:        at,
 	}
 
 	if config.DPoP.Enabled {
@@ -212,13 +221,23 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		return nil, errors.WithStack(err)
 	}
 
-	cfg := jwt.VerifyConfig{
-		ExpectedIssuer:   p.config.JWT.Issuer,
-		ExpectedAudience: []string{p.config.JWT.Audience},
+	var claims jwt.MapClaims
+
+	if p.at != nil {
+		claims, err = p.at.Claims(r.Context(), auth)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
-	claims, err := p.jwt.ParseToken(auth, cfg)
-	if err != nil {
-		return nil, errors.WithStack(err)
+	if claims == nil {
+		cfg := jwt.VerifyConfig{
+			ExpectedIssuer:   p.config.JWT.Issuer,
+			ExpectedAudience: []string{p.config.JWT.Audience},
+		}
+		claims, err = p.jwt.ParseToken(auth, cfg)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
 
 	tb, err := dpop.GetCnfClaim(claims)
@@ -240,13 +259,23 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 }
 
 func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
-	cfg := jwt.VerifyConfig{
-		ExpectedIssuer:   p.config.JWT.Issuer,
-		ExpectedAudience: []string{p.config.JWT.Audience},
+	var claims jwt.MapClaims
+	var err error
+	if p.at != nil {
+		claims, err = p.at.Claims(context.Background(), auth)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
-	claims, err := p.jwt.ParseToken(auth, cfg)
-	if err != nil {
-		return nil, errors.WithStack(err)
+	if claims == nil {
+		cfg := jwt.VerifyConfig{
+			ExpectedIssuer:   p.config.JWT.Issuer,
+			ExpectedAudience: []string{p.config.JWT.Audience},
+		}
+		claims, err = p.jwt.ParseToken(auth, cfg)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
 	subj := claims.String("email")
 	role := p.jwtRoles[subj]
