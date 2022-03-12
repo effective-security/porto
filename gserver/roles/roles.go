@@ -230,7 +230,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
-	subj := claims.String("sub")
+	subj := claims.String("email")
 	role := p.jwtRoles[subj]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
@@ -248,7 +248,7 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	subj := claims["sub"].(string)
+	subj := claims.String("email")
 	role := p.jwtRoles[subj]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
