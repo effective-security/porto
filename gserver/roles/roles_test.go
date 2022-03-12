@@ -38,7 +38,8 @@ func Test_All(t *testing.T) {
 
 	mock := mockJWT{
 		claims: jwt.MapClaims{
-			"sub": "denis@trusty.com",
+			"sub":   "12234",
+			"email": "denis@trusty.com",
 			"cnf": map[string]interface{}{
 				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 			},

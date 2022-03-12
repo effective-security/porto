@@ -43,7 +43,7 @@ func NewIdentity(role, subject string, claims map[string]interface{}) Identity {
 type identity struct {
 	// subject of identity
 	// It can be CommonName extracted from certificate,
-	// or "sub" claim in JWT
+	// or "email" claim in JWT
 	subject string
 	// role of identity
 	role string
@@ -51,7 +51,9 @@ type identity struct {
 	claims jwt.MapClaims
 }
 
-// Subject returns the clients subject
+// Subject returns the client's subject.
+// It can be CommonName extracted from certificate,
+// or "email" claim in JWT
 func (c identity) Subject() string {
 	return c.subject
 }
