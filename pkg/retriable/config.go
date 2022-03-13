@@ -206,10 +206,6 @@ func (c *Client) WithAuthorization() error {
 	}
 
 	ti := dpop.GetTokenInfo(tk)
-	if ti != nil && !ti.IsFresh {
-		return errors.Errorf("authorization: token expired")
-	}
-
 	// check for DPoP
 	if ti != nil && ti.CnfJkt != "" {
 		k, _, err := c.LoadKey(ti.CnfJkt)
