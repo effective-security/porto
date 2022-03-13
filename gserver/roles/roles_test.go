@@ -72,7 +72,7 @@ func Test_All(t *testing.T) {
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "dpop_authenticated",
 			Roles: map[string][]string{
-				"trusty-admin": {"denis@trusty.ca"},
+				"trusty-admin": {"denis@trusty.com"},
 			},
 		},
 	}, mock, at)
@@ -110,7 +110,7 @@ func Test_All(t *testing.T) {
 		}
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
-		assert.Equal(t, "dpop_authenticated", id.Role())
+		assert.Equal(t, "trusty-admin", id.Role())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
