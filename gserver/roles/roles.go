@@ -254,7 +254,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	}
 
 	subj := claims.String("email")
-	role := p.jwtRoles[subj]
+	role := p.dpopRoles[subj]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
