@@ -37,25 +37,20 @@ func Test_Empty(t *testing.T) {
 func Test_All(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 
-	mock := mockJWT{
-		claims: jwt.MapClaims{
-			"sub":   "12234",
-			"email": "denis@trusty.com",
-			"cnf": map[string]interface{}{
-				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
-			},
+	claims := jwt.MapClaims{
+		"sub":   "12234",
+		"email": "denis@trusty.com",
+		"cnf": map[string]interface{}{
+			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
-		err: nil,
+	}
+	mock := mockJWT{
+		claims: claims,
+		err:    nil,
 	}
 	at := mockAccessToken{
-		claims: jwt.MapClaims{
-			"sub":   "12234",
-			"email": "denis@trusty.com",
-			"cnf": map[string]interface{}{
-				dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
-			},
-		},
-		err: nil,
+		claims: claims,
+		err:    nil,
 	}
 
 	p, err := roles.New(&roles.IdentityMap{
@@ -96,7 +91,7 @@ func Test_All(t *testing.T) {
 
 	t.Run("AT default role http", func(t *testing.T) {
 		r, _ := http.NewRequest(http.MethodGet, "/", nil)
-		setAuthorizationHeader(r, "at.AccessToken123")
+		setAuthorizationHeader(r, "pat.AccessToken123")
 		assert.True(t, p.ApplicableForRequest(r))
 
 		id, err := p.IdentityFromRequest(r)
@@ -154,6 +149,169 @@ func Test_All(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+	})
+}
+
+func TestInvalidIssuer(t *testing.T) {
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+
+	claims := jwt.MapClaims{
+		"sub":   "12234",
+		"iss":   "issuer",
+		"email": "denis@trusty.com",
+		"cnf": map[string]interface{}{
+			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
+		},
+	}
+	mock := mockJWT{
+		claims: claims,
+		err:    nil,
+	}
+	at := mockAccessToken{
+		claims: claims,
+		err:    nil,
+	}
+
+	p, err := roles.New(&roles.IdentityMap{
+		JWT: roles.JWTIdentityMap{
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "jwt_authenticated",
+			Issuer:                   "expected_issuer",
+			Roles: map[string][]string{
+				"trusty-client": {"denis@trusty.ca"},
+			},
+		},
+		DPoP: roles.JWTIdentityMap{
+			Enabled:                  true,
+			Issuer:                   "expected_issuer",
+			DefaultAuthenticatedRole: "dpop_authenticated",
+			Roles: map[string][]string{
+				"trusty-admin": {"denis@trusty.ca"},
+			},
+		},
+	}, mock, at)
+	require.NoError(t, err)
+
+	t.Run("default role http", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		setAuthorizationHeader(r, "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+	})
+
+	t.Run("AT default role http", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		setAuthorizationHeader(r, "pat.AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+	})
+
+	t.Run("default role dpop", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+	})
+
+	t.Run("default role grpc", func(t *testing.T) {
+		ctx := context.Background()
+		assert.False(t, p.ApplicableForContext(ctx))
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
+
+		_, err := p.IdentityFromContext(ctx)
+		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+	})
+}
+
+func TestInvalidAudience(t *testing.T) {
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+
+	claims := jwt.MapClaims{
+		"sub":   "12234",
+		"iss":   "expected_issuer",
+		"aud":   []string{"aud"},
+		"email": "denis@trusty.com",
+		"cnf": map[string]interface{}{
+			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
+		},
+	}
+	mock := mockJWT{
+		claims: claims,
+		err:    nil,
+	}
+	at := mockAccessToken{
+		claims: claims,
+		err:    nil,
+	}
+
+	p, err := roles.New(&roles.IdentityMap{
+		JWT: roles.JWTIdentityMap{
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "jwt_authenticated",
+			Issuer:                   "expected_issuer",
+			Audience:                 "expected_aud",
+			Roles: map[string][]string{
+				"trusty-client": {"denis@trusty.ca"},
+			},
+		},
+		DPoP: roles.JWTIdentityMap{
+			Enabled:                  true,
+			Issuer:                   "expected_issuer",
+			Audience:                 "expected_aud",
+			DefaultAuthenticatedRole: "dpop_authenticated",
+			Roles: map[string][]string{
+				"trusty-admin": {"denis@trusty.ca"},
+			},
+		},
+	}, mock, at)
+	require.NoError(t, err)
+
+	t.Run("default role http", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		setAuthorizationHeader(r, "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "token missing audience: expected_aud")
+	})
+
+	t.Run("AT default role http", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		setAuthorizationHeader(r, "pat.AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "token missing audience: expected_aud")
+	})
+
+	t.Run("default role dpop", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		_, err := p.IdentityFromRequest(r)
+		assert.EqualError(t, err, "token missing audience: expected_aud")
+	})
+
+	t.Run("default role grpc", func(t *testing.T) {
+		ctx := context.Background()
+		assert.False(t, p.ApplicableForContext(ctx))
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
+
+		_, err := p.IdentityFromContext(ctx)
+		assert.EqualError(t, err, "token missing audience: expected_aud")
 	})
 }
 
@@ -355,7 +513,11 @@ type mockJWT struct {
 }
 
 func (m mockJWT) ParseToken(authorization string, cfg jwt.VerifyConfig) (jwt.MapClaims, error) {
-	return m.claims, m.err
+	err := m.claims.Valid(cfg)
+	if m.err != nil {
+		err = m.err
+	}
+	return m.claims, err
 }
 
 type mockAccessToken struct {
@@ -364,7 +526,7 @@ type mockAccessToken struct {
 }
 
 func (m mockAccessToken) Claims(ctx context.Context, auth string) (jwt.MapClaims, error) {
-	if !strings.HasPrefix(auth, "at.") {
+	if !strings.HasPrefix(auth, "pat.") {
 		return nil, nil
 	}
 	return m.claims, m.err
