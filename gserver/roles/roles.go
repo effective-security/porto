@@ -222,22 +222,26 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	}
 
 	var claims jwt.MapClaims
-
+	cfg := jwt.VerifyConfig{
+		ExpectedIssuer: p.config.DPoP.Issuer,
+	}
+	if p.config.DPoP.Audience != "" {
+		cfg.ExpectedAudience = []string{p.config.DPoP.Audience}
+	}
 	if p.at != nil {
 		claims, err = p.at.Claims(r.Context(), auth)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
+		if claims != nil {
+			err = claims.Valid(cfg)
+		}
 	}
 	if claims == nil {
-		cfg := jwt.VerifyConfig{
-			ExpectedIssuer:   p.config.JWT.Issuer,
-			ExpectedAudience: []string{p.config.JWT.Audience},
-		}
 		claims, err = p.jwt.ParseToken(auth, cfg)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
+	}
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
 	tb, err := dpop.GetCnfClaim(claims)
@@ -261,22 +265,29 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
+
+	cfg := jwt.VerifyConfig{
+		ExpectedIssuer: p.config.JWT.Issuer,
+	}
+	if p.config.JWT.Audience != "" {
+		cfg.ExpectedAudience = []string{p.config.JWT.Audience}
+	}
 	if p.at != nil {
 		claims, err = p.at.Claims(context.Background(), auth)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
+		if claims != nil {
+			err = claims.Valid(cfg)
+		}
 	}
 	if claims == nil {
-		cfg := jwt.VerifyConfig{
-			ExpectedIssuer:   p.config.JWT.Issuer,
-			ExpectedAudience: []string{p.config.JWT.Audience},
-		}
 		claims, err = p.jwt.ParseToken(auth, cfg)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
 	}
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
 	subj := claims.String("email")
 	role := p.jwtRoles[subj]
 	if role == "" {
