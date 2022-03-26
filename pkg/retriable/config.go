@@ -2,12 +2,15 @@ package retriable
 
 import (
 	"crypto"
+	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/effective-security/porto/pkg/tlsconfig"
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
@@ -197,34 +200,57 @@ func (c *Client) WithAuthorization() error {
 		//return errors.Errorf("authorization header: tls required")
 		return nil
 	}
-	tk := os.Getenv(c.EnvAuthTokenName)
-	if tk == "" {
-		tk, _ = loadAuthToken(c.storeFolder())
+
+	var (
+		accessToken string
+		jkt         string
+	)
+	tokenType := "Bearer"
+
+	accessToken = os.Getenv(c.EnvAuthTokenName)
+	if accessToken == "" {
+		accessToken, _ = loadAuthToken(c.storeFolder())
 	}
-	if tk == "" {
+	if accessToken == "" {
 		return errors.Errorf("authorization: credentials not found")
 	}
 
-	ti := dpop.GetTokenInfo(tk)
-	// check for DPoP
-	if ti != nil && ti.CnfJkt != "" {
-		k, _, err := c.LoadKey(ti.CnfJkt)
+	if strings.Contains(accessToken, "=") {
+		vals, err := url.ParseQuery(accessToken)
+		if err != nil {
+			return errors.WithMessagef(err, "failed to parse token values")
+		}
+		accessToken = slices.StringsCoalesce(getValue(vals, "access_token"), getValue(vals, "id_token"), getValue(vals, "token"))
+		jkt = getValue(vals, "dpop_jkt")
+		exp := getValue(vals, "exp")
+		if exp != "" {
+			ux, err := strconv.ParseInt(exp, 10, 64)
+			if err == nil && time.Now().After(time.Unix(ux, 0)) {
+				return errors.Errorf("authorization: token expired")
+			}
+		}
+	}
+
+	if jkt != "" {
+		k, _, err := c.LoadKey(jkt)
 		if err != nil {
 			return errors.WithMessage(err, "unable to load key for DPoP")
 		}
-		c.AddHeader(header.Authorization, "DPoP "+tk)
+		tokenType = "DPoP"
 		c.signer, err = dpop.NewSigner(k.Key.(crypto.Signer))
 		if err != nil {
 			return errors.WithMessage(err, "unable to create signer")
 		}
-	} else {
-		c.AddHeader(header.Authorization, "Bearer "+tk)
 	}
+
+	c.AddHeader(header.Authorization, tokenType+" "+accessToken)
 
 	return nil
 }
 
 // StoreAuthToken persists auth token
+// the token format can be as opaque string, or as form encoded
+// access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
 func (c *Client) StoreAuthToken(token string) error {
 	folder := c.storeFolder()
 	os.MkdirAll(folder, 0755)
@@ -244,4 +270,13 @@ func (c *Client) LoadKey(label string) (*jose.JSONWebKey, string, error) {
 // SaveKey saves the key to storage
 func (c *Client) SaveKey(k *jose.JSONWebKey) (string, error) {
 	return dpop.SaveKey(c.storeFolder(), k)
+}
+
+// getValue returns a Query parameter
+func getValue(vals url.Values, name string) string {
+	v, ok := vals[name]
+	if !ok || len(v) == 0 {
+		return ""
+	}
+	return v[0]
 }

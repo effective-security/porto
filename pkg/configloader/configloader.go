@@ -280,7 +280,7 @@ func substituteEnvVars(obj interface{}, variables map[string]string) {
 }
 
 func doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
-	for v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 	if !v.IsValid() {

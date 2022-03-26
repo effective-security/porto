@@ -225,8 +225,8 @@ func Test_TaskAtIntervalsMinute(t *testing.T) {
 }
 
 func Test_TaskOnWeekday(t *testing.T) {
-	job1 := NewTaskOnWeekday(time.Monday, 23, 59).Do("test", testTask)
-	job2 := NewTaskOnWeekday(time.Wednesday, 23, 59).Do("test", testTask)
+	job1 := NewTaskOnWeekday(time.Monday, 13, 59).Do("test", testTask)
+	job2 := NewTaskOnWeekday(time.Wednesday, 13, 59).Do("test", testTask)
 
 	nextTime1 := job1.NextScheduledTime()
 	nextTime2 := job2.NextScheduledTime()
