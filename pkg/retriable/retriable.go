@@ -371,7 +371,11 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 
 	if c.httpClient.Transport == nil {
 		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.MaxIdleConnsPerHost = 100
+		tr.MaxConnsPerHost = 100
+		tr.MaxIdleConns = 100
 		tr.TLSClientConfig = tlsConfig
+
 		c.httpClient.Transport = tr
 
 		logger.Infof("reason=new_transport")
@@ -406,6 +410,10 @@ func (c *Client) WithDNSServer(dns string) *Client {
 
 	if c.httpClient.Transport == nil {
 		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.MaxIdleConnsPerHost = 100
+		tr.MaxConnsPerHost = 100
+		tr.MaxIdleConns = 100
+
 		c.httpClient.Transport = tr
 	} else {
 		logger.Trace("reason=update_transport")
