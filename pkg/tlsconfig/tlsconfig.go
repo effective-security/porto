@@ -118,7 +118,10 @@ func NewHTTPTransportWithReloader(
 
 	transport := HTTPUserTransport
 	if transport == nil {
-		transport = http.DefaultTransport.(*http.Transport)
+		transport = http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConnsPerHost = 100
+		transport.MaxConnsPerHost = 100
+		transport.MaxIdleConns = 100
 	}
 
 	tlsCfg, err := NewClientTLSFromFiles(certFile, keyFile, rootsFile)
@@ -169,7 +172,7 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 	resp, err := t.transport.RoundTrip(r)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	return resp, nil
