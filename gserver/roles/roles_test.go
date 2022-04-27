@@ -62,6 +62,7 @@ func Test_All(t *testing.T) {
 			},
 		},
 		JWT: roles.JWTIdentityMap{
+			SubjectClaim:             "email",
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "jwt_authenticated",
 			Roles: map[string][]string{
@@ -72,7 +73,7 @@ func Test_All(t *testing.T) {
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "dpop_authenticated",
 			Roles: map[string][]string{
-				"trusty-admin": {"denis@trusty.com"},
+				"trusty-admin": {"denis@trusty.com", "12234"},
 			},
 		},
 	}, mock, at)
@@ -111,7 +112,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-admin", id.Role())
-		assert.Equal(t, "denis@trusty.com", id.Subject())
+		assert.Equal(t, "12234", id.Subject())
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
