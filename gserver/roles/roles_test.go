@@ -63,6 +63,7 @@ func Test_All(t *testing.T) {
 		},
 		JWT: roles.JWTIdentityMap{
 			SubjectClaim:             "email",
+			RoleClaim:                "email",
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "jwt_authenticated",
 			Roles: map[string][]string{
@@ -72,8 +73,9 @@ func Test_All(t *testing.T) {
 		DPoP: roles.JWTIdentityMap{
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "dpop_authenticated",
+			RoleClaim:                "sub",
 			Roles: map[string][]string{
-				"trusty-admin": {"denis@trusty.com", "12234"},
+				"trusty-admin": {"12234"},
 			},
 		},
 	}, mock, at)

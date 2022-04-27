@@ -36,6 +36,9 @@ const (
 
 	// DefaultSubjectClaim defines default JWT Subject claim
 	DefaultSubjectClaim = "sub"
+
+	// DefaultRoleClaim defines default Role claim
+	DefaultRoleClaim = "email"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -81,6 +84,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 
 	if config.DPoP.Enabled {
 		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
+		prov.config.DPoP.RoleClaim = slices.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
 
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
@@ -90,6 +94,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	}
 	if config.JWT.Enabled {
 		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
+		prov.config.JWT.RoleClaim = slices.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
 
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -261,7 +266,8 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	}
 
 	subj := claims.String(p.config.DPoP.SubjectClaim)
-	role := p.dpopRoles[subj]
+	roleClaim := claims.String(p.config.DPoP.RoleClaim)
+	role := p.dpopRoles[roleClaim]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
@@ -296,7 +302,8 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	}
 
 	subj := claims.String(p.config.JWT.SubjectClaim)
-	role := p.jwtRoles[subj]
+	roleClaim := claims.String(p.config.JWT.RoleClaim)
+	role := p.jwtRoles[roleClaim]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}

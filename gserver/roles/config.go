@@ -33,6 +33,9 @@ type JWTIdentityMap struct {
 	// SubjectClaim specifies claim name to be used as Subject,
 	// by default it's `sub`, but can be changed to `email` etc
 	SubjectClaim string `json:"subject_claim" yaml:"subject_claim"`
+	// RoleClaim specifies claim name to be used for role mapping,
+	// by default it's `email`, but can be changed to `sub` etc
+	RoleClaim string `json:"role_claim" yaml:"role_claim"`
 	// Roles is a map of role to JWT identity
 	Roles map[string][]string `json:"roles" yaml:"roles"`
 }
