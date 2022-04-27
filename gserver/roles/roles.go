@@ -33,6 +33,9 @@ const (
 
 	// DPoPUserRoleName defines a generic role name for an authenticated user
 	DPoPUserRoleName = "dpop_authenticated"
+
+	// DefaultSubjectClaim defines default JWT Subject claim
+	DefaultSubjectClaim = "sub"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -77,6 +80,8 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	}
 
 	if config.DPoP.Enabled {
+		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
+
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
 				prov.dpopRoles[user] = role
@@ -84,6 +89,8 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 		}
 	}
 	if config.JWT.Enabled {
+		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
+
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
 				prov.jwtRoles[user] = role
@@ -253,7 +260,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
-	subj := claims.String("email")
+	subj := claims.String(p.config.DPoP.SubjectClaim)
 	role := p.dpopRoles[subj]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
@@ -288,7 +295,7 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	subj := claims.String("email")
+	subj := claims.String(p.config.JWT.SubjectClaim)
 	role := p.jwtRoles[subj]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
