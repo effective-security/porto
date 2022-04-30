@@ -35,8 +35,7 @@ func (c *Client) Head(ctx context.Context, path string) (http.Header, int, error
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
 func (c *Client) Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "POST", c.hosts, path, requestBody, responseBody)
-	return hdr, sc, err
+	return c.Request(ctx, "POST", c.hosts, path, requestBody, responseBody)
 }
 
 // Put makes an HTTP PUT to the supplied path.
@@ -46,8 +45,7 @@ func (c *Client) Post(ctx context.Context, path string, requestBody interface{},
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
 func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "PUT", c.hosts, path, requestBody, responseBody)
-	return hdr, sc, err
+	return c.Request(ctx, "PUT", c.hosts, path, requestBody, responseBody)
 }
 
 // PostTo is the same as Post, but to the specified host. [the supplied hosts are
@@ -55,8 +53,7 @@ func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, 
 // each host should include all the protocol/host/port preamble, e.g. http://foo.bar:3444
 // path should be an absolute URI path, i.e. /foo/bar/baz
 func (c *Client) PostTo(ctx context.Context, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "POST", hosts, path, requestBody, responseBody)
-	return hdr, sc, err
+	return c.Request(ctx, "POST", hosts, path, requestBody, responseBody)
 }
 
 // Get fetches the supplied resource using the current selected cluster member
@@ -67,8 +64,7 @@ func (c *Client) PostTo(ctx context.Context, hosts []string, path string, reques
 // If configured, this call will wait & retry on rate limit and leader election errors
 // path should be an absolute URI path, i.e. /foo/bar/baz
 func (c *Client) Get(ctx context.Context, path string, body interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "GET", c.hosts, path, nil, body)
-	return hdr, sc, err
+	return c.Request(ctx, "GET", c.hosts, path, nil, body)
 }
 
 // Delete removes the supplied resource using the current selected cluster member
@@ -79,6 +75,5 @@ func (c *Client) Get(ctx context.Context, path string, body interface{}) (http.H
 // If configured, this call will wait & retry on rate limit and leader election errors
 // path should be an absolute URI path, i.e. /foo/bar/baz
 func (c *Client) Delete(ctx context.Context, path string, body interface{}) (http.Header, int, error) {
-	hdr, sc, err := c.Request(ctx, "DELETE", c.hosts, path, nil, body)
-	return hdr, sc, err
+	return c.Request(ctx, "DELETE", c.hosts, path, nil, body)
 }

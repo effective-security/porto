@@ -268,6 +268,7 @@ type Client struct {
 	Policy           Policy // Rery policy for http requests
 	StorageFolder    string
 	EnvAuthTokenName string
+	NonceProvider    NonceProvider
 
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
@@ -502,6 +503,10 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 		return nil, 0, errors.WithStack(err)
 	}
 	defer resp.Body.Close()
+
+	if c.NonceProvider != nil {
+		c.NonceProvider.SetFromHeader(resp.Header)
+	}
 
 	return c.DecodeResponse(resp, responseBody)
 }

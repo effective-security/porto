@@ -24,6 +24,7 @@ import (
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/certutil"
 	"github.com/effective-security/xpki/testca"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -806,6 +807,7 @@ func makeTestHandler(t *testing.T, expURI string, status int, responseBody strin
 		w.Header().Add("X-Global", r.Header.Get("X-Global"))
 		w.Header().Add("X-Request-URL", r.URL.String())
 		w.Header().Add("X-Request-Method", r.Method)
+		w.Header().Add(retriable.DefaultReplayNonceHeader, certutil.RandomString(8))
 		w.WriteHeader(status)
 		io.WriteString(w, responseBody)
 	}
