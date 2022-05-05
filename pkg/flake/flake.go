@@ -110,7 +110,7 @@ func NewIDGenerator(st Settings) IDGenerator {
 		logger.Panicf("CheckMachineID ID failed: %d", sf.machineID)
 	}
 
-	logger.Noticef("start=%s, machineID=%d", now.Format(time.RFC3339), sf.machineID)
+	//logger.Noticef("start=%s, machineID=%d", now.Format(time.RFC3339), sf.machineID)
 
 	return sf
 }
@@ -183,7 +183,7 @@ func defaultMachineID() (uint16, error) {
 		ip := ipnet.IP.To16()
 		last := len(ip)
 		id := (uint16(ip[last-2])<<8 + uint16(ip[last-1])) & uint16(MaskMachineID)
-		logger.Noticef("machine_id=%d, ip=%v, ip_len=%d", id, ip.String(), last)
+		//logger.Noticef("machine_id=%d, ip=%v, ip_len=%d", id, ip.String(), last)
 		return id, nil
 	}
 	logger.Errorf("reason=no_private_ip")
