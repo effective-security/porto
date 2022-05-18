@@ -2,23 +2,22 @@ package testutils
 
 import (
 	"fmt"
-	"math/rand"
-	"os"
-	"sync/atomic"
-)
 
-var (
-	nextPort = int32(os.Getpid()%10000) + int32(17891) + rand.Int31n(1000)
+	"github.com/effective-security/porto/x/netutil"
 )
 
 // CreateURL returns URL with a random port
 func CreateURL(scheme, host string) string {
-	next := atomic.AddInt32(&nextPort, 1)
-	return fmt.Sprintf("%s://%s:%d", scheme, host, next)
+	bind := CreateBindAddr(host)
+
+	return fmt.Sprintf("%s://%s", scheme, bind)
 }
 
 // CreateBindAddr returns a bind address with a random port
 func CreateBindAddr(host string) string {
-	next := atomic.AddInt32(&nextPort, 1)
-	return fmt.Sprintf("%s:%d", host, next)
+	port, err := netutil.FindFreePort(host, 5)
+	if err != nil {
+		panic("unable to find free port: " + err.Error())
+	}
+	return fmt.Sprintf("%s:%d", host, port)
 }
