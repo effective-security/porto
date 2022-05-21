@@ -49,7 +49,7 @@ func Test_grpcFromContext(t *testing.T) {
 		octx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(header.XCorrelationID, "1234567890"))
 		unary(octx, nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
 			cid1 = ID(ctx)
-			assert.Contains(t, cid1, "_12345678")
+			assert.Contains(t, cid1, "1234567890")
 			rctx = ctx
 			return nil, nil
 		})
@@ -69,7 +69,7 @@ func TestCorrelationIDHandler(t *testing.T) {
 
 		handler.ServeHTTP(rw, r)
 		cid := rw.Header().Get(header.XCorrelationID)
-		assert.Len(t, cid, 8)
+		assert.Len(t, cid, IDSize)
 	})
 
 	t.Run("show_from_client", func(t *testing.T) {
@@ -91,6 +91,6 @@ func TestCorrelationIDHandler(t *testing.T) {
 
 		handler.ServeHTTP(rw, r)
 		cid := rw.Header().Get(header.XCorrelationID)
-		assert.Equal(t, "1234jseh", cid)
+		assert.Equal(t, "1234jsehdrlc", cid)
 	})
 }
