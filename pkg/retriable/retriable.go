@@ -138,6 +138,8 @@ type Policy struct {
 	TotalRetryLimit int
 
 	RequestTimeout time.Duration
+
+	NonRetriableErrors []string
 }
 
 // A ClientOption modifies the default behavior of Client.
@@ -379,10 +381,10 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 
 		c.httpClient.Transport = tr
 
-		logger.Infof("reason=new_transport")
+		logger.Debugf("reason=new_transport")
 	} else {
 		c.httpClient.Transport.(*http.Transport).TLSClientConfig = tlsConfig
-		logger.Infof("reason=update_transport")
+		logger.Debugf("reason=update_transport")
 	}
 	return c
 }
@@ -417,7 +419,7 @@ func (c *Client) WithDNSServer(dns string) *Client {
 
 		c.httpClient.Transport = tr
 	} else {
-		logger.Trace("reason=update_transport")
+		logger.Debug("reason=update_transport")
 	}
 	c.httpClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		d := net.Dialer{}
@@ -438,15 +440,16 @@ func DefaultPolicy() Policy {
 	return Policy{
 		Retries: map[int]ShouldRetry{
 			// 0 is connection related
-			0: shouldRetryFactory(3, time.Second*2, "connection"),
+			0: DefaultShouldRetryFactory(3, time.Second*2, "connection"),
 			// TooManyRequests (429) is returned when rate limit is exceeded
-			http.StatusTooManyRequests: shouldRetryFactory(2, time.Second, "rate-limit"),
+			http.StatusTooManyRequests: DefaultShouldRetryFactory(2, time.Second, "rate-limit"),
 			// Unavailble (503) is returned when is not ready yet
-			http.StatusServiceUnavailable: shouldRetryFactory(5, time.Second, "unavailable"),
+			http.StatusServiceUnavailable: DefaultShouldRetryFactory(5, time.Second, "unavailable"),
 			// Bad Gateway (502)
-			http.StatusBadGateway: shouldRetryFactory(5, time.Second, "gateway"),
+			http.StatusBadGateway: DefaultShouldRetryFactory(5, time.Second, "gateway"),
 		},
-		TotalRetryLimit: 5,
+		TotalRetryLimit:    5,
+		NonRetriableErrors: DefaultNonRetriableErrors,
 	}
 }
 
@@ -542,11 +545,11 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.Errorf("httpMethod=%q, host=%q, path=%q, ctx=%s, err=[%+v]",
-				httpMethod, host, path, cid, err)
+			logger.Errorf("client=%s, httpMethod=%q, host=%q, path=%q, ctx=%q, err=[%+v]",
+				c.Name, httpMethod, host, path, cid, err)
 		} else {
-			logger.Infof("httpMethod=%q, host=%q, path=%q, status=%v, ctx=%s",
-				httpMethod, host, path, resp.StatusCode, cid)
+			logger.Infof("client=%s, httpMethod=%q, host=%q, path=%q, status=%v, ctx=%q",
+				c.Name, httpMethod, host, path, resp.StatusCode, cid)
 		}
 
 		if !c.shouldTryDifferentHost(resp, err) {
@@ -568,7 +571,7 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 			}
 		}
 
-		logger.Errorf("err=[%v]", many.Error())
+		logger.Errorf("client=%s, host=%s, err=[%v]", c.Name, host, many.Error())
 
 		// rewind the reader
 		if body != nil {
@@ -640,6 +643,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	cid := correlation.ID(req.Context())
 
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
@@ -655,8 +659,13 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			}
 		}
 
+		started := time.Now()
 		resp, err = c.httpClient.Do(req.Request)
-
+		elapsed := time.Since(started)
+		if err != nil {
+			logger.Errorf("client=%s, ctx=%q, retries=%d, host=%s, elapsed=%s, err=[%v]",
+				c.Name, cid, retries, req.Host, elapsed.String(), err.Error())
+		}
 		// Check if we should continue with retries.
 		shouldRetry, sleepDuration, reason := c.Policy.ShouldRetry(req.Request, resp, err, retries)
 		if !shouldRetry {
@@ -672,8 +681,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			c.consumeResponseBody(resp)
 		}
 
-		logger.Warningf("name=%s, retries=%d, description=%q, reason=%q, sleep=%v",
-			c.Name, retries, desc, reason, sleepDuration.String())
+		logger.Warningf("client=%s, ctx=%q, retries=%d, description=%q, reason=%q, sleep=[%v]",
+			c.Name, cid, retries, desc, reason, sleepDuration.Seconds())
 		time.Sleep(sleepDuration)
 	}
 
@@ -769,13 +778,16 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 	return resp.Header, resp.StatusCode, nil
 }
 
-func shouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry {
+// DefaultShouldRetryFactory returns default ShouldRetry
+func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry {
 	return func(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
 		return (limit >= retries), wait, reason
 	}
 }
 
-var nonRetriableErrors = []string{
+// DefaultNonRetriableErrors provides a list of default errors,
+// that cleint will not retry on
+var DefaultNonRetriableErrors = []string{
 	"no such host",
 	"TLS handshake error",
 	"certificate signed by unknown authority",
@@ -790,10 +802,11 @@ var nonRetriableErrors = []string{
 
 // ShouldRetry returns if connection should be retried
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
+	cid := correlation.ID(r.Context())
 	if err != nil {
 		errStr := err.Error()
-		logger.Errorf("host=%q, path=%q, retries=%d, error_type=%T, err=[%s]",
-			r.URL.Host, r.URL.Path, retries, err, errStr)
+		logger.Errorf("host=%q, path=%q, ctx=%q, retries=%d, error_type=%T, err=[%s]",
+			r.URL.Host, r.URL.Path, cid, retries, err, errStr)
 
 		select {
 		case <-r.Context().Done():
@@ -819,7 +832,7 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 				}
 			}
 		*/
-		if slices.StringContainsOneOf(errStr, nonRetriableErrors) {
+		if slices.StringContainsOneOf(errStr, p.NonRetriableErrors) {
 			return false, 0, NonRetriableError
 		}
 
@@ -835,12 +848,18 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		return false, 0, Success
 	}
 
+	logger.Errorf("host=%q, path=%q, ctx=%q, retries=%d, status=%d",
+		r.URL.Host, r.URL.Path, cid, retries, resp.StatusCode)
+
 	if resp.StatusCode == 404 {
 		return false, 0, NotFound
 	}
 
-	if resp.StatusCode != http.StatusTooManyRequests &&
-		resp.StatusCode < 500 {
+	if resp.StatusCode == 429 {
+		return false, 0, LimitExceeded
+	}
+
+	if resp.StatusCode < 500 {
 		return false, 0, NonRetriableError
 	}
 

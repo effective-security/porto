@@ -22,6 +22,9 @@ const (
 	keyCorrelation
 )
 
+// IDSize specifies a size in characters for the correlation ID
+const IDSize = 12
+
 // RequestContext represents user contextual information about a request being processed by the server,
 // it includes CorrelationID [for cross system request correlation].
 type RequestContext struct {
@@ -37,7 +40,7 @@ func NewHandler(delegate http.Handler) http.Handler {
 		v := ctx.Value(keyContext)
 		if v == nil {
 			rctx = &RequestContext{
-				correlationID: extractCorrelationID(r),
+				correlationID: correlationID(r),
 			}
 			r = r.WithContext(context.WithValue(ctx, keyContext, rctx))
 		} else {
@@ -58,7 +61,7 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 		v := ctx.Value(keyContext)
 		if v == nil {
 			rctx = &RequestContext{
-				correlationID: extractCorrelationIDFromGRPC(ctx),
+				correlationID: correlationIDFromGRPC(ctx),
 			}
 			ctx = context.WithValue(ctx, keyContext, rctx)
 		}
@@ -67,51 +70,62 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-// extractCorrelationIDFromGRPC will find or create a requestID for this request.
-func extractCorrelationIDFromGRPC(ctx context.Context) string {
-	corID := certutil.RandomString(8)
-	incomingID := ""
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
-		xid := md["x-correlation-id"]
-		if len(xid) == 0 {
-			xid = md[header.XCorrelationID]
+// correlationIDFromGRPC will find or create a requestID for this request.
+func correlationIDFromGRPC(ctx context.Context) string {
+	corID := ID(ctx)
+	if corID == "" {
+		incomingID := ""
+		md, ok := metadata.FromIncomingContext(ctx)
+		if ok {
+			xid := md["x-correlation-id"]
+			if len(xid) == 0 {
+				xid = md["x-request-id"]
+			}
+			if len(xid) == 0 {
+				xid = md[header.XCorrelationID]
+			}
+			if len(xid) > 0 {
+				incomingID = xid[0]
+			}
 		}
-		if len(xid) > 0 {
-			incomingID = xid[0]
+		if incomingID != "" {
+			corID = slices.StringUpto(incomingID, IDSize)
+		} else {
+			corID = certutil.RandomString(IDSize)
 		}
+		logger.KV(xlog.TRACE, "ctx", corID, "incoming_ctx", incomingID)
 	}
-	if incomingID != "" {
-		corID += "_" + slices.StringUpto(incomingID, 8)
-	}
-	logger.KV(xlog.TRACE, "ctx", corID, "incoming_ctx", incomingID)
-
 	return corID
 }
 
-// extractCorrelationID will find or create a requestID for this http request.
-func extractCorrelationID(req *http.Request) string {
+// correlationID will find or create a requestID for this http request.
+func correlationID(req *http.Request) string {
 	// 8 chars will have enough entropy
 	// to correlate requests,
 	// without the large footprint in the logs
-	corID := ""
-	incomingID := req.Header.Get(header.XCorrelationID)
-	if incomingID == "" {
-		incomingID = req.Header.Get("X-Request-ID")
-	}
+	corID := ID(req.Context())
+	if corID == "" {
+		incomingID := req.Header.Get(header.XCorrelationID)
+		if incomingID == "" {
+			incomingID = req.Header.Get("X-Request-ID")
+		}
 
-	if incomingID != "" {
-		corID = slices.StringUpto(incomingID, 8)
-	} else {
-		corID = certutil.RandomString(8)
-	}
+		if incomingID != "" {
+			corID = slices.StringUpto(incomingID, IDSize)
+		} else {
+			corID = certutil.RandomString(IDSize)
+		}
 
-	l := xlog.DEBUG
-	if strings.Contains(req.Header.Get(header.Accept), "json") {
-		l = xlog.TRACE
+		path := ""
+		if req.URL != nil {
+			path = req.URL.Path
+		}
+		l := xlog.DEBUG
+		if strings.Contains(req.Header.Get(header.Accept), "json") {
+			l = xlog.TRACE
+		}
+		logger.KV(l, "ctx", corID, "incoming_ctx", incomingID, "path", path)
 	}
-	logger.KV(l, "ctx", corID, "incoming_ctx", incomingID, "path", req.URL.Path)
-
 	return corID
 }
 
@@ -131,7 +145,7 @@ func WithID(ctx context.Context) context.Context {
 	v := ctx.Value(keyContext)
 	if v == nil {
 		rctx := &RequestContext{
-			correlationID: certutil.RandomString(8),
+			correlationID: certutil.RandomString(IDSize),
 		}
 		ctx = context.WithValue(ctx, keyContext, rctx)
 	}
@@ -140,10 +154,23 @@ func WithID(ctx context.Context) context.Context {
 
 // WithMetaFromRequest returns context with Correlation ID
 func WithMetaFromRequest(req *http.Request) context.Context {
-	cid := extractCorrelationID(req)
+	cid := correlationID(req)
 	rctx := &RequestContext{
 		correlationID: cid,
 	}
 	ctx := context.WithValue(req.Context(), keyContext, rctx)
+	return metadata.AppendToOutgoingContext(ctx, "x-correlation-id", cid)
+}
+
+// NewFromContext returns new Background context with Correlation ID from incoming context
+func NewFromContext(ctx context.Context) context.Context {
+	cid := ID(ctx)
+	if cid == "" {
+		cid = certutil.RandomString(IDSize)
+	}
+	rctx := &RequestContext{
+		correlationID: cid,
+	}
+	ctx = context.WithValue(context.Background(), keyContext, rctx)
 	return metadata.AppendToOutgoingContext(ctx, "x-correlation-id", cid)
 }
