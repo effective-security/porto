@@ -41,3 +41,47 @@ func FileExists(file string) error {
 
 	return nil
 }
+
+// SubfolderNames returns list of subfolders in provided folder
+func SubfolderNames(folder string) ([]string, error) {
+	var list []string
+
+	f, err := os.Open(folder)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	dirs, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	for _, d := range dirs {
+		if d.IsDir() {
+			list = append(list, d.Name())
+		}
+	}
+
+	return list, nil
+}
+
+// FileNames returns list of files in provided folder.
+func FileNames(folder string) ([]string, error) {
+	var list []string
+
+	f, err := os.Open(folder)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	dirs, err := f.ReadDir(-1)
+	f.Close()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	for _, d := range dirs {
+		if !d.IsDir() {
+			list = append(list, d.Name())
+		}
+	}
+
+	return list, nil
+}
