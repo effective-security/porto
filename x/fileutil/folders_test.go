@@ -55,3 +55,24 @@ func Test_FileExists(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, fmt.Sprintf("stat %s: no such file or directory", tmpDir+"/a"), err.Error())
 }
+
+func Test_SubfolderNames(t *testing.T) {
+	l, err := fileutil.SubfolderNames(".")
+	require.NoError(t, err)
+	assert.Len(t, l, 2)
+
+	_, err = fileutil.SubfolderNames("./notfound")
+	assert.EqualError(t, err, "open ./notfound: no such file or directory")
+
+	_, err = fileutil.SubfolderNames("./folders.go")
+	assert.EqualError(t, err, "readdirent ./folders.go: not a directory")
+}
+
+func Test_FileNames(t *testing.T) {
+	l, err := fileutil.FileNames("./resolve")
+	require.NoError(t, err)
+	assert.Len(t, l, 2)
+
+	_, err = fileutil.FileNames("./notfound")
+	assert.EqualError(t, err, "open ./notfound: no such file or directory")
+}
