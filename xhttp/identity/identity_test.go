@@ -84,3 +84,9 @@ func Test_WithTestIdentityServeHTTP(t *testing.T) {
 	r = WithTestIdentity(r, NewIdentity("role1", "name2", nil))
 	handler.ServeHTTP(rw, r)
 }
+
+func Test_IdentityString(t *testing.T) {
+	assert.Equal(t, "role1/name2", NewIdentity("role1", "name2", nil).String())
+	assert.Equal(t, "test", NewIdentity("test", "test", nil).String())
+	assert.Equal(t, "test", NewIdentity("test", "", nil).String())
+}
