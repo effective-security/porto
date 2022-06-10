@@ -122,9 +122,9 @@ func TestConfig_WalkTree(t *testing.T) {
 	assert.Equal(t, n1, alice, "walkPath(/foo/bar/alice) shoud return node for /foo/bar")
 }
 
-func checkAllowed(t *testing.T, c *Provider, path, role string, expectedAllowed bool) {
-	actual := c.isAllowed(ctx, path, role)
-	assert.Equal(t, expectedAllowed, actual, "isAllowed(%v, %v) returned unexpected results", path, role)
+func checkAllowed(t *testing.T, c *Provider, path string, idn identity.Identity, expectedAllowed bool) {
+	actual := c.isAllowed(ctx, path, idn)
+	assert.Equal(t, expectedAllowed, actual, "isAllowed(%v, %v) returned unexpected results", path, idn.String())
 }
 
 func TestConfigYaml(t *testing.T) {
@@ -158,7 +158,8 @@ func TestConfig_Allow(t *testing.T) {
 	t.Log(c.treeAsText())
 
 	check := func(path, role string, allowed bool) {
-		checkAllowed(t, c, path, role, allowed)
+		idn := identity.NewIdentity(role, "test", nil)
+		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/foo", "bob", true)
 	check("/foo", "alice", false)
@@ -207,7 +208,8 @@ func TestConfig_AllowAny(t *testing.T) {
 	})
 	require.NoError(t, err)
 	check := func(path, role string, allowed bool) {
-		checkAllowed(t, c, path, role, allowed)
+		idn := identity.NewIdentity(role, "test", nil)
+		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/", "alice", false)
 	check("/", "bob", false)
@@ -268,19 +270,19 @@ func Test_AccessLogs(t *testing.T) {
 
 	shouldLog := func(path, service, expLog string) {
 		buf.Reset()
-		c.isAllowed(ctx, path, service)
+		c.isAllowed(ctx, path, identity.NewIdentity(service, "test", nil))
 		result := buf.String()[len("2018-11-28T04:48:22Z "):]
 		assert.Equal(t, expLog, result, "Unexpected log output for isAllowed(%q, %q)", path, service)
 	}
 
 	t.Run("logs", func(t *testing.T) {
 		buf.Reset()
-		shouldLog("/", "bobby", fmt.Sprintf("authz: src=isAllowed, status=allowed, reason=AllowAny, role=\"bobby\", path=/, node=, ctx=%s\n", cid1))
-		shouldLog("/bob", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=allowed, reason=AllowAny, role=\"svc_bob\", path=/bob, node=, ctx=%s\n", cid1))
-		shouldLog("/bar", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=allowed, role=\"svc_bob\", path=/bar, node=bar, ctx=%s\n", cid1))
-		shouldLog("/bar", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=denied, role=\"svc_eve\", path=/bar, allowed_roles='svc_bob', node=bar, ctx=%s\n", cid1))
-		shouldLog("/foo/eve", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=allowed, role=\"svc_eve\", path=/foo/eve, node=eve, ctx=%s\n", cid1))
-		shouldLog("/foo/eve", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=denied, role=\"svc_bob\", path=/foo/eve, allowed_roles='svc_alice,svc_eve', node=eve, ctx=%s\n", cid1))
+		shouldLog("/", "bobby", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"bobby\", user=\"test\", path=\"/\", node=\"\", ctx=%q\n", cid1))
+		shouldLog("/bob", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"svc_bob\", user=\"test\", path=\"/bob\", node=\"\", ctx=%q\n", cid1))
+		shouldLog("/bar", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_bob\", user=\"test\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
+		shouldLog("/bar", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_eve\", user=\"test\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
+		shouldLog("/foo/eve", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_eve\", user=\"test\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
+		shouldLog("/foo/eve", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_bob\", user=\"test\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
 	})
 
 	t.Run("nologs", func(t *testing.T) {
@@ -288,12 +290,12 @@ func Test_AccessLogs(t *testing.T) {
 		c.cfg.LogAllowed = false
 		c.cfg.LogDenied = false
 		buf.Reset()
-		c.isAllowed(ctx, "/", "bobby")
-		c.isAllowed(ctx, "/bob", "svc_bob")
-		c.isAllowed(ctx, "/bar", "svc_bob")
-		c.isAllowed(ctx, "/bar", "svc_eve")
-		c.isAllowed(ctx, "/foo/eve", "svc_eve")
-		c.isAllowed(ctx, "/foo/eve", "svc_bob")
+		c.isAllowed(ctx, "/", identity.NewIdentity("bobby", "test", nil))
+		c.isAllowed(ctx, "/bob", identity.NewIdentity("svc_bob", "test", nil))
+		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_bob", "test", nil))
+		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_eve", "test", nil))
+		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_eve", "test", nil))
+		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_bob", "test", nil))
 		assert.Empty(t, buf.Bytes())
 	})
 }
@@ -318,9 +320,9 @@ func TestConfig_Clone(t *testing.T) {
 	clone := c.Clone()
 	c.Allow("/foo", "alice")
 	require.NotNil(t, clone.requestRoleMapper, "Config.Clone() didn't clone roleMapper")
-	assert.Equal(t, "bob", clone.requestRoleMapper(nil), "Config.Clone() has a roleMapper set, but it doesn't appear to be ours!")
-	assert.False(t, clone.isAllowed(ctx, "/foo", "alice"), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
-	assert.True(t, clone.isAllowed(ctx, "/foo", "bob"), "Config.Clone() return a clone that's missing an Allow() from the source")
+	assert.Equal(t, "bob", clone.requestRoleMapper(nil).Role(), "Config.Clone() has a roleMapper set, but it doesn't appear to be ours!")
+	assert.False(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("alise", "test", nil)), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
+	assert.True(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("bob", "test", nil)), "Config.Clone() return a clone that's missing an Allow() from the source")
 }
 
 func TestConfig_checkAccess_defaultMapper(t *testing.T) {
@@ -329,7 +331,7 @@ func TestConfig_checkAccess_defaultMapper(t *testing.T) {
 
 	c.Allow("/foo", "bob")
 	r, _ := http.NewRequest(http.MethodGet, "/foo", nil)
-	assert.EqualError(t, c.checkAccess(r), "the \"guest\" role is not allowed")
+	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
 }
 
 func TestConfig_checkAccess_noTLS(t *testing.T) {
@@ -393,7 +395,7 @@ func TestConfig_Handler(t *testing.T) {
 			assert.Equal(t, header.ApplicationJSON, ct, "Unauthorized response should have an application/json contentType")
 
 			body := w.Body.String()
-			assert.JSONEq(t, `{"code":"unauthorized", "message":"the \"bob\" role is not allowed"}`, body)
+			assert.JSONEq(t, `{"code":"unauthorized", "message":"bob/test role not allowed"}`, body)
 		}
 	}
 	testHandler("/who", true)
@@ -433,7 +435,7 @@ func TestNewUnaryInterceptor(t *testing.T) {
 	}
 	_, err = unary(context.Background(), nil, si, handler)
 	require.Error(t, err)
-	assert.Equal(t, `rpc error: code = PermissionDenied desc = the "guest" role is not allowed`, err.Error())
+	assert.Equal(t, `rpc error: code = PermissionDenied desc = guest role not allowed`, err.Error())
 }
 
 func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
@@ -441,15 +443,15 @@ func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Hello"))
 }
 
-func roleMapper(role string) func(*http.Request) string {
-	return func(*http.Request) string {
-		return role
+func roleMapper(role string) func(*http.Request) identity.Identity {
+	return func(*http.Request) identity.Identity {
+		return identity.NewIdentity(role, "test", nil)
 	}
 }
 
-func gRPCRoleMapper(role string) func(ctx context.Context) string {
-	return func(ctx context.Context) string {
-		return role
+func gRPCRoleMapper(role string) func(ctx context.Context) identity.Identity {
+	return func(ctx context.Context) identity.Identity {
+		return identity.NewIdentity(role, "test", nil)
 	}
 }
 

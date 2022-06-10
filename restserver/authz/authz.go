@@ -65,7 +65,7 @@ var (
 // configuration for you by calling NewHandler
 type HTTPAuthz interface {
 	// SetRoleMapper configures the function that provides the mapping from an HTTP request to a role name
-	SetRoleMapper(func(*http.Request) string)
+	SetRoleMapper(func(*http.Request) identity.Identity)
 	// NewHandler returns a http.Handler that enforces the current authorization configuration
 	// The handler has its own copy of the configuration changes to the Provider after calling
 	// NewHandler won't affect previously created Handlers.
@@ -83,7 +83,7 @@ type HTTPAuthz interface {
 type GRPCAuthz interface {
 	// SetGRPCRoleMapper configures the function that provides
 	// the mapping from a gRPC request to a role name
-	SetGRPCRoleMapper(m func(ctx context.Context) string)
+	SetGRPCRoleMapper(m func(ctx context.Context) identity.Identity)
 	// NewUnaryInterceptor returns grpc.UnaryServerInterceptor that enforces the current
 	// authorization configuration.
 	// The returned interceptor will extract the role and verify that the role has access to the
@@ -119,8 +119,8 @@ type Config struct {
 // once configured you can create a http.Handler that enforces that
 // configuration for you by calling NewHandler
 type Provider struct {
-	requestRoleMapper func(*http.Request) string
-	grpcRoleMapper    func(context.Context) string
+	requestRoleMapper func(*http.Request) identity.Identity
+	grpcRoleMapper    func(context.Context) identity.Identity
 	pathRoot          *pathNode
 	cfg               *Config
 }
@@ -149,20 +149,12 @@ type pathNode struct {
 	allow        allowTypes
 }
 
-var defaultRoleMapper = func(r *http.Request) string {
-	id := identity.FromRequest(r).Identity()
-	if id != nil {
-		return id.Role()
-	}
-	return identity.GuestRoleName
+var defaultRoleMapper = func(r *http.Request) identity.Identity {
+	return identity.FromRequest(r).Identity()
 }
 
-var defaultGrpcRoleMapper = func(ctx context.Context) string {
-	id := identity.FromContext(ctx).Identity()
-	if id != nil {
-		return id.Role()
-	}
-	return identity.GuestRoleName
+var defaultGrpcRoleMapper = func(ctx context.Context) identity.Identity {
+	return identity.FromContext(ctx).Identity()
 }
 
 // New returns new Authz provider
@@ -305,12 +297,12 @@ func (c *Provider) Clone() *Provider {
 }
 
 // SetRoleMapper configures the function that provides the mapping from an HTTP request to a role name
-func (c *Provider) SetRoleMapper(m func(r *http.Request) string) {
+func (c *Provider) SetRoleMapper(m func(r *http.Request) identity.Identity) {
 	c.requestRoleMapper = m
 }
 
 // SetGRPCRoleMapper configures the function that provides the mapping from a gRPC request to a role name
-func (c *Provider) SetGRPCRoleMapper(m func(ctx context.Context) string) {
+func (c *Provider) SetGRPCRoleMapper(m func(ctx context.Context) identity.Identity) {
 	c.grpcRoleMapper = m
 }
 
@@ -378,26 +370,40 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 }
 
 // isAllowed returns true if access to 'path' is allowed for the specified role.
-func (c *Provider) isAllowed(ctx context.Context, path, role string) bool {
+func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Identity) bool {
 	cid := correlation.ID(ctx)
 	node := c.walkPath(path, false)
 	allowAny := node.allowAny()
 	allowRole := false
+	role := idn.Role()
+	subj := idn.Subject()
 	if !allowAny {
 		allowRole = node.allowRole(role)
 	}
 	res := allowAny || allowRole
 	if res {
 		if allowRole && c.cfg.LogAllowed {
-			logger.Noticef("status=allowed, role=%q, path=%s, node=%s, ctx=%s",
-				role, path, node.value, cid)
+			logger.KV(xlog.NOTICE, "status", "allowed",
+				"role", role,
+				"user", subj,
+				"path", path,
+				"node", node.value,
+				"ctx", cid)
 		} else if c.cfg.LogAllowedAny {
-			logger.Infof("status=allowed, reason=AllowAny, role=%q, path=%s, node=%s, ctx=%s",
-				role, path, node.value, cid)
+			logger.KV(xlog.NOTICE, "status", "allowed_any",
+				"role", role,
+				"user", subj,
+				"path", path,
+				"node", node.value,
+				"ctx", cid)
 		}
 	} else if c.cfg.LogDenied {
-		logger.Noticef("status=denied, role=%q, path=%s, allowed_roles='%v', node=%s, ctx=%s",
-			role, path, strings.Join(node.allowedRoleKeys(), ","), node.value, cid)
+		logger.KV(xlog.NOTICE, "status", "denied",
+			"role", role,
+			"user", subj,
+			"path", path,
+			"node", node.value,
+			"ctx", cid)
 	}
 	return res
 }
@@ -409,12 +415,9 @@ func (c *Provider) checkAccess(r *http.Request) error {
 		return nil
 	}
 
-	role := c.requestRoleMapper(r)
-	if role == "" {
-		role = identity.GuestRoleName
-	}
-	if !c.isAllowed(r.Context(), r.URL.Path, role) {
-		return errors.Errorf("the %q role is not allowed", role)
+	idn := c.requestRoleMapper(r)
+	if !c.isAllowed(r.Context(), r.URL.Path, idn) {
+		return errors.Errorf("%s role not allowed", idn.String())
 	}
 
 	return nil
@@ -458,12 +461,9 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // NewUnaryInterceptor returns grpc.UnaryServerInterceptor to check access
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		role := c.grpcRoleMapper(ctx)
-		if role == "" {
-			role = identity.GuestRoleName
-		}
-		if !c.isAllowed(ctx, info.FullMethod, role) {
-			return nil, status.Errorf(codes.PermissionDenied, "the %q role is not allowed", role)
+		idn := c.grpcRoleMapper(ctx)
+		if !c.isAllowed(ctx, info.FullMethod, idn) {
+			return nil, status.Errorf(codes.PermissionDenied, "%s role not allowed", idn.String())
 		}
 
 		return handler(ctx, req)

@@ -490,7 +490,7 @@ func Test_Authz(t *testing.T) {
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, `{"code":"unauthorized","message":"the \"guest\" role is not allowed"}`, w.Body.String())
+		assert.Equal(t, `{"code":"unauthorized","message":"guest/client role not allowed"}`, w.Body.String())
 
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
@@ -548,7 +548,7 @@ func Test_Authz(t *testing.T) {
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, `{"code":"unauthorized","message":"the \"client\" role is not allowed"}`, w.Body.String())
+		assert.Equal(t, `{"code":"unauthorized","message":"client role not allowed"}`, w.Body.String())
 
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
@@ -561,7 +561,7 @@ func Test_Authz(t *testing.T) {
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, `{"code":"unauthorized","message":"the \"client\" role is not allowed"}`, w.Body.String())
+		assert.Equal(t, `{"code":"unauthorized","message":"client role not allowed"}`, w.Body.String())
 
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
