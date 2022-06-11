@@ -6,13 +6,14 @@ require (
 	github.com/deckarep/golang-set v1.7.1
 	github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b
 	github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04
-	github.com/effective-security/xpki v0.1.2-0.20220312153658-844deb73ac47
+	github.com/effective-security/xpki v0.1.2-0.20220611144614-10460f38adac
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/jinzhu/copier v0.3.5
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/goveralls v0.0.11
+	github.com/mitchellh/go-homedir v1.1.0
 	github.com/oleiade/reflections v1.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/rs/cors v1.8.2
@@ -64,7 +65,6 @@ require (
 	github.com/json-iterator/go v1.1.11 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect

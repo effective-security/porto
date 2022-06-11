@@ -277,12 +277,12 @@ func Test_AccessLogs(t *testing.T) {
 
 	t.Run("logs", func(t *testing.T) {
 		buf.Reset()
-		shouldLog("/", "bobby", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"bobby\", user=\"test\", path=\"/\", node=\"\", ctx=%q\n", cid1))
-		shouldLog("/bob", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"svc_bob\", user=\"test\", path=\"/bob\", node=\"\", ctx=%q\n", cid1))
-		shouldLog("/bar", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_bob\", user=\"test\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
-		shouldLog("/bar", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_eve\", user=\"test\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
-		shouldLog("/foo/eve", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_eve\", user=\"test\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
-		shouldLog("/foo/eve", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_bob\", user=\"test\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
+		shouldLog("/", "bobby", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"bobby\", user=\"test\", email=\"\", path=\"/\", node=\"\", ctx=%q\n", cid1))
+		shouldLog("/bob", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/bob\", node=\"\", ctx=%q\n", cid1))
+		shouldLog("/bar", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
+		shouldLog("/bar", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_eve\", user=\"test\", email=\"\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
+		shouldLog("/foo/eve", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_eve\", user=\"test\", email=\"\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
+		shouldLog("/foo/eve", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
 	})
 
 	t.Run("nologs", func(t *testing.T) {
