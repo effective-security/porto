@@ -42,6 +42,7 @@ import (
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/jwt"
 	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -377,6 +378,9 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 	allowRole := false
 	role := idn.Role()
 	subj := idn.Subject()
+	claims := jwt.MapClaims(idn.Claims())
+	email := claims.String("email")
+
 	if !allowAny {
 		allowRole = node.allowRole(role)
 	}
@@ -386,6 +390,7 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 			logger.KV(xlog.NOTICE, "status", "allowed",
 				"role", role,
 				"user", subj,
+				"email", email,
 				"path", path,
 				"node", node.value,
 				"ctx", cid)
@@ -393,6 +398,7 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 			logger.KV(xlog.NOTICE, "status", "allowed_any",
 				"role", role,
 				"user", subj,
+				"email", email,
 				"path", path,
 				"node", node.value,
 				"ctx", cid)
@@ -401,6 +407,7 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 		logger.KV(xlog.NOTICE, "status", "denied",
 			"role", role,
 			"user", subj,
+			"email", email,
 			"path", path,
 			"node", node.value,
 			"ctx", cid)
