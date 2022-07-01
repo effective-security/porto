@@ -62,7 +62,7 @@ GOLANG_HOST := golang.org
 GIT_DIRTY := $(shell git describe --dirty --always --tags --long | grep -q -e '-dirty' && echo -$$HOSTNAME)
 GIT_HASH := $(shell git rev-parse --short HEAD)
 # number of commits
-COMMITS_COUNT := $(shell git rev-list --count ${GIT_HASH})
+COMMITS_COUNT := $(shell git rev-list --count HEAD)
 #
 PROD_VERSION := $(shell cat .VERSION)
 GIT_VERSION := $(shell printf %s.%d%s ${PROD_VERSION} ${COMMITS_COUNT} ${GIT_DIRTY})

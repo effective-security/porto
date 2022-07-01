@@ -82,7 +82,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"req", reflect.TypeOf(req),
 		"res", responseType,
 		"remote", remote,
-		"duration", duration,
+		"duration", duration.Milliseconds(),
 		"code", code,
 		"ctx", correlation.ID(ctx),
 		"role", role,

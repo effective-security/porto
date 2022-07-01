@@ -3,13 +3,12 @@ name: Build
 on:
   push:
     branches:
-    - main
+      - main
     tags:
-    - 'v*'
+      - "v*"
   pull_request:
 
 jobs:
-
   context-info:
     runs-on: ubuntu-latest
     steps:
@@ -37,44 +36,44 @@ jobs:
       MIN_TESTCOV: 80
 
     steps:
-    - name: Create code coverage status for the current commit
-      if: github.event_name == 'pull_request'
-      run: |
-        curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
-      env:
-        GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-        GIT_USER: ${{ secrets.GIT_USER }}
+      - name: Create code coverage status for the current commit
+        if: github.event_name == 'pull_request'
+        run: |
+          curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
+        env:
+          GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
+          GIT_USER: ${{ secrets.GIT_USER }}
 
-    - name: Install Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: ${{ matrix.go-version }}
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go-version }}
 
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Prepare
-      run: make vars tools generate
+      - name: Prepare
+        run: make vars tools generate
 
-    - name: UnitTest
-      run: make build covtest
+      - name: UnitTest
+        run: make build covtest
 
-    - name: Generate covarege Status
-      if: github.event_name == 'pull_request'
-      run: |
-        set -x
-        PROJECT_NAME=${PROJECT_NAME}
+      - name: Generate covarege Status
+        if: github.event_name == 'pull_request'
+        run: |
+          set -x
+          PROJECT_NAME=${PROJECT_NAME}
 
-        total=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
-        echo "total cov: $total"
-        (( $(echo "$total > ${MIN_TESTCOV}" | bc -l) )) && STATE=success || STATE=failure
-        curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"${STATE}\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"${total}%\",\"context\": \"code cov\"}"
-      env:
-        GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-        GIT_USER: ${{ secrets.GIT_USER }}
+          total=`go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+'`
+          echo "total cov: $total"
+          (( $(echo "$total > ${MIN_TESTCOV}" | bc -l) )) && STATE=success || STATE=failure
+          curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"${STATE}\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"${total}%\",\"context\": \"code cov\"}"
+        env:
+          GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
+          GIT_USER: ${{ secrets.GIT_USER }}
 
-    - name: coveralls
-      #if: github.event_name == 'pull_request'
-      env:
-        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: make coveralls-github
+      - name: coveralls
+        #if: github.event_name == 'pull_request'
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make coveralls-github
