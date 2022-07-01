@@ -105,18 +105,24 @@ func Start(
 
 	err = container.Invoke(func(
 		d discovery.Discovery,
+	) error {
+		e.disco = d
+		return nil
+	})
+	if err != nil {
+		return nil, errors.WithMessagef(err, "unable to inject dependencies")
+	}
+
+	err = container.Invoke(func(
 		jwtParser jwt.Parser,
 		at roles.AccessToken,
 	) error {
-		e.disco = d
 		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
 		if err != nil {
 			logger.Errorf("err=[%+v]", err)
 			return err
 		}
-
 		e.identity = iden
-
 		return nil
 	})
 	if err != nil {
