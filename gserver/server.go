@@ -163,7 +163,7 @@ func newServer(
 	ipaddr, err := netutil.GetLocalIP()
 	if err != nil {
 		ipaddr = "127.0.0.1"
-		logger.Errorf("reason=unable_determine_ipaddr, use=%q, err=[%+v]", ipaddr, err)
+		logger.Errorf("reason=unable_determine_ipaddr, use=%q, err=[%s]", ipaddr, err.Error())
 	}
 	hostname, _ := os.Hostname()
 
@@ -186,7 +186,7 @@ func newServer(
 		}
 		err = container.Invoke(sf(e))
 		if err != nil {
-			return nil, errors.WithMessagef(err, "reason=factory, server=%q, service=%s",
+			return nil, errors.WithMessagef(err, "service factory failed, server=%q, service=%s",
 				name, svc)
 		}
 	}
