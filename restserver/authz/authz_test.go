@@ -332,6 +332,9 @@ func TestConfig_checkAccess_defaultMapper(t *testing.T) {
 	c.Allow("/foo", "bob")
 	r, _ := http.NewRequest(http.MethodGet, "/foo", nil)
 	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
+
+	r, _ = http.NewRequest(http.MethodGet, "*", nil)
+	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
 }
 
 func TestConfig_checkAccess_noTLS(t *testing.T) {

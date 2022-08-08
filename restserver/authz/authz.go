@@ -373,13 +373,24 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 // isAllowed returns true if access to 'path' is allowed for the specified role.
 func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Identity) bool {
 	cid := correlation.ID(ctx)
-	node := c.walkPath(path, false)
-	allowAny := node.allowAny()
-	allowRole := false
 	role := idn.Role()
 	subj := idn.Subject()
 	claims := jwt.MapClaims(idn.Claims())
 	email := claims.String("email")
+
+	if len(path) == 0 || path[0] != '/' {
+		logger.KV(xlog.NOTICE, "status", "denied",
+			"invalid_path", path,
+			"role", role,
+			"user", subj,
+			"email", email,
+			"ctx", cid)
+		return false
+	}
+
+	node := c.walkPath(path, false)
+	allowAny := node.allowAny()
+	allowRole := false
 
 	if !allowAny {
 		allowRole = node.allowRole(role)
