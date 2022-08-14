@@ -18,6 +18,7 @@ import (
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
+	"github.com/effective-security/xlog"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pkg/errors"
@@ -105,8 +106,11 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 		// clean up on error
 		for _, sctx := range sctxs {
 			if sctx.listener != nil {
-				logger.Infof("reason=error, network=%s, address=%s, err=[%+v]",
-					sctx.network, sctx.addr, err)
+				logger.KV(xlog.INFO,
+					"reason", "error",
+					"network", sctx.network,
+					"address", sctx.addr,
+					"err", err)
 				sctx.listener.Close()
 			}
 		}
@@ -124,8 +128,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			return nil, errors.Errorf("TLS key/cert must be provided for the url %s with HTTPS scheme", u.String())
 		}
 		if (u.Scheme == "http" || u.Scheme == "unix") && tlsInfo != nil {
-			logger.Warningf("reason=tls_without_https_scheme, url=%s",
-				u.String())
+			logger.KV(xlog.WARNING, "reason", "tls_without_https_scheme", "url", u.String())
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -157,8 +160,10 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			continue
 		}
 
-		logger.Infof("status=listen, network=%s, address=%s",
-			sctx.network, sctx.addr)
+		logger.KV(xlog.INFO,
+			"status", "listen",
+			"network", sctx.network,
+			"address", sctx.addr)
 
 		if sctx.listener, err = net.Listen(sctx.network, sctx.addr); err != nil {
 			return nil, errors.WithStack(err)

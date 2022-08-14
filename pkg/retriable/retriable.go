@@ -381,10 +381,10 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 
 		c.httpClient.Transport = tr
 
-		logger.Debugf("reason=new_transport")
+		logger.KV(xlog.DEBUG, "reason", "new_transport")
 	} else {
 		c.httpClient.Transport.(*http.Transport).TLSClientConfig = tlsConfig
-		logger.Debugf("reason=update_transport")
+		logger.KV(xlog.DEBUG, "reason", "update_transport")
 	}
 	return c
 }
@@ -419,7 +419,7 @@ func (c *Client) WithDNSServer(dns string) *Client {
 
 		c.httpClient.Transport = tr
 	} else {
-		logger.Debug("reason=update_transport")
+		logger.KV(xlog.DEBUG, "reason", "update_transport")
 	}
 	c.httpClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		d := net.Dialer{}
@@ -521,8 +521,10 @@ func (c *Client) ensureContext(ctx context.Context, httpMethod, path string) (co
 		ctx = context.Background()
 	}
 	if c.Policy.RequestTimeout > 0 {
-		logger.Debugf("method=%s, path=%s, timeout=%v",
-			httpMethod, path, c.Policy.RequestTimeout)
+		logger.KV(xlog.DEBUG,
+			"method", httpMethod,
+			"path", path,
+			"timeout", c.Policy.RequestTimeout)
 		return context.WithTimeout(ctx, c.Policy.RequestTimeout)
 	}
 	return ctx, noop
@@ -545,11 +547,21 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.Errorf("client=%s, httpMethod=%q, host=%q, path=%q, ctx=%q, err=[%+v]",
-				c.Name, httpMethod, host, path, cid, err)
+			logger.KV(xlog.WARNING,
+				"client", c.Name,
+				"method", httpMethod,
+				"host", host,
+				"path", path,
+				"ctx", cid,
+				"err", err)
 		} else {
-			logger.Infof("client=%s, httpMethod=%q, host=%q, path=%q, status=%v, ctx=%q",
-				c.Name, httpMethod, host, path, resp.StatusCode, cid)
+			logger.KV(xlog.TRACE,
+				"client", c.Name,
+				"method", httpMethod,
+				"host", host,
+				"path", path,
+				"status", resp.StatusCode,
+				"ctx", cid)
 		}
 
 		if !c.shouldTryDifferentHost(resp, err) {
@@ -571,7 +583,10 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 			}
 		}
 
-		logger.Errorf("client=%s, host=%s, err=[%v]", c.Name, host, many.Error())
+		logger.KV(xlog.WARNING,
+			"client", c.Name,
+			"host", host,
+			"err", many.Error())
 
 		// rewind the reader
 		if body != nil {
@@ -663,8 +678,13 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		resp, err = c.httpClient.Do(req.Request)
 		elapsed := time.Since(started)
 		if err != nil {
-			logger.Errorf("client=%s, ctx=%q, retries=%d, host=%s, elapsed=%s, err=[%v]",
-				c.Name, cid, retries, req.Host, elapsed.String(), err.Error())
+			logger.KV(xlog.WARNING,
+				"client", c.Name,
+				"ctx", cid,
+				"retries", retries,
+				"host", req.Host,
+				"elapsed", elapsed.String(),
+				"err", err.Error())
 		}
 		// Check if we should continue with retries.
 		shouldRetry, sleepDuration, reason := c.Policy.ShouldRetry(req.Request, resp, err, retries)
@@ -681,8 +701,14 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			c.consumeResponseBody(resp)
 		}
 
-		logger.Warningf("client=%s, ctx=%q, retries=%d, description=%q, reason=%q, sleep=[%v]",
-			c.Name, cid, retries, desc, reason, sleepDuration.Seconds())
+		logger.KV(xlog.WARNING,
+			"client", c.Name,
+			"ctx", cid,
+			"retries", retries,
+			"description", desc,
+			"reason", reason,
+			"sleep", sleepDuration)
+
 		time.Sleep(sleepDuration)
 	}
 
@@ -725,7 +751,7 @@ func debugRequest(r *http.Request, body bool) {
 	if logger.LevelAt(xlog.DEBUG) {
 		b, err := httputil.DumpRequestOut(r, body)
 		if err != nil {
-			logger.Errorf("err=[%v]", err.Error())
+			logger.KV(xlog.ERROR, "err", err.Error())
 		} else {
 			logger.Debug(string(b))
 		}
@@ -736,7 +762,7 @@ func debugResponse(w *http.Response, body bool) {
 	if logger.LevelAt(xlog.DEBUG) {
 		b, err := httputil.DumpResponse(w, body)
 		if err != nil {
-			logger.Errorf("err=[%v]", err.Error())
+			logger.KV(xlog.ERROR, "err", err.Error())
 		} else {
 			logger.Debug(string(b))
 		}
@@ -805,8 +831,12 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 	cid := correlation.ID(r.Context())
 	if err != nil {
 		errStr := err.Error()
-		logger.Errorf("host=%q, path=%q, ctx=%q, retries=%d, error_type=%T, err=[%s]",
-			r.URL.Host, r.URL.Path, cid, retries, err, errStr)
+		logger.KV(xlog.WARNING,
+			"host", r.URL.Host,
+			"path", r.URL.Path,
+			"ctx", cid,
+			"retries", retries,
+			"err", errStr)
 
 		select {
 		case <-r.Context().Done():
@@ -848,8 +878,12 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		return false, 0, Success
 	}
 
-	logger.Errorf("host=%q, path=%q, ctx=%q, retries=%d, status=%d",
-		r.URL.Host, r.URL.Path, cid, retries, resp.StatusCode)
+	logger.KV(xlog.WARNING,
+		"host", r.URL.Host,
+		"path", r.URL.Path,
+		"ctx", cid,
+		"retries", retries,
+		"status", resp.StatusCode)
 
 	if resp.StatusCode == 404 {
 		return false, 0, NotFound

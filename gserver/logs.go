@@ -106,7 +106,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 
 func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		logger.Debugf("method=%s", info.FullMethod)
+		logger.KV(xlog.DEBUG, "method", info.FullMethod)
 		return handler(srv, ss)
 	}
 }

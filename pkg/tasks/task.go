@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
 
@@ -81,19 +82,25 @@ type task struct {
 
 	runLock chan struct{}
 	running bool
+	// timeout interval to schedule a run
+	runTimeout time.Duration
 }
+
+// DefaultRunTimeoutInterval specify a timeout for a task to start
+const DefaultRunTimeoutInterval = time.Second
 
 // NewTaskAtIntervals creates a new task with the time interval.
 func NewTaskAtIntervals(interval uint64, unit TimeUnit) Task {
 	return &task{
-		interval:  interval,
-		unit:      unit,
-		lastRunAt: nil,
-		nextRunAt: time.Unix(0, 0),
-		period:    0,
-		startDay:  time.Sunday,
-		runLock:   make(chan struct{}, 1),
-		count:     0,
+		interval:   interval,
+		unit:       unit,
+		lastRunAt:  nil,
+		nextRunAt:  time.Unix(0, 0),
+		period:     0,
+		startDay:   time.Sunday,
+		runLock:    make(chan struct{}, 1),
+		count:      0,
+		runTimeout: DefaultRunTimeoutInterval,
 	}
 }
 
@@ -103,14 +110,15 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int) Task {
 		logger.Panicf("invalid time value: time='%d:%d'", hour, minute)
 	}
 	j := &task{
-		interval:  1,
-		unit:      Weeks,
-		lastRunAt: nil,
-		nextRunAt: time.Unix(0, 0),
-		period:    0,
-		startDay:  startDay,
-		runLock:   make(chan struct{}, 1),
-		count:     0,
+		interval:   1,
+		unit:       Weeks,
+		lastRunAt:  nil,
+		nextRunAt:  time.Unix(0, 0),
+		period:     0,
+		startDay:   startDay,
+		runLock:    make(chan struct{}, 1),
+		count:      0,
+		runTimeout: DefaultRunTimeoutInterval,
 	}
 	return j.at(hour, minute)
 }
@@ -121,14 +129,15 @@ func NewTaskDaily(hour, minute int) Task {
 		logger.Panicf("invalid time value:, time='%d:%d'", hour, minute)
 	}
 	j := &task{
-		interval:  1,
-		unit:      Days,
-		lastRunAt: nil,
-		nextRunAt: time.Unix(0, 0),
-		period:    0,
-		startDay:  time.Sunday,
-		runLock:   make(chan struct{}, 1),
-		count:     0,
+		interval:   1,
+		unit:       Days,
+		lastRunAt:  nil,
+		nextRunAt:  time.Unix(0, 0),
+		period:     0,
+		startDay:   time.Sunday,
+		runLock:    make(chan struct{}, 1),
+		count:      0,
+		runTimeout: DefaultRunTimeoutInterval,
 	}
 	return j.at(hour, minute)
 }
@@ -256,10 +265,10 @@ func (j *task) scheduleNextRun() time.Time {
 
 	j.nextRunAt = j.lastRunAt.Add(j.Duration())
 	/*
-		logger.Tracef("lastRunAt='%v', nextRunAt='%v', task=%q",
-			j.lastRunAt.Format(time.RFC3339),
-			j.nextRunAt.Format(time.RFC3339),
-			j.Name())
+		logger.KV(xlog.DEBUG,
+			"lastRunAt",j.lastRunAt.Format(time.RFC3339),
+			"nextRunAt",j.nextRunAt.Format(time.RFC3339),
+			"task",j.Name())
 	*/
 	return j.nextRunAt
 }
@@ -272,7 +281,11 @@ func getFunctionName(fn interface{}) string {
 // Run will try to run the task, if it's not already running
 // and immediately reschedule it after run
 func (j *task) Run() bool {
-	timeout := time.Millisecond
+	timeout := j.runTimeout
+	if timeout == 0 {
+		timeout = DefaultRunTimeoutInterval
+	}
+
 	timer := time.NewTimer(timeout)
 	select {
 	case j.runLock <- struct{}{}:
@@ -282,10 +295,11 @@ func (j *task) Run() bool {
 		j.running = true
 		count := atomic.AddUint32(&j.count, 1)
 
-		logger.Tracef("status=running, count=%d, started_at='%v', task=%q",
-			count,
-			j.lastRunAt.Format(time.RFC3339),
-			j.Name())
+		logger.KV(xlog.TRACE,
+			"status", "running",
+			"count", count,
+			"started_at", j.lastRunAt,
+			"task", j.Name())
 
 		j.callback.Call(j.params)
 		j.running = false
@@ -294,10 +308,12 @@ func (j *task) Run() bool {
 		return true
 	case <-time.After(timeout):
 	}
-	logger.Debugf("reason=already_running, count=%d, started_at='%v', task=%q",
-		j.count,
-		j.lastRunAt.Format(time.RFC3339),
-		j.Name())
+
+	logger.KV(xlog.DEBUG,
+		"status", "already_running",
+		"count", j.count,
+		"started_at", j.lastRunAt,
+		"task", j.Name())
 
 	return false
 }
