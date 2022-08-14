@@ -15,6 +15,9 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "tasks")
 
+// DefaultTickerInterval for scheduler
+const DefaultTickerInterval = time.Second
+
 // Time location, default set by the time.Local (*time.Location)
 var loc = time.Local
 
@@ -41,6 +44,8 @@ type Scheduler interface {
 
 // scheduler provides a task scheduler functionality
 type scheduler struct {
+	dops options
+
 	tasks   []Task
 	running bool
 	quit    chan bool
@@ -66,12 +71,18 @@ func (s *scheduler) Less(i, j int) bool {
 }
 
 // NewScheduler creates a new scheduler
-func NewScheduler() Scheduler {
-	return &scheduler{
+func NewScheduler(ops ...Option) Scheduler {
+	s := &scheduler{
 		tasks:   []Task{},
 		running: false,
 		quit:    make(chan bool, 1),
 	}
+
+	for _, op := range ops {
+		op.apply(&s.dops)
+	}
+
+	return s
 }
 
 // Count returns the number of registered tasks
@@ -116,7 +127,7 @@ func (s *scheduler) Add(j Task) Scheduler {
 // runPending will run all the tasks that are scheduled to run.
 func (s *scheduler) runPending() {
 	for _, task := range s.getRunnableTasks() {
-		logger.Tracef("task=%q", task.Name())
+		logger.KV(xlog.DEBUG, "status", "pending_run", "task", task.Name())
 		go task.Run()
 	}
 }
@@ -138,16 +149,35 @@ func (s *scheduler) IsRunning() bool {
 // Start all the pending tasks,
 // and create a second ticker
 func (s *scheduler) Start() error {
-	logger.Tracef("tasks=%d", s.Count())
-
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if s.running {
-		return errors.Errorf("reasoen=already_running")
+		return errors.Errorf("schedule already started")
 	}
 	s.running = true
 
-	ticker := time.NewTicker(1 * time.Second)
+	interval := s.dops.tickerInterval
+	if interval == 0 {
+		// if not specified, then find a reasonable interval to schedule
+		interval = DefaultTickerInterval
+		for _, t := range s.tasks {
+			in := t.Duration()
+			if in < interval {
+				interval = in / 10 // use 1/10 of a task schedule interval
+			}
+		}
+	}
+
+	if interval == 0 {
+		interval = DefaultTickerInterval
+	}
+
+	logger.KV(xlog.DEBUG,
+		"tasks", s.Count(),
+		"schedule_interval", interval,
+	)
+
+	ticker := time.NewTicker(interval)
 	go func() {
 		for {
 			select {
@@ -174,4 +204,34 @@ func (s *scheduler) Stop() error {
 	s.quit <- true
 
 	return nil
+}
+
+// Option configures how we set up the client
+type Option interface {
+	apply(*options)
+}
+
+type options struct {
+	tickerInterval time.Duration
+}
+
+type funcOption struct {
+	f func(*options)
+}
+
+func (fo *funcOption) apply(o *options) {
+	fo.f(o)
+}
+
+func newFuncOption(f func(*options)) *funcOption {
+	return &funcOption{
+		f: f,
+	}
+}
+
+// WithTickerInterval option to provide ticker interval
+func WithTickerInterval(tickerInterval time.Duration) Option {
+	return newFuncOption(func(o *options) {
+		o.tickerInterval = tickerInterval
+	})
 }
