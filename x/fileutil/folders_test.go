@@ -59,7 +59,7 @@ func Test_FileExists(t *testing.T) {
 func Test_SubfolderNames(t *testing.T) {
 	l, err := fileutil.SubfolderNames(".")
 	require.NoError(t, err)
-	assert.Len(t, l, 2)
+	assert.Len(t, l, 3)
 
 	_, err = fileutil.SubfolderNames("./notfound")
 	assert.EqualError(t, err, "open ./notfound: no such file or directory")

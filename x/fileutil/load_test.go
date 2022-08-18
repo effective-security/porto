@@ -49,3 +49,29 @@ func Test_SaveConfigWithSchema_env(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test", c)
 }
+
+type config struct {
+	Service     string
+	Region      string
+	Cluster     string
+	Environment string
+}
+
+func Test_Unmarshal(t *testing.T) {
+	var v config
+	err := fileutil.Unmarshal("testdata/test_config.yaml", &v)
+	require.NoError(t, err)
+
+	assert.Equal(t, "porto-pod", v.Service)
+	assert.Equal(t, "local", v.Region)
+	assert.Equal(t, "cl1", v.Cluster)
+	assert.Equal(t, "test", v.Environment)
+
+	err = fileutil.Unmarshal("testdata/test_config.json", &v)
+	require.NoError(t, err)
+
+	assert.Equal(t, "porto-pod", v.Service)
+	assert.Equal(t, "local", v.Region)
+	assert.Equal(t, "cl1", v.Cluster)
+	assert.Equal(t, "test", v.Environment)
+}

@@ -5,8 +5,8 @@ go 1.17
 require (
 	github.com/deckarep/golang-set v1.7.1
 	github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b
-	github.com/effective-security/xlog v0.0.0-20220119145654-f9e93d59bf04
-	github.com/effective-security/xpki v0.2.1-0.20220722214001-35d63f94f9cb
+	github.com/effective-security/xlog v0.0.0-20220818044154-4d280a49975d
+	github.com/effective-security/xpki v0.2.1-0.20220818054901-6e859e0bc6af
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
 	github.com/golang-migrate/migrate/v4 v4.15.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -47,6 +47,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.30.0 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect
+	github.com/spf13/afero v1.9.2 // indirect
 	github.com/yuin/goldmark v1.4.1 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect

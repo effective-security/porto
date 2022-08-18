@@ -17,7 +17,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-var logger = xlog.NewPackageLogger("github.com/effective-security/porto/x", "db")
+var logger = xlog.NewPackageLogger("github.com/effective-security/porto/x", "xdb")
 
 // Postgres performs the postgres db migration
 func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error {

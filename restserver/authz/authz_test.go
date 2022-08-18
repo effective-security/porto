@@ -3,11 +3,11 @@ package authz
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
@@ -252,6 +252,11 @@ func TestConfig_TreeAsText(t *testing.T) {
 }
 
 func Test_AccessLogs(t *testing.T) {
+	xlog.TimeNowFn = func() time.Time {
+		date, _ := time.Parse("2006-01-02", "2021-04-01")
+		return date
+	}
+
 	c, err := New(&Config{LogAllowed: true, LogDenied: true, LogAllowedAny: true})
 	require.NoError(t, err)
 	c.AllowAny("/")
@@ -271,18 +276,18 @@ func Test_AccessLogs(t *testing.T) {
 	shouldLog := func(path, service, expLog string) {
 		buf.Reset()
 		c.isAllowed(ctx, path, identity.NewIdentity(service, "test", nil))
-		result := buf.String()[len("2018-11-28T04:48:22Z "):]
+		result := buf.String()
 		assert.Equal(t, expLog, result, "Unexpected log output for isAllowed(%q, %q)", path, service)
 	}
 
 	t.Run("logs", func(t *testing.T) {
 		buf.Reset()
-		shouldLog("/", "bobby", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"bobby\", user=\"test\", email=\"\", path=\"/\", node=\"\", ctx=%q\n", cid1))
-		shouldLog("/bob", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed_any\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/bob\", node=\"\", ctx=%q\n", cid1))
-		shouldLog("/bar", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
-		shouldLog("/bar", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_eve\", user=\"test\", email=\"\", path=\"/bar\", node=\"bar\", ctx=%q\n", cid1))
-		shouldLog("/foo/eve", "svc_eve", fmt.Sprintf("authz: src=isAllowed, status=\"allowed\", role=\"svc_eve\", user=\"test\", email=\"\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
-		shouldLog("/foo/eve", "svc_bob", fmt.Sprintf("authz: src=isAllowed, status=\"denied\", role=\"svc_bob\", user=\"test\", email=\"\", path=\"/foo/eve\", node=\"eve\", ctx=%q\n", cid1))
+		shouldLog("/", "bobby", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"bobby\" user=\"test\" email=\"\" path=\"/\" node=\"\" ctx=\"\"\n")
+		shouldLog("/bob", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bob\" node=\"\" ctx=\"\"\n")
+		shouldLog("/bar", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\" ctx=\"\"\n")
+		shouldLog("/bar", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\" ctx=\"\"\n")
+		shouldLog("/foo/eve", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\" ctx=\"\"\n")
+		shouldLog("/foo/eve", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\" ctx=\"\"\n")
 	})
 
 	t.Run("nologs", func(t *testing.T) {
