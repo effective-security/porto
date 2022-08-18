@@ -1,4 +1,4 @@
-package db
+package xdb
 
 import (
 	"context"
@@ -16,6 +16,11 @@ const (
 	MaxLenForEmail    = 160
 	MaxLenForShortURL = 256
 )
+
+// Scanner is DB scan interface
+type Scanner interface {
+	Scan(dest ...any) error
+}
 
 // Validator provides schema validation interface
 type Validator interface {
@@ -38,6 +43,15 @@ func NullTime(val *time.Time) sql.NullTime {
 	}
 
 	return sql.NullTime{Time: *val, Valid: true}
+}
+
+// TimePtr returns nil if time is zero, or pointer with a value
+func TimePtr(val Time) *time.Time {
+	t := time.Time(val)
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // String returns string
@@ -64,7 +78,13 @@ func IDString(id uint64) string {
 
 // IsNotFoundError returns true, if error is NotFound
 func IsNotFoundError(err error) bool {
-	return err == sql.ErrNoRows || strings.Contains(err.Error(), "sql: no rows in result set")
+	return err != nil &&
+		(err == sql.ErrNoRows || strings.Contains(err.Error(), "sql: no rows in result set"))
+}
+
+// IsInvalidModel returns true, if error is InvalidModel
+func IsInvalidModel(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "invalid model")
 }
 
 // any is an alias for interface{} and is equivalent to interface{} in all ways.

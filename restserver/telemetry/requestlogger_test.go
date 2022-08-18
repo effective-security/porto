@@ -81,6 +81,11 @@ func TestHttp_NoLogger(t *testing.T) {
 }
 
 func TestHttp_RequestLogger(t *testing.T) {
+	xlog.TimeNowFn = func() time.Time {
+		date, _ := time.Parse("2006-01-02", "2021-04-01")
+		return date
+	}
+
 	testResponseBody := []byte(`Hello World`)
 	handler := &testHandler{t, http.StatusBadRequest, testResponseBody}
 	w := httptest.NewRecorder()
@@ -93,30 +98,36 @@ func TestHttp_RequestLogger(t *testing.T) {
 
 	tw := bytes.Buffer{}
 	writer := bufio.NewWriter(&tw)
-	xlog.SetFormatter(xlog.NewPrettyFormatter(writer, false))
+	xlog.SetFormatter(xlog.NewStringFormatter(writer))
 
 	logHandler := NewRequestLogger(handler, time.Millisecond, logger)
 	logHandler.ServeHTTP(w, r)
 	require.Equal(t, http.StatusBadRequest, w.Code, "Status code set by ultimate handler wasn't returned by the logging wrapper")
 	require.NotEmpty(t, tw, "A request was processed, but nothing was logged")
 
-	logLine := tw.String()[prefixLength:]
+	logLine := tw.String()
 	// cid is random
-	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=400, bytes=11, time=0, remote="127.0.0.1:51500", agent="no-agent", ctx="`)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=400 bytes=11 time=0 remote=\"127.0.0.1:51500\" agent=\"no-agent\" ctx=\"\" role=\"guest\" user=\"\"\n", logLine)
 }
 
 func TestHttp_RequestLoggerDef(t *testing.T) {
+	xlog.TimeNowFn = func() time.Time {
+		date, _ := time.Parse("2006-01-02", "2021-04-01")
+		return date
+	}
+
 	handler := &testHandler{t, http.StatusOK, []byte(`Hello World`)}
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/foo", nil)
+
 	tw := bytes.Buffer{}
 	writer := bufio.NewWriter(&tw)
-	xlog.SetFormatter(xlog.NewPrettyFormatter(writer, false))
+	xlog.SetFormatter(xlog.NewStringFormatter(writer))
 	lg := NewRequestLogger(handler, time.Millisecond, logger)
 	lg.ServeHTTP(w, r)
-	logLine := tw.String()[prefixLength:]
+	logLine := tw.String()
 	// cid is random
-	assert.Contains(t, logLine, `http: src=ServeHTTP, method="GET", path="/foo", status=200, bytes=11, time=0, remote="", agent="no-agent", ctx="`)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=200 bytes=11 time=0 remote=\"\" agent=\"no-agent\" ctx=\"\" role=\"guest\" user=\"\"\n", logLine)
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {
@@ -145,7 +156,7 @@ func TestHttp_RequestLoggerWithSkip(t *testing.T) {
 		w := httptest.NewRecorder()
 		tw := bytes.Buffer{}
 		writer := bufio.NewWriter(&tw)
-		xlog.SetFormatter(xlog.NewPrettyFormatter(writer, false))
+		xlog.SetFormatter(xlog.NewStringFormatter(writer))
 
 		lg := NewRequestLogger(http.HandlerFunc(handler), time.Millisecond, logger, tc.opt)
 		r, _ := http.NewRequest("GET", tc.path, nil)
@@ -157,9 +168,9 @@ func TestHttp_RequestLoggerWithSkip(t *testing.T) {
 
 		logLine := tw.String()
 		if tc.exp {
-			assert.Contains(t, logLine, tc.path, xlog.String(tc))
+			assert.Contains(t, logLine, tc.path, xlog.EscapedString(tc))
 		} else {
-			assert.NotContains(t, logLine, tc.path, xlog.String(tc))
+			assert.NotContains(t, logLine, tc.path, xlog.EscapedString(tc))
 		}
 	}
 }

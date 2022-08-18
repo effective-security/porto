@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/effective-security/porto/x/db/migrate"
+	"github.com/effective-security/porto/x/xdb/migrate"
 	"github.com/stretchr/testify/assert"
 )
 
