@@ -2,7 +2,6 @@ package configloader
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -86,14 +85,14 @@ func (f *Factory) Load(configFile string, config interface{}) error {
 // LoadForHostName will load the configuration from the named config file for specified host name,
 // apply any overrides, and resolve relative directory locations.
 func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config interface{}) error {
-	logger.Infof("file=%s, hostname=%s", configFile, hostnameOverride)
+	logger.KV(xlog.INFO, "cfg", configFile, "hostname", hostnameOverride)
 
 	configFile, baseDir, err := f.resolveConfigFile(configFile)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	logger.Infof("file=%s, baseDir=%s", configFile, baseDir)
+	logger.KV(xlog.DEBUG, "cfg", configFile, "baseDir", baseDir)
 
 	err = f.load(configFile, hostnameOverride, baseDir, config)
 	if err != nil {
@@ -137,7 +136,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 	ops := []yamlcfg.YAMLOption{yamlcfg.File(configFilename)}
 
 	// load hostmap schema
-	if hmapraw, err := ioutil.ReadFile(configFilename + ".hostmap"); err == nil {
+	if hmapraw, err := os.ReadFile(configFilename + ".hostmap"); err == nil {
 		var hmap Hostmap
 		err = yaml.Unmarshal(hmapraw, &hmap)
 		if err != nil {
@@ -209,7 +208,7 @@ func (f *Factory) getVariableValues(environment string) map[string]string {
 			if strings.HasPrefix(env, f.envPrefix) {
 				formattedKey := fmt.Sprintf("${%v}", env)
 				if _, ok := ret[formattedKey]; !ok {
-					logger.Infof("set=%s", formattedKey)
+					logger.KV(xlog.DEBUG, "set", formattedKey)
 					ret[formattedKey] = val
 				}
 			}
