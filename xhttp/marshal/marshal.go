@@ -37,10 +37,10 @@ type WriteHTTPResponse interface {
 //
 // multiple body parameters can be supplied, in which case the first
 // non-nil one will be used. This is useful as it allows you to do
+//
 //		x, err := doSomething()
 //		WriteJSON(logger,w,r,err,x)
 //	and if there was an error, that's what'll get returned
-//
 func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 	var body interface{}
 	for i := range bodies {

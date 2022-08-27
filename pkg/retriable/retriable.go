@@ -153,7 +153,7 @@ func (f optionFunc) applyOption(opts *Client) { f(opts) }
 
 // WithName is a ClientOption that specifies client's name for logging purposes.
 //
-//   retriable.New(retriable.WithName("tlsclient"))
+//	retriable.New(retriable.WithName("tlsclient"))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -165,7 +165,7 @@ func WithName(name string) ClientOption {
 
 // WithPolicy is a ClientOption that specifies retriable policy.
 //
-//   retriable.New(retriable.WithPolicy(p))
+//	retriable.New(retriable.WithPolicy(p))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -177,7 +177,7 @@ func WithPolicy(policy Policy) ClientOption {
 
 // WithTLS is a ClientOption that specifies TLS configuration.
 //
-//   retriable.New(retriable.WithTLS(t))
+//	retriable.New(retriable.WithTLS(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -189,7 +189,7 @@ func WithTLS(tlsConfig *tls.Config) ClientOption {
 
 // WithTransport is a ClientOption that specifies HTTP Transport configuration.
 //
-//   retriable.New(retriable.WithTransport(t))
+//	retriable.New(retriable.WithTransport(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -201,7 +201,7 @@ func WithTransport(transport http.RoundTripper) ClientOption {
 
 // WithTimeout is a ClientOption that specifies HTTP client timeout.
 //
-//   retriable.New(retriable.WithTimeout(t))
+//	retriable.New(retriable.WithTimeout(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -215,7 +215,7 @@ func WithTimeout(timeout time.Duration) ClientOption {
 // dns server for resolution
 // dns server must be specified in <host>:<port> format
 //
-//   retriable.New(retriable.WithDNSServer(dns))
+//	retriable.New(retriable.WithDNSServer(dns))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -224,7 +224,6 @@ func WithTimeout(timeout time.Duration) ClientOption {
 // WithDNSServer should be called after WithTransport is called.
 //
 // retriable.New(retriable.WithTransport(t).WithDNSServer(dns))
-//
 func WithDNSServer(dns string) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithDNSServer(dns)
@@ -234,8 +233,7 @@ func WithDNSServer(dns string) ClientOption {
 // WithHosts is a ClientOption that allows to set
 // the hosts list.
 //
-//   retriable.New(retriable.WithHosts(hosts))
-//
+//	retriable.New(retriable.WithHosts(hosts))
 func WithHosts(hosts []string) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithHosts(hosts)

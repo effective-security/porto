@@ -24,7 +24,6 @@
 //
 // Once you've built your Provider you can call NewHandler to get a http.Handler
 // that implements those rules.
-//
 package authz
 
 import (
@@ -136,13 +135,14 @@ const (
 // the auth info is stored in a tree based on the path segments
 // the deepest node that matches the request is used to validate the request
 // e.g. if /v1/foo is allowed access by sales and
-//			   /v1/bar is allowed access by baristas
+//
+//	/v1/bar is allowed access by baristas
+//
 // the tree is
 // ""
-//	- "v1"
-//		- "foo"	allow sales
-//		- "bar" allow baristas
-//
+//   - "v1"
+//   - "foo"	allow sales
+//   - "bar" allow baristas
 type pathNode struct {
 	value        string
 	children     map[string]*pathNode

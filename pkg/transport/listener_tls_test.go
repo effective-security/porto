@@ -215,9 +215,10 @@ func (v verifier) Update() error {
 }
 
 // Verify returns OCSP status:
-//   ocsp.Revoked - the certificate found in CRL
-//   ocsp.Good - the certificate not found in a valid CRL
-//   ocsp.Unknown - no CRL or OCSP response found for the certificate
+//
+//	ocsp.Revoked - the certificate found in CRL
+//	ocsp.Good - the certificate not found in a valid CRL
+//	ocsp.Unknown - no CRL or OCSP response found for the certificate
 func (v verifier) Verify(crt *x509.Certificate, issuer *x509.Certificate) (int, error) {
 	return v.status, nil
 }

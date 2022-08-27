@@ -357,14 +357,14 @@ func (server *HTTPServer) StartHTTP() error {
 }
 
 // StopHTTP will perform a graceful shutdown of the serivce by
-//		1) signally to the Load Balancer to remove this instance from the pool
-//				by changing to response to /availability
-//		2) cause new responses to have their Connection closed when finished
-//				to force clients to re-connect [hopefully to a different instance]
-//		3) wait the minShutdownTime to ensure the LB has noticed the status change
-//		4) wait for existing requests to finish processing
-//		5) step 4 is capped by a overrall timeout where we'll give up waiting
-//			 for the requests to complete and will exit.
+//  1. signally to the Load Balancer to remove this instance from the pool
+//     by changing to response to /availability
+//  2. cause new responses to have their Connection closed when finished
+//     to force clients to re-connect [hopefully to a different instance]
+//  3. wait the minShutdownTime to ensure the LB has noticed the status change
+//  4. wait for existing requests to finish processing
+//  5. step 4 is capped by a overrall timeout where we'll give up waiting
+//     for the requests to complete and will exit.
 //
 // it is expected that you don't try and use the server instance again
 // after this. [i.e. if you want to start it again, create another server instance]

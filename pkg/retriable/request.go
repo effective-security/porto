@@ -15,7 +15,7 @@ type lenReader interface {
 	Len() int
 }
 
-//Requestor defines interface to make HTTP calls
+// Requestor defines interface to make HTTP calls
 type Requestor interface {
 	Do(r *http.Request) (*http.Response, error)
 }

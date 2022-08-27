@@ -200,7 +200,7 @@ func Uint64SlicesEqual(a, b []uint64) bool {
 	return true
 }
 
-//NvlUint64 returns the first item from the list that is not 0, or 0 if there are no values that are not zero
+// NvlUint64 returns the first item from the list that is not 0, or 0 if there are no values that are not zero
 func NvlUint64(items ...uint64) uint64 {
 	for _, x := range items {
 		if x != 0 {
