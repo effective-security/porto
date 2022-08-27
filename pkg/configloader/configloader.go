@@ -128,9 +128,9 @@ type Hostmap struct {
 // Load will attempt to load the configuration from the supplied filename.
 // Overrides defined in the config file will be applied based on the hostname
 // the hostname used is dervied from [in order]
-//    1) the hostnameOverride parameter if not ""
-//    2) the value of the Environment variable in envKeyName, if not ""
-//    3) the OS supplied hostname
+//  1. the hostnameOverride parameter if not ""
+//  2. the value of the Environment variable in envKeyName, if not ""
+//  3. the OS supplied hostname
 func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config interface{}) error {
 	var err error
 	ops := []yamlcfg.YAMLOption{yamlcfg.File(configFilename)}
