@@ -114,6 +114,11 @@ func (f *Factory) CreateClient(clientName string) (*Client, error) {
 	return New(), nil
 }
 
+// ConfigForHost returns config for host
+func (f *Factory) ConfigForHost(hostname string) *ClientConfig {
+	return f.perHost[hostname]
+}
+
 // ForHost returns Client for specified host name.
 // If the name is not found in the configuration,
 // a client with default settings will be returned.
