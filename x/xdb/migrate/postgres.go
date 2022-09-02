@@ -21,7 +21,11 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/x", "xdb
 
 // Postgres performs the postgres db migration
 func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error {
-	logger.Infof("db=%s, reason=load, directory=%q, forceVersion=%d", dbName, migrationsDir, forceVersion)
+	logger.KV(xlog.INFO,
+		"db", dbName,
+		"status", "load",
+		"directory", migrationsDir,
+		"forceVersion", forceVersion)
 	if len(migrationsDir) == 0 {
 		return nil
 	}
@@ -42,19 +46,20 @@ func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error 
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	m.Log = migrateLog{}
 
 	version, _, err := m.Version()
 	if err != nil && err != migrate.ErrNilVersion {
 		return errors.WithStack(err)
 	}
 	if err == migrate.ErrNilVersion {
-		logger.Infof("db=%s, reason=initial_state, version=nil", dbName)
+		logger.KV(xlog.INFO, "db", dbName, "reason", "initial_state", "version", "nil")
 	} else {
-		logger.Infof("db=%s, reason=initial_state, version=%d", dbName, version)
+		logger.KV(xlog.INFO, "db", dbName, "reason", "initial_state", "version", version)
 	}
 
 	if forceVersion > 0 {
-		logger.Infof("db=%s, forceVersion=%d", dbName, forceVersion)
+		logger.KV(xlog.NOTICE, "db", dbName, "forceVersion", forceVersion)
 		err = m.Force(forceVersion)
 		if err != nil {
 			return errors.WithStack(err)
@@ -64,7 +69,7 @@ func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error 
 	err = m.Up()
 	if err != nil {
 		if strings.Contains(err.Error(), "no change") {
-			logger.Infof("db=%s, reason=no_change, version=%d", dbName, version)
+			logger.KV(xlog.INFO, "db", dbName, "status", "no_change", "version", version)
 			return nil
 		}
 		return errors.WithStack(err)
@@ -75,7 +80,14 @@ func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error 
 		return errors.WithStack(err)
 	}
 
-	logger.Infof("db=%s, reason=changed_state, version=%d", dbName, version)
+	logger.KV(xlog.NOTICE, "db", dbName, "status", "changed_state", "version", version)
 
 	return nil
+}
+
+type migrateLog struct{}
+
+func (migrateLog) Verbose() bool { return true }
+func (migrateLog) Printf(format string, v ...interface{}) {
+	logger.Debugf(format, v...)
 }
