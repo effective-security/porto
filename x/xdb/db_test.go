@@ -141,3 +141,7 @@ func TestDbTime(t *testing.T) {
 		assert.EqualValues(t, tc.val.UTC(), val2)
 	}
 }
+
+func TestDbNameFromConnection(t *testing.T) {
+	assert.Equal(t, "scannerdb", xdb.DbNameFromConnection("host=localhost port=45432 user=postgres p=xxx sslmode=disable dbname=scannerdb"))
+}

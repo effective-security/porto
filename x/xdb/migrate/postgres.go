@@ -20,12 +20,14 @@ import (
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/x", "xdb")
 
 // Postgres performs the postgres db migration
-func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error {
+func Postgres(dbName, migrationsDir string, forceVersion, migrateVersion int, db *sql.DB) error {
 	logger.KV(xlog.INFO,
 		"db", dbName,
 		"status", "load",
 		"directory", migrationsDir,
-		"forceVersion", forceVersion)
+		"forceVersion", forceVersion,
+		"migrateVersion", migrateVersion,
+	)
 	if len(migrationsDir) == 0 {
 		return nil
 	}
@@ -66,7 +68,13 @@ func Postgres(dbName, migrationsDir string, forceVersion int, db *sql.DB) error 
 		}
 	}
 
-	err = m.Up()
+	if migrateVersion > 0 {
+		logger.KV(xlog.NOTICE, "db", dbName, "migrateVersion", migrateVersion)
+		err = m.Migrate(uint(migrateVersion))
+	} else {
+		err = m.Up()
+	}
+
 	if err != nil {
 		if strings.Contains(err.Error(), "no change") {
 			logger.KV(xlog.INFO, "db", dbName, "status", "no_change", "version", version)
