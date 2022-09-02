@@ -9,10 +9,10 @@ import (
 )
 
 func TestPostgres(t *testing.T) {
-	err := migrate.Postgres("test", "", 1, nil)
+	err := migrate.Postgres("test", "", 1, 1, nil)
 	assert.NoError(t, err)
 
 	assert.Panics(t, func() {
-		migrate.Postgres("test", "testdata", 1, &sql.DB{})
+		migrate.Postgres("test", "testdata", 1, 1, &sql.DB{})
 	})
 }

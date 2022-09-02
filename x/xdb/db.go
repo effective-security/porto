@@ -87,6 +87,12 @@ func IsInvalidModel(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "invalid model")
 }
 
+// DbNameFromConnection return DB name from connection
+func DbNameFromConnection(conn string) string {
+	idx := strings.LastIndex(conn, "dbname=")
+	return conn[idx+7:]
+}
+
 // any is an alias for interface{} and is equivalent to interface{} in all ways.
 type any = interface{}
 
