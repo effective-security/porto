@@ -168,12 +168,12 @@ func New(cfg *Config) (*Provider, error) {
 
 	for _, s := range cfg.AllowAny {
 		az.AllowAny(s)
-		logger.Noticef("AllowAny=%s", s)
+		logger.KV(xlog.NOTICE, "AllowAny", s)
 	}
 
 	for _, s := range cfg.AllowAnyRole {
 		az.AllowAnyRole(s)
-		logger.Noticef("AllowAnyRole=%s", s)
+		logger.KV(xlog.NOTICE, "AllowAnyRole", s)
 	}
 
 	for _, s := range cfg.Allow {
@@ -181,7 +181,7 @@ func New(cfg *Config) (*Provider, error) {
 		if len(parts) != 2 || len(parts[0]) == 0 || len(parts[1]) == 0 {
 			return nil, errors.Errorf("not valid Authz allow configuration: %q", s)
 		}
-		logger.Noticef("Allow=%s:%s", parts[0], parts[1])
+		logger.KV(xlog.NOTICE, "allow", parts[0], "role", parts[1])
 		roles := strings.Split(parts[1], ",")
 		az.Allow(parts[0], roles...)
 	}
@@ -458,7 +458,7 @@ func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error) {
 		delegate: delegate,
 		config:   c.Clone(),
 	}
-	logger.Infof("config=[%s]", h.config.treeAsText())
+	logger.KV(xlog.INFO, "config", h.config.treeAsText())
 	return h, nil
 }
 

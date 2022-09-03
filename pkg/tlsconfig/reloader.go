@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
 
@@ -51,7 +52,7 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 		stopChan: make(chan struct{}),
 	}
 
-	logger.Tracef("label=%s, status=started", label)
+	logger.KV(xlog.TRACE, "label", label, "status", "started")
 
 	err := result.Reload()
 	if err != nil {
@@ -65,7 +66,7 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 			select {
 			case <-stopChan:
 				tickerStop()
-				logger.Tracef("status=closed, label=%s, count=%d", result.label, result.LoadedCount())
+				logger.KV(xlog.TRACE, "status", "closed", "label", result.label, "count", result.LoadedCount())
 				return
 			case <-tickChan:
 				modified := false
@@ -73,21 +74,21 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 				if err == nil {
 					modified = fi.ModTime().After(result.certModifiedAt)
 				} else {
-					logger.Warningf("reason=stat, label=%s, file=%q, err=[%v]", result.label, certPath, err)
+					logger.KV(xlog.WARNING, "reason", "stat", "label", result.label, "file", certPath, "err", err)
 				}
 				if !modified {
 					fi, err = os.Stat(keyPath)
 					if err == nil {
 						modified = fi.ModTime().After(result.keyModifiedAt)
 					} else {
-						logger.Warningf("reason=stat, label=%s, file=%q, err=[%v]", result.label, keyPath, err)
+						logger.KV(xlog.WARNING, "reason", "stat", "label", result.label, "file", keyPath, "err", err)
 					}
 				}
 				// reload on modified, or force to reload each hour
 				if modified || result.loadedAt.Add(1*time.Hour).Before(time.Now().UTC()) {
 					err := result.Reload()
 					if err != nil {
-						logger.Errorf("label=%s, err=[%+v]", result.label, err)
+						logger.KV(xlog.ERROR, "label", result.label, "err", err)
 					}
 				}
 			}
@@ -135,7 +136,7 @@ func (k *KeypairReloader) Reload() error {
 		if err == nil {
 			break
 		}
-		logger.Warningf("reason=LoadX509KeyPair, label=%s, file=%q, err=[%v]", k.label, k.certPath, err)
+		logger.KV(xlog.WARNING, "reason", "LoadX509KeyPair", "label", k.label, "file", k.certPath, "err", err)
 	}
 	if err != nil {
 		return errors.WithMessagef(err, "count: %d", k.count)
@@ -148,18 +149,17 @@ func (k *KeypairReloader) Reload() error {
 	if err == nil {
 		k.certModifiedAt = certFileInfo.ModTime()
 	} else {
-		logger.Warningf("reason=stat, label=%s, file=%q, err=[%v]", k.label, k.certPath, err)
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.certPath, "err", err)
 	}
 
 	keyFileInfo, err := os.Stat(k.keyPath)
 	if err == nil {
 		k.keyModifiedAt = keyFileInfo.ModTime()
 	} else {
-		logger.Warningf("reason=stat, label=%s, file=%q, err=[%v]", k.label, k.keyPath, err)
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.keyPath, "err", err)
 	}
 
-	logger.Noticef("label=%s, count=%d, cert=%q, modifiedAt=%q",
-		k.label, k.count, k.certPath, k.certModifiedAt.Format(time.RFC3339))
+	logger.KV(xlog.WARNING, "label", k.label, "count", k.count, "cert", k.certPath, "modifiedAt", k.certModifiedAt.Format(time.RFC3339))
 
 	k.keypair = newCert
 	keypair := k.tlsCert()
@@ -180,13 +180,12 @@ func (k *KeypairReloader) tlsCert() *tls.Certificate {
 	if kp.Leaf == nil && len(kp.Certificate) > 0 {
 		kp.Leaf, err = x509.ParseCertificate(kp.Certificate[0])
 		if err != nil {
-			logger.Warningf("reason=ParseCertificate, label=%s, err=[%v]", k.label, err)
+			logger.KV(xlog.WARNING, "reason", "ParseCertificate", "label", k.label, "err", err)
 		}
 	}
 
 	if kp.Leaf != nil && kp.Leaf.NotAfter.Add(1*time.Hour).Before(time.Now().UTC()) {
-		logger.Warningf("label=%s, count=%d, cert=%q, expires=%q",
-			k.label, k.count, k.certPath, kp.Leaf.NotAfter.Format(time.RFC3339))
+		logger.KV(xlog.WARNING, "label", k.label, "count", k.count, "cert", k.certPath, "expires", kp.Leaf.NotAfter.Format(time.RFC3339))
 	}
 	return kp
 }
@@ -257,7 +256,7 @@ func (k *KeypairReloader) Close() error {
 		return errors.New("already closed")
 	}
 
-	logger.Infof("label=%s, count=%d, cert=%q, key=%q", k.label, k.count, k.certPath, k.keyPath)
+	logger.KV(xlog.INFO, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
 
 	k.closed = true
 	k.stopChan <- struct{}{}

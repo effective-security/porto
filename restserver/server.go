@@ -119,7 +119,7 @@ func New(
 		ipaddr, err = netutil.GetLocalIP()
 		if err != nil {
 			ipaddr = "127.0.0.1"
-			logger.Errorf("reason=unable_determine_ipaddr, use=%q, err=[%+v]", ipaddr, err)
+			logger.KV(xlog.ERROR, "reason", "unable_determine_ipaddr", "use", ipaddr, "err", err)
 		}
 	}
 
@@ -338,8 +338,7 @@ func (server *HTTPServer) StartHTTP() error {
 	go func() {
 		server.broadcast(ServerStartedEvent)
 
-		logger.Infof("server=%s, bind=%v, status=starting, protocol=%s",
-			server.Name(), bindAddr, server.Protocol())
+		logger.KV(xlog.INFO, "server", server.Name(), "bind", bindAddr, "status", "starting", "protocol", server.Protocol())
 
 		// this is a blocking call to serve
 		if err := serve(); err != nil {
@@ -349,7 +348,7 @@ func (server *HTTPServer) StartHTTP() error {
 			if netutil.IsAddrInUse(err) || err != http.ErrServerClosed {
 				logger.Panicf("server=%s, err=[%v]", server.Name(), errors.WithStack(err))
 			}
-			logger.Warningf("server=%s, status=stopped, reason=[%s]", server.Name(), err.Error())
+			logger.KV(xlog.WARNING, "server", server.Name(), "status", "stopped", "reason", err.Error())
 		}
 	}()
 
@@ -373,7 +372,7 @@ func (server *HTTPServer) StopHTTP() {
 
 	// close services
 	for _, f := range server.services {
-		logger.Tracef("service=%q, status=closing", f.Name())
+		logger.KV(xlog.TRACE, "service", f.Name(), "status", "closing")
 		f.Close()
 	}
 
@@ -381,7 +380,7 @@ func (server *HTTPServer) StopHTTP() {
 	defer cancel()
 	err := server.httpServer.Shutdown(ctx)
 	if err != nil {
-		logger.Errorf("reason=Shutdown, err=[%+v]", err)
+		logger.KV(xlog.ERROR, "reason", "Shutdown", "err", err)
 	}
 	server.broadcast(ServerStoppedEvent)
 }
@@ -401,13 +400,12 @@ func (server *HTTPServer) NewMux() http.Handler {
 	for _, f := range server.services {
 		f.Register(router)
 	}
-	logger.Debugf("server=%s, service_count=%d",
-		server.Name(), len(server.services))
+	logger.KV(xlog.DEBUG, "server", server.Name(), "service_count", len(server.services))
 
 	var err error
 	httpHandler := router.Handler()
 
-	logger.Infof("server=%s, ClientAuth=%s", server.Name(), server.clientAuth)
+	logger.KV(xlog.INFO, "server", server.Name(), "ClientAuth", server.clientAuth)
 
 	// service ready
 	httpHandler = ready.NewServiceStatusVerifier(server, httpHandler)

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/effective-security/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,7 @@ func testTask() {
 }
 
 func taskWithParams(a int, b string) {
-	logger.Infof("TEST: running task with parameters: a=%d, b=%s.", a, b)
+	logger.KV(xlog.INFO, "TEST", "running task with parameters:", "a", a, "b", b)
 }
 
 func Test_StartAndStop(t *testing.T) {

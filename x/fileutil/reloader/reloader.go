@@ -42,7 +42,7 @@ func NewReloader(filePath string, checkInterval time.Duration, onChangedFunc OnC
 		stopChan:      make(chan struct{}),
 	}
 
-	logger.Infof("status=started, file=%q", filePath)
+	logger.KV(xlog.INFO, "status", "started", "file", filePath)
 
 	stopChan := make(chan struct{})
 	result.stopChan = stopChan
@@ -52,8 +52,7 @@ func NewReloader(filePath string, checkInterval time.Duration, onChangedFunc OnC
 			select {
 			case <-stopChan:
 				tickerStop()
-				logger.Infof("status=closed, count=%d, file=%q",
-					result.LoadedCount(), filePath)
+				logger.KV(xlog.INFO, "status", "closed", "count", result.LoadedCount(), "file", filePath)
 				return
 			case <-tickChan:
 				modified := false
@@ -64,11 +63,11 @@ func NewReloader(filePath string, checkInterval time.Duration, onChangedFunc OnC
 						result.fileModifiedAt = fi.ModTime()
 						err := result.Reload()
 						if err != nil {
-							logger.Errorf("err=[%+v]", err)
+							logger.KV(xlog.ERROR, "err", err)
 						}
 					}
 				} else {
-					logger.Warningf("reason=stat, file=%q, err=[%v]", filePath, err)
+					logger.KV(xlog.WARNING, "reason", "stat", "file", filePath, "err", err)
 				}
 			}
 		}

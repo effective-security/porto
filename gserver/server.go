@@ -119,7 +119,7 @@ func Start(
 	) error {
 		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
 		if err != nil {
-			logger.Errorf("err=[%+v]", err)
+			logger.KV(xlog.ERROR, "err", err)
 			return err
 		}
 		e.identity = iden
@@ -163,7 +163,7 @@ func newServer(
 	ipaddr, err := netutil.GetLocalIP()
 	if err != nil {
 		ipaddr = "127.0.0.1"
-		logger.Errorf("reason=unable_determine_ipaddr, use=%q, err=[%s]", ipaddr, err.Error())
+		logger.KV(xlog.ERROR, "reason", "unable_determine_ipaddr", "use", ipaddr, "err", err.Error())
 	}
 	hostname, _ := os.Hostname()
 
@@ -191,7 +191,7 @@ func newServer(
 		}
 	}
 
-	logger.Tracef("status=configuring_listeners, server=%s", name)
+	logger.KV(xlog.TRACE, "status", "configuring_listeners", "server", name)
 
 	e.sctxs, err = configureListeners(cfg)
 	if err != nil {
@@ -220,7 +220,7 @@ func (e *Server) serveClients() (err error) {
 
 func (e *Server) errHandler(err error) {
 	if err != nil && !strings.Contains(err.Error(), "closed") {
-		logger.Infof("err=[%v]", err)
+		logger.KV(xlog.INFO, "err", err)
 	}
 	select {
 	case <-e.stopc:
@@ -237,7 +237,7 @@ func (e *Server) errHandler(err error) {
 // Client requests will be terminated with request timeout.
 // After timeout, enforce remaning requests be closed immediately.
 func (e *Server) Close() {
-	logger.Infof("server=%s", e.Name())
+	logger.KV(xlog.INFO, "server", e.Name())
 
 	for _, svc := range e.services {
 		svc.Close()
@@ -320,8 +320,7 @@ func (e *Server) Configuration() *Config {
 
 // AddService to the server
 func (e *Server) AddService(svc Service) {
-	logger.Noticef("server=%s, service=%s",
-		e.Name(), svc.Name())
+	logger.KV(xlog.NOTICE, "server", e.Name(), "service", svc.Name())
 
 	e.services[svc.Name()] = svc
 }
@@ -335,7 +334,7 @@ func (e *Server) Service(name string) Service {
 func (e *Server) IsReady() bool {
 	for _, ss := range e.services {
 		if !ss.IsReady() {
-			logger.Infof("status=NOT_READY, svc=%s", ss.Name())
+			logger.KV(xlog.INFO, "status", "NOT_READY", "svc", ss.Name())
 			return false
 		}
 	}

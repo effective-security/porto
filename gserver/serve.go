@@ -188,8 +188,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	//<-s.ReadyNotify()
 
-	logger.Infof("status=ready_to_serve, service=%s, network=%s, address=%q",
-		s.Name(), sctx.network, sctx.addr)
+	logger.KV(xlog.INFO, "status", "ready_to_serve", "service", s.Name(), "network", sctx.network, "address", sctx.addr)
 
 	var gsSecure *grpc.Server
 	var gsInsecure *grpc.Server
@@ -228,7 +227,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 		sctx.serversC <- &servers{grpc: gsInsecure, http: srv}
 
-		logger.Warningf("reason=insecure, service=%s, address=%q", s.Name(), sctx.addr)
+		logger.KV(xlog.WARNING, "reason", "insecure", "service", s.Name(), "address", sctx.addr)
 	}
 
 	if sctx.secure {
@@ -253,8 +252,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		sctx.serversC <- &servers{secure: true, grpc: gsSecure, http: srv}
 	}
 
-	logger.Infof("status=serving, service=%s, address=%s, secure=%t, insecure=%t",
-		s.Name(), sctx.listener.Addr().String(), sctx.secure, sctx.insecure)
+	logger.KV(xlog.INFO, "status", "serving", "service", s.Name(), "address", sctx.listener.Addr().String(), "secure", sctx.secure, "insecure", sctx.insecure)
 
 	close(sctx.serversC)
 
@@ -292,7 +290,7 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	handler = identity.NewContextHandler(handler, s.identity.IdentityFromRequest)
 
 	if s.cfg.CORS.GetEnabled() {
-		logger.Noticef("server=%s, CORS=enabled", s.name)
+		logger.KV(xlog.NOTICE, "server", s.name, "CORS", "enabled")
 		co := cors.New(cors.Options{
 			AllowedOrigins: s.cfg.CORS.AllowedOrigins,
 			//AllowOriginFunc:        s.cfg.CORS.AllowOriginFunc,
@@ -318,13 +316,11 @@ func restRouter(s *Server) restserver.Router {
 
 	for name, svc := range s.services {
 		if registrator, ok := svc.(RouteRegistrator); ok {
-			logger.Infof("status=RouteRegistrator, server=%s, service=%s",
-				s.Name(), name)
+			logger.KV(xlog.INFO, "status", "RouteRegistrator", "server", s.Name(), "service", name)
 
 			registrator.RegisterRoute(router)
 		} else {
-			logger.Infof("status=not_supported_RouteRegistrator, server=%s, service=%s",
-				s.Name(), name)
+			logger.KV(xlog.INFO, "status", "not_supported_RouteRegistrator", "server", s.Name(), "service", name)
 		}
 	}
 
@@ -360,13 +356,11 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 	for name, svc := range s.services {
 		if registrator, ok := svc.(GRPCRegistrator); ok {
-			logger.Infof("status=RegisterGRPC, server=%s, service=%s",
-				s.Name(), name)
+			logger.KV(xlog.INFO, "status", "RegisterGRPC", "server", s.Name(), "service", name)
 
 			registrator.RegisterGRPC(grpcServer)
 		} else {
-			logger.Infof("status=not_supported_RegisterGRPC, server=%s, service=%s",
-				s.Name(), name)
+			logger.KV(xlog.INFO, "status", "not_supported_RegisterGRPC", "server", s.Name(), "service", name)
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
 
@@ -79,7 +80,7 @@ func (c *nonceProvider) Nonce() (string, error) {
 	if nonce, ok := c.popNonce(); ok {
 		return nonce, nil
 	}
-	logger.Debugf("reason=fetch_nonce")
+	logger.KV(xlog.DEBUG, "reason", "fetch_nonce")
 	return c.getNonce(context.Background())
 }
 
