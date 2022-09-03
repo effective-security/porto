@@ -185,7 +185,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.TLS.Enabled && peers > 0 {
 		id, err := p.tlsIdentity(r.TLS)
 		if err == nil {
-			logger.Debugf("type=TLS, role=%v", id)
+			logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
 			return id, nil
 		}
 	}
@@ -218,7 +218,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 			if ok && len(si.State.PeerCertificates) > 0 {
 				id, err := p.tlsIdentity(&si.State)
 				if err == nil {
-					logger.Debugf("type=TLS, role=%v", id)
+					logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
 					return id, nil
 				}
 			}
@@ -261,7 +261,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		return nil, errors.WithStack(err)
 	}
 	if tb != res.Thumbprint {
-		logger.Debugf("header=%s, claims=%s", tb, res.Thumbprint)
+		logger.KV(xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
@@ -271,7 +271,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
-	logger.Debugf("role=%s, subject=%s", role, subj)
+	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
 	return identity.NewIdentity(role, subj, claims), nil
 }
 
@@ -307,7 +307,7 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
-	logger.Debugf("role=%s, subject=%s", role, subj)
+	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
 	return identity.NewIdentity(role, subj, claims), nil
 }
 
@@ -319,7 +319,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		if role == "" {
 			role = p.config.TLS.DefaultAuthenticatedRole
 		}
-		logger.Debugf("spiffe=%s, role=%s", spiffe, role)
+		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
 		claims := map[string]interface{}{
 			"sub": peer.Subject.String(),
 			"iss": peer.Issuer.String(),
@@ -330,7 +330,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		return identity.NewIdentity(role, peer.Subject.CommonName, claims), nil
 	}
 
-	logger.Debugf("spiffe=none, cn=%q", peer.Subject.CommonName)
+	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)
 
 	return nil, errors.Errorf("could not determine identity: %q", peer.Subject.CommonName)
 }

@@ -151,7 +151,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 			if hn == "" {
 				hn, err = os.Hostname()
 				if err != nil {
-					logger.Errorf("reason=hostname, err=[%+v]", err)
+					logger.KV(xlog.ERROR, "reason", "hostname", "err", err)
 				}
 			}
 		}
@@ -235,7 +235,7 @@ func (f *Factory) resolveConfigFile(configFile string) (absConfigFile, baseDir s
 		absConfigFile, err = resolve.File(configFile, absDir)
 		if err == nil && absConfigFile != "" {
 			baseDir = absDir
-			logger.Infof("resolved=%q", absConfigFile)
+			logger.KV(xlog.INFO, "resolved", absConfigFile)
 			return
 		}
 	}

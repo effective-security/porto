@@ -67,7 +67,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 		}
 
 		// you should really be using Error to get a good error response returned
-		logger.Debugf("reason=generic_error, type='%T', err=[%v]", bv, bv)
+		logger.KV(xlog.DEBUG, "reason", "generic_error", "type", bv, "err", bv)
 		WriteJSON(w, r, httperror.Unexpected(bv.Error()))
 		return
 
@@ -82,7 +82,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 		}
 		bw := bufio.NewWriter(out)
 		if err := NewEncoder(bw, r).Encode(body); err != nil {
-			logger.Warningf("reason=encode, type=%T, err=[%v]", body, err.Error())
+			logger.KV(xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
 		}
 		bw.Flush()
 	}
@@ -119,7 +119,7 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, pri
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(statusCode)
 	if err := codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body); err != nil {
-		logger.Warningf("reason=encode, type=%T, err=[%v]", body, err.Error())
+		logger.KV(xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
 	}
 }
 

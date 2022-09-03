@@ -69,9 +69,9 @@ func ExampleServer() {
 	if sig == syscall.SIGUSR2 {
 		select {
 		case <-time.After(time.Second * 5):
-			logger.Info("status='service shutdown from SIGUSR2 complete, waiting for SIGTERM to exit'")
+			logger.KV(xlog.INFO, "status", "service shutdown from SIGUSR2 complete, waiting for SIGTERM to exit")
 		case sig = <-sigs:
-			logger.Infof("status=exiting, reason=received_signal, sig=%v", sig)
+			logger.KV(xlog.INFO, "status", "exiting", "reason", "received_signal", "sig", sig)
 		}
 	}
 

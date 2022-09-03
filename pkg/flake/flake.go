@@ -172,7 +172,7 @@ func (sf *Flake) toID() uint64 {
 func defaultMachineID() (uint16, error) {
 	as, err := net.InterfaceAddrs()
 	if err != nil {
-		logger.Errorf("reason=InterfaceAddrs, err=[%+v]", err)
+		logger.KV(xlog.ERROR, "reason", "InterfaceAddrs", "err", err)
 		return 0, nil
 	}
 
@@ -187,7 +187,7 @@ func defaultMachineID() (uint16, error) {
 		//logger.Noticef("machine_id=%d, ip=%v, ip_len=%d", id, ip.String(), last)
 		return id, nil
 	}
-	logger.Errorf("reason=no_private_ip")
+	logger.KV(xlog.ERROR, "reason", "no_private_ip")
 	return 0, nil
 }
 
