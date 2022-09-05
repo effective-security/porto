@@ -66,7 +66,7 @@ func Test_RequestMetrics(t *testing.T) {
 	req := func(method, uri string, sc int) {
 		r, err := http.NewRequest(method, uri, nil)
 		require.NoError(t, err)
-		r = identity.WithTestIdentity(r, identity.NewIdentity("admin", "10.0.0.1", nil))
+		r = identity.WithTestIdentity(r, identity.NewIdentity("admin", "10.0.0.1", nil, "", ""))
 
 		w := httptest.NewRecorder()
 		handlerStatusCode = sc

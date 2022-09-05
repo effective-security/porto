@@ -161,7 +161,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.DPoP.Enabled {
 		if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
 			token := authHeader[5:]
-			id, err := p.dpopIdentity(r, token)
+			id, err := p.dpopIdentity(r, token, "DPoP")
 			if err != nil {
 				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
 				return nil, errors.WithStack(err)
@@ -173,7 +173,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.JWT.Enabled {
 		if strings.ToLower(slices.StringUpto(authHeader, 7)) == "bearer " {
 			token := authHeader[7:]
-			id, err := p.jwtIdentity(token)
+			id, err := p.jwtIdentity(token, "Bearer")
 			if err != nil {
 				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
 				return nil, errors.WithStack(err)
@@ -207,7 +207,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 	if p.config.JWT.Enabled {
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
-			return p.jwtIdentity(md[tcredentials.TokenFieldNameGRPC][0])
+			return p.jwtIdentity(md[tcredentials.TokenFieldNameGRPC][0], "Bearer")
 		}
 	}
 
@@ -227,7 +227,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 	return identity.GuestIdentityForContext(ctx)
 }
 
-func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity, error) {
+func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identity.Identity, error) {
 	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r)
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -271,11 +271,12 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
-	return identity.NewIdentity(role, subj, claims), nil
+
+	logger.KV(xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
+	return identity.NewIdentity(role, subj, claims, auth, tokenType), nil
 }
 
-func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
+func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
 
@@ -307,8 +308,8 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
-	return identity.NewIdentity(role, subj, claims), nil
+	logger.KV(xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
+	return identity.NewIdentity(role, subj, claims, auth, tokenType), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {
@@ -321,13 +322,14 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		}
 		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
 		claims := map[string]interface{}{
-			"sub": peer.Subject.String(),
-			"iss": peer.Issuer.String(),
+			"sub":    peer.Subject.String(),
+			"iss":    peer.Issuer.String(),
+			"spiffe": spiffe,
 		}
 		if len(peer.EmailAddresses) > 0 {
 			claims["email"] = peer.EmailAddresses[0]
 		}
-		return identity.NewIdentity(role, peer.Subject.CommonName, claims), nil
+		return identity.NewIdentity(role, peer.Subject.CommonName, claims, "", ""), nil
 	}
 
 	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)

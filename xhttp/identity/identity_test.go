@@ -55,7 +55,7 @@ func Test_WithTestIdentityDirect(t *testing.T) {
 	r, err := http.NewRequest(http.MethodGet, "/", nil)
 	require.NoError(t, err)
 
-	r = WithTestIdentity(r, NewIdentity("role1", "name1", nil))
+	r = WithTestIdentity(r, NewIdentity("role1", "name1", nil, "", ""))
 	ctx := FromRequest(r)
 
 	assert.Equal(t, "role1/name1", ctx.Identity().String())
@@ -67,7 +67,7 @@ func Test_NewIdentityWithClaims(t *testing.T) {
 	require.NoError(t, err)
 
 	u := jwt.MapClaims{"email": "denis@ekspand.com"}
-	r = WithTestIdentity(r, NewIdentity("role1", "name1", u))
+	r = WithTestIdentity(r, NewIdentity("role1", "name1", u, "", ""))
 	ctx := FromRequest(r)
 	assert.Equal(t, "role1/name1", ctx.Identity().String())
 	assert.Equal(t, "denis@ekspand.com", ctx.Identity().Claims()["email"])
@@ -81,12 +81,12 @@ func Test_WithTestIdentityServeHTTP(t *testing.T) {
 	rw := httptest.NewRecorder()
 	handler := NewContextHandler(d, nil)
 	r, _ := http.NewRequest("GET", "/test", nil)
-	r = WithTestIdentity(r, NewIdentity("role1", "name2", nil))
+	r = WithTestIdentity(r, NewIdentity("role1", "name2", nil, "", ""))
 	handler.ServeHTTP(rw, r)
 }
 
 func Test_IdentityString(t *testing.T) {
-	assert.Equal(t, "role1/name2", NewIdentity("role1", "name2", nil).String())
-	assert.Equal(t, "test", NewIdentity("test", "test", nil).String())
-	assert.Equal(t, "test", NewIdentity("test", "", nil).String())
+	assert.Equal(t, "role1/name2", NewIdentity("role1", "name2", nil, "", "").String())
+	assert.Equal(t, "test", NewIdentity("test", "test", nil, "", "").String())
+	assert.Equal(t, "test", NewIdentity("test", "", nil, "", "").String())
 }
