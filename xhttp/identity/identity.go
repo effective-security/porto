@@ -19,6 +19,8 @@ type Identity interface {
 	Role() string
 	Subject() string
 	Claims() map[string]interface{}
+	AccessToken() string
+	TokenType() string
 }
 
 // ProviderFromRequest returns Identity from supplied HTTP request
@@ -28,11 +30,13 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 type ProviderFromContext func(ctx context.Context) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
-func NewIdentity(role, subject string, claims map[string]interface{}) Identity {
+func NewIdentity(role, subject string, claims map[string]interface{}, accessToken, tokenType string) Identity {
 	id := identity{
-		role:    role,
-		subject: subject,
-		claims:  jwt.MapClaims{},
+		role:        role,
+		subject:     subject,
+		claims:      jwt.MapClaims{},
+		accessToken: accessToken,
+		tokenType:   tokenType,
 	}
 	if claims != nil {
 		id.claims.Add(claims)
@@ -49,6 +53,9 @@ type identity struct {
 	role string
 	// extra user info, specific to the application
 	claims jwt.MapClaims
+
+	accessToken string
+	tokenType   string
 }
 
 // Subject returns the client's subject.
@@ -61,6 +68,16 @@ func (c identity) Subject() string {
 // Role returns the clients role
 func (c identity) Role() string {
 	return c.role
+}
+
+// AccessToken returns AccessToken for identity
+func (c identity) AccessToken() string {
+	return c.accessToken
+}
+
+// TokenType returns token type for IDentity
+func (c identity) TokenType() string {
+	return c.tokenType
 }
 
 // Claims returns application specific user info
@@ -87,12 +104,12 @@ func GuestIdentityMapper(r *http.Request) (Identity, error) {
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
 	}
-	return NewIdentity(GuestRoleName, name, nil), nil
+	return NewIdentity(GuestRoleName, name, nil, "", ""), nil
 }
 
 // GuestIdentityForContext always returns "guest" for the role
 func GuestIdentityForContext(ctx context.Context) (Identity, error) {
-	return NewIdentity(GuestRoleName, "", nil), nil
+	return NewIdentity(GuestRoleName, "", nil, "", ""), nil
 }
 
 // WithTestIdentity is used in unit tests to set HTTP request identity

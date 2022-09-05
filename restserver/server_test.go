@@ -590,7 +590,7 @@ func identityMapperFromCN(r *http.Request) (identity.Identity, error) {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
 		role = r.TLS.PeerCertificates[0].Subject.CommonName
 	}
-	return identity.NewIdentity(role, name, nil), nil
+	return identity.NewIdentity(role, name, nil, "", ""), nil
 }
 
 func identityMapperFromCNMust(r *http.Request) (identity.Identity, error) {
@@ -598,7 +598,7 @@ func identityMapperFromCNMust(r *http.Request) (identity.Identity, error) {
 		return nil, errors.New("missing client certificate")
 	}
 	return identity.NewIdentity(r.TLS.PeerCertificates[0].Subject.CommonName,
-		r.TLS.PeerCertificates[0].Subject.CommonName, nil), nil
+		r.TLS.PeerCertificates[0].Subject.CommonName, nil, "", ""), nil
 }
 
 type serviceX struct {
