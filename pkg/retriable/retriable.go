@@ -794,7 +794,9 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to read body response to (%T) type", body)
 		}
 	default:
-		if err := json.NewDecoder(resp.Body).Decode(body); err != nil {
+		d := json.NewDecoder(resp.Body)
+		d.UseNumber()
+		if err := d.Decode(body); err != nil {
 			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to decode body response to (%T) type", body)
 		}
 	}
