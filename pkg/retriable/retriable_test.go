@@ -591,7 +591,7 @@ func Test_Retriable_WithReadTimeout(t *testing.T) {
 
 		_, _, err := client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Client.Timeout exceeded while awaiting headers")
+		assert.Contains(t, err.Error(), "exceeded")
 	})
 }
 

@@ -256,7 +256,7 @@ func (k *KeypairReloader) Close() error {
 		return errors.New("already closed")
 	}
 
-	logger.KV(xlog.INFO, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
+	logger.KV(xlog.DEBUG, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
 
 	k.closed = true
 	k.stopChan <- struct{}{}
