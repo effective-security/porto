@@ -281,9 +281,9 @@ type Client struct {
 // New creates a new Client
 func New(opts ...ClientOption) *Client {
 	c := &Client{
-		Name: "retriable",
+		Name:       "retriable",
 		httpClient: &http.Client{
-			Timeout: time.Second * 30,
+			//Timeout: time.Second * 30,
 		},
 		Policy: DefaultPolicy(),
 	}
@@ -399,7 +399,7 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	c.httpClient.Timeout = timeout
+	c.Policy.RequestTimeout = timeout
 	return c
 }
 
@@ -446,6 +446,7 @@ func DefaultPolicy() Policy {
 			// Bad Gateway (502)
 			http.StatusBadGateway: DefaultShouldRetryFactory(5, time.Second, "gateway"),
 		},
+		//RequestTimeout:     6 * time.Second,
 		TotalRetryLimit:    5,
 		NonRetriableErrors: DefaultNonRetriableErrors,
 	}
@@ -540,12 +541,13 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	// NOTE: do not `defer cancel()` context as it will cause error
 	// when reading the body
 	ctx, _ = c.ensureContext(ctx, httpMethod, path)
+
 	ctx = correlation.WithID(ctx)
 	cid := correlation.ID(ctx)
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.KV(xlog.WARNING,
+			logger.KV(xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
@@ -553,7 +555,7 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 				"ctx", cid,
 				"err", err)
 		} else {
-			logger.KV(xlog.TRACE,
+			logger.KV(xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
@@ -581,10 +583,10 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 			}
 		}
 
-		logger.KV(xlog.WARNING,
-			"client", c.Name,
-			"host", host,
-			"err", many.Error())
+		// logger.KV(xlog.WARNING,
+		// 	"client", c.Name,
+		// 	"host", host,
+		// 	"err", many.Error())
 
 		// rewind the reader
 		if body != nil {
@@ -831,7 +833,7 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 	cid := correlation.ID(r.Context())
 	if err != nil {
 		errStr := err.Error()
-		logger.KV(xlog.WARNING,
+		logger.KV(xlog.DEBUG,
 			"host", r.URL.Host,
 			"path", r.URL.Path,
 			"ctx", cid,
@@ -862,6 +864,11 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 				}
 			}
 		*/
+
+		if p.TotalRetryLimit <= retries {
+			return false, 0, LimitExceeded
+		}
+
 		if slices.StringContainsOneOf(errStr, p.NonRetriableErrors) {
 			return false, 0, NonRetriableError
 		}
@@ -885,6 +892,10 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		"retries", retries,
 		"status", resp.StatusCode)
 
+	if p.TotalRetryLimit <= retries {
+		return false, 0, LimitExceeded
+	}
+
 	if resp.StatusCode == 404 {
 		return false, 0, NotFound
 	}
@@ -895,10 +906,6 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 
 	if resp.StatusCode < 500 {
 		return false, 0, NonRetriableError
-	}
-
-	if p.TotalRetryLimit <= retries {
-		return false, 0, LimitExceeded
 	}
 
 	if fn, ok := p.Retries[resp.StatusCode]; ok {
