@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 )
@@ -79,4 +80,21 @@ func Unmarshal(file string, v interface{}) error {
 		}
 	}
 	return nil
+}
+
+// Marshal saves object to file
+func Marshal(fn string, value interface{}) error {
+	var data []byte
+	var err error
+	if strings.HasSuffix(fn, ".json") {
+		data, err = marshal.EncodeBytes(marshal.PrettyPrint, value)
+	} else {
+		data, err = yaml.Marshal(value)
+	}
+
+	if err != nil {
+		return errors.WithMessage(err, "failed to encode")
+	}
+
+	return os.WriteFile(fn, data, os.ModePerm)
 }

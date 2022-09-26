@@ -9,3 +9,4 @@ bin/
 
 debug
 debug.test
+.vscode/launch.json
