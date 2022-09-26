@@ -58,14 +58,27 @@ type config struct {
 }
 
 func Test_Unmarshal(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "porto-fileutil")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmp)
+
 	var v config
-	err := fileutil.Unmarshal("testdata/test_config.yaml", &v)
+	err = fileutil.Unmarshal("testdata/test_config.yaml", &v)
 	require.NoError(t, err)
 
 	assert.Equal(t, "porto-pod", v.Service)
 	assert.Equal(t, "local", v.Region)
 	assert.Equal(t, "cl1", v.Cluster)
 	assert.Equal(t, "test", v.Environment)
+
+	fn := path.Join(tmp, "test_config.yaml")
+	err = fileutil.Marshal(fn, &v)
+	require.NoError(t, err)
+
+	var v2 config
+	err = fileutil.Unmarshal(fn, &v2)
+	require.NoError(t, err)
+	assert.Equal(t, v, v2)
 
 	err = fileutil.Unmarshal("testdata/test_config.json", &v)
 	require.NoError(t, err)
@@ -74,4 +87,12 @@ func Test_Unmarshal(t *testing.T) {
 	assert.Equal(t, "local", v.Region)
 	assert.Equal(t, "cl1", v.Cluster)
 	assert.Equal(t, "test", v.Environment)
+
+	fn = path.Join(tmp, "test_config.json")
+	err = fileutil.Marshal(fn, &v)
+	require.NoError(t, err)
+
+	err = fileutil.Unmarshal(fn, &v2)
+	require.NoError(t, err)
+	assert.Equal(t, v, v2)
 }
