@@ -5,9 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
-	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 )
 
@@ -94,10 +92,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	dur := time.Since(start)
 
-	ctx := identity.FromRequest(r)
-	idn := ctx.Identity()
-
-	l.cfg.logger.KV(xlog.INFO,
+	l.cfg.logger.ContextKV(r.Context(), xlog.INFO,
 		"method", r.Method,
 		"path", r.URL.Path,
 		"status", rw.statusCode,
@@ -105,7 +100,8 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"time", dur.Nanoseconds()/l.cfg.granularity,
 		"remote", r.RemoteAddr,
 		"agent", agent,
-		"ctx", correlation.ID(r.Context()),
-		"role", idn.Role(),
-		"user", idn.Subject())
+		// use and role added to ctx
+		//"role", idn.Role(),
+		//"user", idn.Subject(),
+	)
 }

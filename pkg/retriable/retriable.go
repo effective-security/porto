@@ -543,25 +543,23 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	ctx, _ = c.ensureContext(ctx, httpMethod, path)
 
 	ctx = correlation.WithID(ctx)
-	cid := correlation.ID(ctx)
+
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.KV(xlog.DEBUG,
+			logger.ContextKV(ctx, xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
 				"path", path,
-				"ctx", cid,
 				"err", err)
 		} else {
-			logger.KV(xlog.DEBUG,
+			logger.ContextKV(ctx, xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
 				"path", path,
-				"status", resp.StatusCode,
-				"ctx", cid)
+				"status", resp.StatusCode)
 		}
 
 		if !c.shouldTryDifferentHost(resp, err) {
@@ -830,19 +828,18 @@ var DefaultNonRetriableErrors = []string{
 
 // ShouldRetry returns if connection should be retried
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
-	cid := correlation.ID(r.Context())
+	ctx := r.Context()
 	if err != nil {
 		errStr := err.Error()
-		logger.KV(xlog.DEBUG,
+		logger.ContextKV(ctx, xlog.DEBUG,
 			"host", r.URL.Host,
 			"path", r.URL.Path,
-			"ctx", cid,
 			"retries", retries,
 			"err", errStr)
 
 		select {
-		case <-r.Context().Done():
-			err := r.Context().Err()
+		case <-ctx.Done():
+			err := ctx.Err()
 			if err == context.Canceled {
 				return false, 0, Cancelled
 			} else if err == context.DeadlineExceeded {
@@ -885,10 +882,9 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		return false, 0, Success
 	}
 
-	logger.KV(xlog.WARNING,
+	logger.ContextKV(ctx, xlog.WARNING,
 		"host", r.URL.Host,
 		"path", r.URL.Path,
-		"ctx", cid,
 		"retries", retries,
 		"status", resp.StatusCode)
 
