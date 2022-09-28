@@ -74,7 +74,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 		v := r.Context().Value(keyContext)
 		if v == nil {
 			clientIP := ClientIPFromRequest(r)
-			identity, err := identityMapper(r)
+			idn, err := identityMapper(r)
 			if err != nil {
 				logger.KV(xlog.WARNING, "reason", "identityMapper", "ip", clientIP, "err", err.Error())
 				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
@@ -82,12 +82,16 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			}
 
 			rctx = &RequestContext{
-				identity: identity,
+				identity: idn,
 				clientIP: clientIP,
 			}
-			r = r.WithContext(context.WithValue(r.Context(), keyContext, rctx))
-		} else {
-			rctx = v.(*RequestContext)
+
+			ctx := r.Context()
+			role := idn.Role()
+			if role != "guest" {
+				ctx = xlog.ContextWithKV(ctx, "user", idn.Subject(), "role", role)
+			}
+			r = r.WithContext(context.WithValue(ctx, keyContext, rctx))
 		}
 
 		delegate.ServeHTTP(w, r)
@@ -111,6 +115,10 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 			id = guestIdentity
 		}
 		ctx = AddToContext(ctx, NewRequestContext(id))
+		role := id.Role()
+		if role != "guest" {
+			ctx = xlog.ContextWithKV(ctx, "user", id.Subject(), "role", role)
+		}
 
 		return handler(ctx, req)
 	}

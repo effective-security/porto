@@ -47,6 +47,9 @@ func NewHandler(delegate http.Handler) http.Handler {
 			rctx = v.(*RequestContext)
 		}
 
+		// add correlationID to logs as "ctx"
+		r = r.WithContext(xlog.ContextWithKV(r.Context(), "ctx", rctx.correlationID))
+
 		w.Header().Set(header.XCorrelationID, rctx.correlationID)
 		delegate.ServeHTTP(w, r)
 	}
@@ -65,6 +68,9 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 			}
 			ctx = context.WithValue(ctx, keyContext, rctx)
 		}
+
+		// add correlationID to logs as "ctx"
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
 
 		return handler(ctx, req)
 	}
@@ -148,6 +154,7 @@ func WithID(ctx context.Context) context.Context {
 			correlationID: certutil.RandomString(IDSize),
 		}
 		ctx = context.WithValue(ctx, keyContext, rctx)
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
 	}
 	return ctx
 }
@@ -159,6 +166,7 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 		correlationID: cid,
 	}
 	ctx := context.WithValue(req.Context(), keyContext, rctx)
+	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
 	return metadata.AppendToOutgoingContext(ctx, "x-correlation-id", cid)
 }
 
@@ -172,5 +180,6 @@ func NewFromContext(ctx context.Context) context.Context {
 		correlationID: cid,
 	}
 	ctx = context.WithValue(context.Background(), keyContext, rctx)
+	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
 	return metadata.AppendToOutgoingContext(ctx, "x-correlation-id", cid)
 }

@@ -396,8 +396,9 @@ github.com/edsrzf/mmap-go v0.0.0-20170320065105-0bce6a688712/go.mod h1:YO35OhQPt
 github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b h1:04WN0NliJj3iYMx0VARSYZ+988kJmekiIcnvgnABjXY=
 github.com/effective-security/metrics v0.0.0-20220118120427-f740cb7dda2b/go.mod h1:/ybrmYnI3g1zrYQFIx6QjzyX1H2616Q0xcQRGrJa4cU=
 github.com/effective-security/xlog v0.0.0-20220117152117-b33834702782/go.mod h1:LdIVUg2ZIJ8TR9/zPgX1vuBv1GC8Pl1PvNYdckVrrR0=
-github.com/effective-security/xlog v0.0.0-20220818044154-4d280a49975d h1:5Yz4xP+w+ss67oxQgOTy6doyevIjYWwmy3GSo4MBZtc=
 github.com/effective-security/xlog v0.0.0-20220818044154-4d280a49975d/go.mod h1:MgiEiGSIXe0WWCX37/HkNKgsuKy3IbyQ6XVhOCBcsiM=
+github.com/effective-security/xlog v0.0.0-20220928192849-43ec53f20323 h1:S5yW8fIvRp39yQ3O/REQwZ0VZVan6g9d5v51zOrMNHY=
+github.com/effective-security/xlog v0.0.0-20220928192849-43ec53f20323/go.mod h1:MgiEiGSIXe0WWCX37/HkNKgsuKy3IbyQ6XVhOCBcsiM=
 github.com/effective-security/xpki v0.2.1-0.20220906090035-4c5ba6383254 h1:wT8nOHiQeVsoTt+Nwn5otrQTM+xOzg8lvfOH6Z45n5M=
 github.com/effective-security/xpki v0.2.1-0.20220906090035-4c5ba6383254/go.mod h1:sK5Ni22p7g4Ewt37ZciTKbRlU+KcfApU04UMSHp65JE=
 github.com/elazarl/goproxy v0.0.0-20180725130230-947c36da3153/go.mod h1:/Zj4wYkgs4iZTTu3o/KG3Itv/qCCa8VVMlb3i9OVuzc=

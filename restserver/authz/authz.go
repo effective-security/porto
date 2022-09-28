@@ -36,7 +36,6 @@ import (
 	"strings"
 
 	"github.com/effective-security/porto/x/math"
-	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
@@ -372,19 +371,17 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 
 // isAllowed returns true if access to 'path' is allowed for the specified role.
 func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Identity) bool {
-	cid := correlation.ID(ctx)
 	role := idn.Role()
 	subj := idn.Subject()
 	claims := jwt.MapClaims(idn.Claims())
 	email := claims.String("email")
 
 	if len(path) == 0 || path[0] != '/' {
-		logger.KV(xlog.NOTICE, "status", "denied",
+		logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
 			"invalid_path", path,
 			"role", role,
 			"user", subj,
-			"email", email,
-			"ctx", cid)
+			"email", email)
 		return false
 	}
 
@@ -398,30 +395,27 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 	res := allowAny || allowRole
 	if res {
 		if allowRole && c.cfg.LogAllowed {
-			logger.KV(xlog.NOTICE, "status", "allowed",
+			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",
 				"role", role,
 				"user", subj,
 				"email", email,
 				"path", path,
-				"node", node.value,
-				"ctx", cid)
+				"node", node.value)
 		} else if c.cfg.LogAllowedAny {
-			logger.KV(xlog.NOTICE, "status", "allowed_any",
+			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed_any",
 				"role", role,
 				"user", subj,
 				"email", email,
 				"path", path,
-				"node", node.value,
-				"ctx", cid)
+				"node", node.value)
 		}
 	} else if c.cfg.LogDenied {
-		logger.KV(xlog.NOTICE, "status", "denied",
+		logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
 			"role", role,
 			"user", subj,
 			"email", email,
 			"path", path,
-			"node", node.value,
-			"ctx", cid)
+			"node", node.value)
 	}
 	return res
 }
