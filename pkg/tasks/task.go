@@ -295,7 +295,7 @@ func (j *task) Run() bool {
 		j.running = true
 		count := atomic.AddUint32(&j.count, 1)
 
-		logger.KV(xlog.TRACE,
+		logger.KV(xlog.DEBUG,
 			"status", "running",
 			"count", count,
 			"started_at", j.lastRunAt,
