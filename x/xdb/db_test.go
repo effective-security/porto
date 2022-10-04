@@ -110,6 +110,33 @@ func TestStrings(t *testing.T) {
 	}
 }
 
+func TestMetadata(t *testing.T) {
+	tcases := []struct {
+		val xdb.Metadata
+		exp string
+	}{
+		{val: xdb.Metadata{"one": "two"}, exp: "{\"one\":\"two\"}"},
+		{val: xdb.Metadata{}, exp: ""},
+		{val: nil, exp: ""},
+	}
+
+	for _, tc := range tcases {
+		dr, err := tc.val.Value()
+		require.NoError(t, err)
+
+		var drv string
+		if v, ok := dr.(string); ok {
+			drv = v
+		}
+		assert.Equal(t, tc.exp, drv)
+
+		var val2 xdb.Metadata
+		err = val2.Scan(dr)
+		require.NoError(t, err)
+		assert.Equal(t, len(tc.val), len(val2))
+	}
+}
+
 func TestDbTime(t *testing.T) {
 	nb, err := time.Parse(time.RFC3339, "2022-04-01T16:11:15.182Z")
 	require.NoError(t, err)

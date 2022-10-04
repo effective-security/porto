@@ -70,3 +70,32 @@ func (n Strings) Value() (driver.Value, error) {
 	}
 	return string(value), nil
 }
+
+// Metadata de/encodes the string map to/from a SQL string.
+type Metadata map[string]string
+
+// Scan implements the Scanner interface.
+func (n *Metadata) Scan(value interface{}) error {
+	if value == nil {
+		*n = nil
+		return nil
+	}
+	v := fmt.Sprint(value)
+	if len(v) == 0 {
+		*n = Metadata{}
+		return nil
+	}
+	return errors.WithStack(json.Unmarshal([]byte(v), n))
+}
+
+// Value implements the driver Valuer interface.
+func (n Metadata) Value() (driver.Value, error) {
+	if len(n) == 0 {
+		return nil, nil
+	}
+	value, err := json.Marshal(n)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return string(value), nil
+}
