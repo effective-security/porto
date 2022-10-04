@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/ugorji/go/codec"
 )
@@ -16,6 +17,9 @@ type Error struct {
 
 	// Code identifies the particular error condition [for programatic consumers]
 	Code string `json:"code"`
+
+	// RequestID identifies the request ID
+	RequestID string `json:"request_id,omitempty"`
 
 	// Message is an textual description of the error
 	Message string `json:"message"`
@@ -145,6 +149,9 @@ type ManyError struct {
 	// Code identifies the particular error condition [for programatic consumers]
 	Code string `json:"code,omitempty"`
 
+	// RequestID identifies the request ID
+	RequestID string `json:"request_id,omitempty"`
+
 	// Message is an textual description of the error
 	Message string `json:"message,omitempty"`
 
@@ -202,6 +209,9 @@ func (m *ManyError) HasErrors() bool {
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(e.HTTPStatus)
+	if e.RequestID == "" {
+		e.RequestID = correlation.ID(r.Context())
+	}
 	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
 }
 
@@ -209,5 +219,8 @@ func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(m.HTTPStatus)
+	if m.RequestID == "" {
+		m.RequestID = correlation.ID(r.Context())
+	}
 	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
 }
