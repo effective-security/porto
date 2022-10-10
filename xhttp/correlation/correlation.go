@@ -174,6 +174,7 @@ func WithMetaFromContext(ctx context.Context) context.Context {
 		}
 		ctx = context.WithValue(ctx, keyContext, rctx)
 		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+		v = rctx
 	}
 	cid := v.(*RequestContext).correlationID
 	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)

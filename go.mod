@@ -1,6 +1,6 @@
 module github.com/effective-security/porto
 
-go 1.17
+go 1.19
 
 require (
 	github.com/deckarep/golang-set v1.7.1
