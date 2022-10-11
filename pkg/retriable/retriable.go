@@ -502,7 +502,7 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 	}
 	resp, err := c.executeRequest(ctx, method, hosts, path, body)
 	if err != nil {
-		return nil, 0, errors.WithStack(err)
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
@@ -654,7 +654,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 
 	req, err := convertRequest(r)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	cid := correlation.ID(req.Context())
 
@@ -663,7 +663,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		if req.body != nil {
 			body, err := req.body()
 			if err != nil {
-				return resp, errors.WithStack(err)
+				return resp, err
 			}
 			if c, ok := body.(io.ReadCloser); ok {
 				req.Request.Body = c

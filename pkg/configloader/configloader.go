@@ -35,7 +35,7 @@ func NewFactory(nodeInfo netutil.NodeInfo, searchDirs []string, envPrefix string
 	if nodeInfo == nil {
 		nodeInfo, err = netutil.NewNodeInfo(nil)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
@@ -89,14 +89,14 @@ func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config in
 
 	configFile, baseDir, err := f.resolveConfigFile(configFile)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	logger.KV(xlog.DEBUG, "cfg", configFile, "baseDir", baseDir)
 
 	err = f.load(configFile, hostnameOverride, baseDir, config)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	environment := f.environment
@@ -170,7 +170,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 	if len(f.overrideCfg) > 0 {
 		overrideCfg, _, err := f.resolveConfigFile(f.overrideCfg)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		logger.KV(xlog.INFO, "override", overrideCfg)
 		ops = append(ops, yamlcfg.File(overrideCfg))

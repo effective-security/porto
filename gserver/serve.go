@@ -55,7 +55,7 @@ type servers struct {
 func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 	urls, err := cfg.ParseListenURLs()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	var tlsInfo *transport.TLSInfo
@@ -76,7 +76,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 
 		_, err = tlsInfo.ServerTLSWithReloader()
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
@@ -171,7 +171,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 
 		if sctx.network == "tcp" {
 			if sctx.listener, err = transport.NewKeepAliveListener(sctx.listener, sctx.network, nil); err != nil {
-				return nil, errors.WithStack(err)
+				return nil, err
 			}
 		}
 		// TODO: register profiler, tracer, etc

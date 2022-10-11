@@ -100,7 +100,7 @@ func Start(
 
 	e, err = newServer(name, cfg, container, serviceFactories)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	err = container.Invoke(func(
@@ -135,7 +135,7 @@ func Start(
 			len(cfg.Authz.AllowAnyRole) > 0) {
 		e.authz, err = authz.New(cfg.Authz)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
@@ -195,7 +195,7 @@ func newServer(
 
 	e.sctxs, err = configureListeners(cfg)
 	if err != nil {
-		return e, errors.WithStack(err)
+		return e, err
 	}
 
 	for _, sctx := range e.sctxs {

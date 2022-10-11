@@ -55,7 +55,7 @@ func newTLSListener(l net.Listener, tlsinfo *TLSInfo, check tlsCheckFunc) (net.L
 
 	tlsCfg, err := tlsinfo.ServerTLSWithReloader()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	hf := tlsinfo.HandshakeFailure
@@ -67,7 +67,7 @@ func newTLSListener(l net.Listener, tlsinfo *TLSInfo, check tlsCheckFunc) (net.L
 		prevCheck := check
 		check = func(ctx context.Context, tlsConn *tls.Conn) error {
 			if err := prevCheck(ctx, tlsConn); err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			st := tlsConn.ConnectionState()
 
