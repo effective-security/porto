@@ -2,7 +2,6 @@ package fileutil
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -23,7 +22,7 @@ const (
 func LoadConfigWithSchema(config string) (string, error) {
 	if strings.HasPrefix(config, FileSource) {
 		fn := strings.TrimPrefix(config, FileSource)
-		f, err := ioutil.ReadFile(fn)
+		f, err := os.ReadFile(fn)
 		if err != nil {
 			return config, errors.WithStack(err)
 		}
@@ -45,7 +44,7 @@ func LoadConfigWithSchema(config string) (string, error) {
 func SaveConfigWithSchema(path, value string) error {
 	if strings.HasPrefix(path, FileSource) {
 		fn := strings.TrimPrefix(path, FileSource)
-		err := ioutil.WriteFile(fn, []byte(value), 0644)
+		err := os.WriteFile(fn, []byte(value), 0644)
 		if err != nil {
 			return errors.WithStack(err)
 		}

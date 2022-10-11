@@ -164,7 +164,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			id, err := p.dpopIdentity(r, token, "DPoP")
 			if err != nil {
 				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
-				return nil, errors.WithStack(err)
+				return nil, err
 			}
 			return id, nil
 		}
@@ -176,7 +176,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			id, err := p.jwtIdentity(token, "Bearer")
 			if err != nil {
 				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
-				return nil, errors.WithStack(err)
+				return nil, err
 			}
 			return id, nil
 		}
@@ -230,7 +230,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identity.Identity, error) {
 	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	var claims jwt.MapClaims
@@ -243,7 +243,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 	if p.at != nil {
 		claims, err = p.at.Claims(r.Context(), auth)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if claims != nil {
 			err = claims.Valid(cfg)
@@ -253,12 +253,12 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		claims, err = p.jwt.ParseToken(auth, cfg)
 	}
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	tb, err := dpop.GetCnfClaim(claims)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if tb != res.Thumbprint {
 		logger.KV(xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
@@ -289,7 +289,7 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 	if p.at != nil {
 		claims, err = p.at.Claims(context.Background(), auth)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if claims != nil {
 			err = claims.Valid(cfg)
@@ -299,7 +299,7 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 		claims, err = p.jwt.ParseToken(auth, cfg)
 	}
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	subj := claims.String(p.config.JWT.SubjectClaim)

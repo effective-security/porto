@@ -56,7 +56,7 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 
 	err := result.Reload()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	stopChan := make(chan struct{})
