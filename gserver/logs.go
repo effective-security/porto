@@ -60,7 +60,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 			if s, ok := status.FromError(err); ok {
 				code = s.Code()
 			} else {
-				logger.KV(xlog.ERROR, "err", err.Error())
+				logger.ContextKV(ctx, xlog.ERROR, "err", err.Error())
 			}
 		default:
 			logger.ContextKV(ctx, xlog.ERROR,

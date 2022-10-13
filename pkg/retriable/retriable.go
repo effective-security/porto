@@ -656,8 +656,6 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	cid := correlation.ID(req.Context())
-
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
 		if req.body != nil {
@@ -676,9 +674,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		resp, err = c.httpClient.Do(req.Request)
 		elapsed := time.Since(started)
 		if err != nil {
-			logger.KV(xlog.WARNING,
+			logger.ContextKV(r.Context(), xlog.WARNING,
 				"client", c.Name,
-				"ctx", cid,
 				"retries", retries,
 				"host", req.Host,
 				"elapsed", elapsed.String(),
@@ -699,9 +696,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			c.consumeResponseBody(resp)
 		}
 
-		logger.KV(xlog.WARNING,
+		logger.ContextKV(r.Context(), xlog.WARNING,
 			"client", c.Name,
-			"ctx", cid,
 			"retries", retries,
 			"description", desc,
 			"reason", reason,
@@ -749,7 +745,7 @@ func debugRequest(r *http.Request, body bool) {
 	if logger.LevelAt(xlog.DEBUG) {
 		b, err := httputil.DumpRequestOut(r, body)
 		if err != nil {
-			logger.KV(xlog.ERROR, "err", err.Error())
+			logger.ContextKV(r.Context(), xlog.ERROR, "err", err.Error())
 		} else {
 			logger.Debug(string(b))
 		}
