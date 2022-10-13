@@ -151,7 +151,7 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 // IdentityFromRequest returns identity from the request
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
 	peers := getPeerCertAndCount(r)
-	logger.KV(xlog.DEBUG,
+	logger.ContextKV(r.Context(), xlog.DEBUG,
 		"dpop_enabled", p.config.DPoP.Enabled,
 		"jwt_enabled", p.config.JWT.Enabled,
 		"tls_enabled", p.config.TLS.Enabled,
@@ -163,7 +163,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			token := authHeader[5:]
 			id, err := p.dpopIdentity(r, token, "DPoP")
 			if err != nil {
-				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
+				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
 				return nil, err
 			}
 			return id, nil
@@ -175,7 +175,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			token := authHeader[7:]
 			id, err := p.jwtIdentity(token, "Bearer")
 			if err != nil {
-				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
+				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
 				return nil, err
 			}
 			return id, nil
@@ -185,7 +185,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.TLS.Enabled && peers > 0 {
 		id, err := p.tlsIdentity(r.TLS)
 		if err == nil {
-			logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
+			logger.ContextKV(r.Context(), xlog.DEBUG, "type", "TLS", "role", id)
 			return id, nil
 		}
 	}
@@ -218,7 +218,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 			if ok && len(si.State.PeerCertificates) > 0 {
 				id, err := p.tlsIdentity(&si.State)
 				if err == nil {
-					logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
+					logger.ContextKV(ctx, xlog.DEBUG, "type", "TLS", "role", id)
 					return id, nil
 				}
 			}
@@ -261,7 +261,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		return nil, err
 	}
 	if tb != res.Thumbprint {
-		logger.KV(xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
+		logger.ContextKV(r.Context(), xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
@@ -272,7 +272,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
 
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
+	logger.ContextKV(r.Context(), xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
 	return identity.NewIdentity(role, subj, claims, auth, tokenType), nil
 }
 

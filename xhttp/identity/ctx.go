@@ -76,7 +76,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			clientIP := ClientIPFromRequest(r)
 			idn, err := identityMapper(r)
 			if err != nil {
-				logger.KV(xlog.WARNING, "reason", "identityMapper", "ip", clientIP, "err", err.Error())
+				logger.ContextKV(r.Context(), xlog.WARNING, "reason", "identityMapper", "ip", clientIP, "err", err.Error())
 				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
 				return
 			}
