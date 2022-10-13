@@ -1,6 +1,7 @@
 package pberror
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/effective-security/porto/xhttp/correlation"
@@ -75,6 +76,9 @@ func Error(err error) error {
 	e := GRPCError{code: ev.Code(), desc: desc}
 	if ctx, ok := err.(correlation.Correlation); ok {
 		e.requestID = ctx.CorrelationID()
+		if e.requestID != "" {
+			e.desc = fmt.Sprintf("request %s: ", e.requestID) + desc
+		}
 	}
 
 	return e
@@ -88,10 +92,27 @@ func ErrorDesc(err error) string {
 	return err.Error()
 }
 
-// NewError returns new GRPCError
-func NewError(code codes.Code, msgFormat string, vals ...interface{}) error {
+// New returns new GRPCError
+func New(code codes.Code, msgFormat string, vals ...interface{}) error {
 	return GRPCError{
 		code: code,
 		desc: fmt.Sprintf(msgFormat, vals...),
 	}
+}
+
+// NewFromCtx returns new GRPCError
+func NewFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals ...interface{}) error {
+	e := GRPCError{
+		code: code,
+		desc: fmt.Sprintf(msgFormat, vals...),
+	}
+
+	if ctx := correlation.ID(ctx); ctx != "" {
+		e.requestID = ctx
+		if e.requestID != "" {
+			e.desc = fmt.Sprintf("request %s: ", e.requestID) + e.desc
+		}
+	}
+
+	return e
 }
