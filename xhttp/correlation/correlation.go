@@ -28,6 +28,11 @@ const (
 // IDSize specifies a size in characters for the correlation ID
 const IDSize = 12
 
+// Correlation interface allows to provide request ID
+type Correlation interface {
+	CorrelationID() string
+}
+
 // RequestContext represents user contextual information about a request being processed by the server,
 // it includes CorrelationID [for cross system request correlation].
 type RequestContext struct {
