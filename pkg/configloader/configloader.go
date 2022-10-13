@@ -140,7 +140,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 		var hmap Hostmap
 		err = yaml.Unmarshal(hmapraw, &hmap)
 		if err != nil {
-			return errors.WithMessagef(err, "failed to load hostmap file")
+			return errors.Wrapf(err, "failed to load hostmap file")
 		}
 
 		hn := hostnameOverride
@@ -178,12 +178,12 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 
 	provider, err := yamlcfg.NewYAML(ops...)
 	if err != nil {
-		return errors.WithMessagef(err, "failed to load configuration")
+		return errors.Wrap(err, "failed to load configuration")
 	}
 
 	err = provider.Get(yamlcfg.Root).Populate(config)
 	if err != nil {
-		return errors.WithMessagef(err, "failed to parse configuration")
+		return errors.Wrap(err, "failed to parse configuration")
 	}
 
 	return nil

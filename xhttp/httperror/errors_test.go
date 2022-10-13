@@ -26,9 +26,11 @@ func TestError_Error(t *testing.T) {
 
 	e := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "Bob")
 	assert.Equal(t, "invalid_json: Bob", e.Error())
+	e.RequestID = "123"
+	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
 
 	e.WithCause(errors.New("some other error"))
-	assert.Equal(t, "invalid_json: Bob", e.Error())
+	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
 }
 
 func TestError_Nil(t *testing.T) {
@@ -41,6 +43,8 @@ func TestError_ManyErrorIsError(t *testing.T) {
 	err := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 42 errors!")
 	var _ error = err // won't compile if ManyError doesn't impl error
 	assert.Equal(t, "rate_limit_exceeded: There were 42 errors!", err.Error())
+	err.RequestID = "123"
+	assert.Equal(t, "request 123: rate_limit_exceeded: There were 42 errors!", err.Error())
 }
 
 func TestError_ManyError(t *testing.T) {
@@ -82,8 +86,10 @@ func TestError_AddErrorToNilManyError(t *testing.T) {
 
 func TestError_WriteHTTPResponse(t *testing.T) {
 	single := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2")
+	single.RequestID = "123"
 
 	many := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 2 errors!")
+	many.RequestID = "123"
 	many.Add("one", errors.Errorf("test error 1"))
 	many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
 
@@ -101,7 +107,7 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 			name:     "single_raw_json",
 			err:      single,
 			urlPath:  "/",
-			expected: `{"code":"invalid_json","message":"test error 2"}`,
+			expected: `{"code":"invalid_json","request_id":"123","message":"test error 2"}`,
 		},
 		{
 			name:    "single_pretty_json",
@@ -109,7 +115,8 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 			urlPath: "/?pp",
 			expected: `{
 	"code": "invalid_json",
-	"message": "test error 2"
+	"message": "test error 2",
+	"request_id": "123"
 }`,
 		},
 		{
@@ -128,7 +135,8 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 			"message": "test error 2"
 		}
 	},
-	"message": "There were 2 errors!"
+	"message": "There were 2 errors!",
+	"request_id": "123"
 }`,
 		},
 		{

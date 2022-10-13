@@ -133,10 +133,19 @@ func (e *Error) WithCause(err error) *Error {
 	return e
 }
 
+// CorrelationID implements the Correlation interface,
+// and returns request ID
+func (e *Error) CorrelationID() string {
+	return e.RequestID
+}
+
 // Error implements the standard error interface
 func (e *Error) Error() string {
 	if e == nil {
 		return "nil"
+	}
+	if e.RequestID != "" {
+		return fmt.Sprintf("request %s: %s: %s", e.RequestID, e.Code, e.Message)
 	}
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
@@ -163,6 +172,9 @@ func (m *ManyError) Error() string {
 		return "nil"
 	}
 	if m.Code != "" {
+		if m.RequestID != "" {
+			return fmt.Sprintf("request %s: %s: %s", m.RequestID, m.Code, m.Message)
+		}
 		return fmt.Sprintf("%s: %s", m.Code, m.Message)
 	}
 
@@ -172,6 +184,12 @@ func (m *ManyError) Error() string {
 	}
 
 	return strings.Join(errs, ";")
+}
+
+// CorrelationID implements the Correlation interface,
+// and returns request ID
+func (m *ManyError) CorrelationID() string {
+	return m.RequestID
 }
 
 // NewMany builds new ManyError instance, build message string along the way
