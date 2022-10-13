@@ -1,9 +1,12 @@
 package pberror_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,10 +39,18 @@ func TestGRPCError(t *testing.T) {
 	assert.NotNil(t, pberror.Error(e3))
 	assert.Equal(t, "permission denied", pberror.ErrorDesc(e3))
 
-	ne := pberror.NewError(codes.Unavailable, "some error")
+	ne := pberror.New(codes.Unavailable, "some error")
 	assert.Equal(t, "some error", pberror.ErrorDesc(ne))
 
 	ev4, ok := status.FromError(ne)
 	assert.True(t, ok)
 	assert.Equal(t, codes.Unavailable, ev4.Code())
+
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	ne2 := pberror.NewFromCtx(ctx, codes.Unavailable, "some error")
+	exp := fmt.Sprintf("request %s: some error", cid)
+	assert.Equal(t, exp, pberror.ErrorDesc(ne2))
+	assert.Equal(t, exp, ne2.Error())
+	assert.Equal(t, cid, ne2.(pberror.GRPCError).RequestID())
 }
