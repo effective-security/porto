@@ -172,3 +172,30 @@ func TestDbTime(t *testing.T) {
 func TestDbNameFromConnection(t *testing.T) {
 	assert.Equal(t, "scannerdb", xdb.DbNameFromConnection("host=localhost port=45432 user=postgres p=xxx sslmode=disable dbname=scannerdb"))
 }
+
+func TestNULLString(t *testing.T) {
+	tcases := []struct {
+		val xdb.NULLString
+		exp string
+	}{
+		{val: "one", exp: "one"},
+		{val: "", exp: ""},
+	}
+
+	for _, tc := range tcases {
+		val := tc.val
+		dr, err := val.Value()
+		require.NoError(t, err)
+
+		var drv string
+		if v, ok := dr.(string); ok {
+			drv = v
+		}
+		assert.Equal(t, tc.exp, drv)
+
+		var val2 xdb.NULLString
+		err = val2.Scan(dr)
+		require.NoError(t, err)
+		assert.EqualValues(t, val, val2)
+	}
+}

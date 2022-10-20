@@ -17,7 +17,7 @@ type Time time.Time
 func (ns *Time) Scan(value interface{}) error {
 	var v sql.NullTime
 	if err := (&v).Scan(value); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	var zero Time
 	if v.Valid {
@@ -98,4 +98,30 @@ func (n Metadata) Value() (driver.Value, error) {
 		return nil, errors.WithStack(err)
 	}
 	return string(value), nil
+}
+
+// NULLString de/encodes the string a SQL string.
+type NULLString string
+
+// Scan implements the Scanner interface.
+func (ns *NULLString) Scan(value interface{}) error {
+	var v sql.NullString
+	if err := (&v).Scan(value); err != nil {
+		return errors.WithStack(err)
+	}
+	if v.Valid {
+		*ns = NULLString(v.String)
+	} else {
+		*ns = ""
+	}
+
+	return nil
+}
+
+// Value implements the driver Valuer interface.
+func (ns NULLString) Value() (driver.Value, error) {
+	if ns == "" {
+		return nil, nil
+	}
+	return string(ns), nil
 }
