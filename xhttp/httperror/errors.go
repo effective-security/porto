@@ -28,7 +28,7 @@ type Error struct {
 	Cause error `json:"-"`
 }
 
-// New builds a new Error instance, building the message string along the way
+// New returns Error instance, building the message string along the way
 func New(status int, code string, msgFormat string, vals ...interface{}) *Error {
 	return &Error{
 		HTTPStatus: status,
@@ -37,92 +37,92 @@ func New(status int, code string, msgFormat string, vals ...interface{}) *Error 
 	}
 }
 
-// InvalidParam for builds a new Error instance with InvalidParam code
+// InvalidParam returns Error instance with InvalidParam code
 func InvalidParam(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeInvalidParam, msgFormat, vals...)
 }
 
-// InvalidJSON for builds a new Error instance with InvalidJSON code
+// InvalidJSON returns Error instance with InvalidJSON code
 func InvalidJSON(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeInvalidJSON, msgFormat, vals...)
 }
 
-// BadNonce for builds a new Error instance with BadNonce code
+// BadNonce returns Error instance with BadNonce code
 func BadNonce(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeBadNonce, msgFormat, vals...)
 }
 
-// InvalidRequest for builds a new Error instance with InvalidRequest code
+// InvalidRequest returns Error instance with InvalidRequest code
 func InvalidRequest(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeInvalidRequest, msgFormat, vals...)
 }
 
-// Malformed for builds a new Error instance with Malformed code
+// Malformed returns Error instance with Malformed code
 func Malformed(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeMalformed, msgFormat, vals...)
 }
 
-// InvalidContentType for builds a new Error instance with InvalidContentType code
+// InvalidContentType returns Error instance with InvalidContentType code
 func InvalidContentType(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeInvalidContentType, msgFormat, vals...)
 }
 
-// ContentLengthRequired for builds a new Error instance with ContentLengthRequired code
+// ContentLengthRequired returns Error instance with ContentLengthRequired code
 func ContentLengthRequired() *Error {
 	return New(http.StatusBadRequest, CodeContentLengthRequired, "Content-Length header not provided")
 }
 
-// NotFound for builds a new Error instance with NotFound code
+// NotFound returns Error instance with NotFound code
 func NotFound(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusNotFound, CodeNotFound, msgFormat, vals...)
 }
 
-// RequestTooLarge for builds a new Error instance with RequestTooLarge code
+// RequestTooLarge returns Error instance with RequestTooLarge code
 func RequestTooLarge(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusBadRequest, CodeRequestTooLarge, msgFormat, vals...)
 }
 
-// FailedToReadRequestBody for builds a new Error instance with FailedToReadRequestBody code
+// FailedToReadRequestBody returns Error instance with FailedToReadRequestBody code
 func FailedToReadRequestBody(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusInternalServerError, CodeFailedToReadRequestBody, msgFormat, vals...)
 }
 
-// RateLimitExceeded for builds a new Error instance with RateLimitExceeded code
+// RateLimitExceeded returns Error instance with RateLimitExceeded code
 func RateLimitExceeded(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusTooManyRequests, CodeRateLimitExceeded, msgFormat, vals...)
 }
 
-// TooEarly for builds a new Error instance with TooEarly code
+// TooEarly returns Error instance with TooEarly code
 func TooEarly(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusTooEarly, CodeTooEarly, msgFormat, vals...)
 }
 
-// Unexpected for builds a new Error instance with Unexpected code
+// Unexpected returns Error instance with Unexpected code
 func Unexpected(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusInternalServerError, CodeUnexpected, msgFormat, vals...)
 }
 
-// Forbidden for builds a new Error instance with Forbidden code
+// Forbidden returns Error instance with Forbidden code
 func Forbidden(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusForbidden, CodeForbidden, msgFormat, vals...)
 }
 
-// Unauthorized for builds a new Error instance with Unauthorized code
+// Unauthorized returns Error instance with Unauthorized code
 func Unauthorized(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusUnauthorized, CodeUnauthorized, msgFormat, vals...)
 }
 
-// AccountNotFound for builds a new Error instance with AccountNotFound code
+// AccountNotFound returns Error instance with AccountNotFound code
 func AccountNotFound(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusForbidden, CodeAccountNotFound, msgFormat, vals...)
 }
 
-// NotReady for builds a new Error instance with NotReady code
+// NotReady returns Error instance with NotReady code
 func NotReady(msgFormat string, vals ...interface{}) *Error {
-	return New(http.StatusForbidden, CodeNotReady, msgFormat, vals...)
+	return New(http.StatusServiceUnavailable, CodeNotReady, msgFormat, vals...)
 }
 
-// Conflict for builds a new Error instance with Conflict code
+// Conflict returns Error instance with Conflict code
 func Conflict(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusConflict, CodeConflict, msgFormat, vals...)
 }
