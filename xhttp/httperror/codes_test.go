@@ -51,7 +51,7 @@ func Test_StatusCodes(t *testing.T) {
 		{httperror.Forbidden("1"), http.StatusForbidden, "forbidden: 1"},
 		{httperror.Unauthorized("1"), http.StatusUnauthorized, "unauthorized: 1"},
 		{httperror.AccountNotFound("1"), http.StatusForbidden, "account_not_found: 1"},
-		{httperror.NotReady("1"), http.StatusForbidden, "not_ready: 1"},
+		{httperror.NotReady("1"), http.StatusServiceUnavailable, "not_ready: 1"},
 		{httperror.Conflict("1"), http.StatusConflict, "conflict: 1"},
 	}
 	for _, tc := range tcases {
