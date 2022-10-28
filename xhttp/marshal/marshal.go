@@ -66,7 +66,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 		}
 
 		// you should really be using Error to get a good error response returned
-		logger.ContextKV(r.Context(), xlog.DEBUG, "reason", "generic_error", "type", bv, "err", bv)
+		logger.ContextKV(r.Context(), xlog.WARNING, "reason", "generic_error", "type", bv, "err", bv)
 		WriteJSON(w, r, httperror.Unexpected(bv.Error()))
 		return
 
@@ -88,11 +88,11 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 }
 
 func httpError(bv interface{}, r *http.Request) {
-	// notice that we're using 2, so it will actually log where
-	// the error happened, 0 = this function, we don't want that.
-	_, fn, line, _ := runtime.Caller(2)
-
 	if e, ok := bv.(*httperror.Error); ok {
+		// notice that we're using 2, so it will actually log where
+		// the error happened, 0 = this function, we don't want that.
+		_, fn, line, _ := runtime.Caller(2)
+
 		sv := xlog.WARNING
 		typ := "API_ERROR"
 		if e.HTTPStatus >= 500 {
@@ -116,9 +116,7 @@ func httpError(bv interface{}, r *http.Request) {
 func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, printSetting PrettyPrintSetting) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(statusCode)
-	if err := codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body); err != nil {
-		logger.KV(xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
-	}
+	codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body)
 }
 
 // NewRequest returns http.Request
