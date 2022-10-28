@@ -13,6 +13,11 @@ import (
 )
 
 func TestCorrelationID(t *testing.T) {
+	v := Value(context.Background())
+	assert.Nil(t, v)
+	v = Value(WithID(NewFromContext(context.Background())))
+	assert.NotNil(t, v)
+
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cid := ID(r.Context())
 		assert.NotEmpty(t, cid)

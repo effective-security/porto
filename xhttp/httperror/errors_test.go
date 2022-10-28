@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,4 +174,18 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 			assert.Equal(t, tc.expected, w.Body.String())
 		})
 	}
+}
+
+func TestError_IsTimeout(t *testing.T) {
+	assert.True(t, httperror.IsTimeout(errors.Errorf("context deadline exceeded")))
+	assert.True(t, httperror.IsTimeout(errors.Errorf("request timeout")))
+}
+
+func TestError_NewFromPb(t *testing.T) {
+	err := httperror.InvalidParam("test")
+	assert.Equal(t, err.Error(), httperror.NewFromPb(err).Error())
+	err2 := errors.Errorf("test")
+	assert.Equal(t, "unexpected: test", httperror.NewFromPb(err2).Error())
+
+	assert.Equal(t, "unavailable: request timed out", httperror.NewFromPb(pberror.ErrGRPCTimeout).Error())
 }

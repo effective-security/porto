@@ -28,15 +28,15 @@ const (
 // IDSize specifies a size in characters for the correlation ID
 const IDSize = 12
 
-// Correlation interface allows to provide request ID
-type Correlation interface {
+// Correlator interface allows to provide request ID
+type Correlator interface {
 	CorrelationID() string
 }
 
 // RequestContext represents user contextual information about a request being processed by the server,
-// it includes CorrelationID [for cross system request correlation].
+// it includes ID, aka Request-ID or Correlation-ID (for cross system request correlation).
 type RequestContext struct {
-	correlationID string
+	ID string
 }
 
 // NewHandler returns a handler that will extact/add the correlationID from the request
@@ -48,7 +48,7 @@ func NewHandler(delegate http.Handler) http.Handler {
 		v := ctx.Value(keyContext)
 		if v == nil {
 			rctx = &RequestContext{
-				correlationID: correlationID(r),
+				ID: correlationID(r),
 			}
 			r = r.WithContext(context.WithValue(ctx, keyContext, rctx))
 		} else {
@@ -56,9 +56,9 @@ func NewHandler(delegate http.Handler) http.Handler {
 		}
 
 		// add correlationID to logs as "ctx"
-		r = r.WithContext(xlog.ContextWithKV(r.Context(), "ctx", rctx.correlationID))
+		r = r.WithContext(xlog.ContextWithKV(r.Context(), "ctx", rctx.ID))
 
-		w.Header().Set(header.XCorrelationID, rctx.correlationID)
+		w.Header().Set(header.XCorrelationID, rctx.ID)
 		delegate.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(h)
@@ -72,13 +72,13 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 		v := ctx.Value(keyContext)
 		if v == nil {
 			rctx = &RequestContext{
-				correlationID: correlationIDFromGRPC(ctx),
+				ID: correlationIDFromGRPC(ctx),
 			}
 			ctx = context.WithValue(ctx, keyContext, rctx)
 		}
 
 		// add correlationID to logs as "ctx"
-		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 
 		return handler(ctx, req)
 	}
@@ -143,13 +143,21 @@ func correlationID(req *http.Request) string {
 	return corID
 }
 
+// Value returns correlation RequestContext from the context
+func Value(ctx context.Context) *RequestContext {
+	v := ctx.Value(keyContext)
+	if r, ok := v.(*RequestContext); ok {
+		return r
+	}
+	return nil
+}
+
 // ID returns correlation ID from the context
 func ID(ctx context.Context) string {
 	corID := ""
-	v := ctx.Value(keyContext)
+	v := Value(ctx)
 	if v != nil {
-		rctx := v.(*RequestContext)
-		corID = rctx.correlationID
+		corID = v.ID
 	}
 	return corID
 }
@@ -161,10 +169,10 @@ func WithID(ctx context.Context) context.Context {
 	v := ctx.Value(keyContext)
 	if v == nil {
 		rctx := &RequestContext{
-			correlationID: certutil.RandomString(IDSize),
+			ID: certutil.RandomString(IDSize),
 		}
 		ctx = context.WithValue(ctx, keyContext, rctx)
-		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 	}
 	return ctx
 }
@@ -175,13 +183,13 @@ func WithMetaFromContext(ctx context.Context) context.Context {
 	v := ctx.Value(keyContext)
 	if v == nil {
 		rctx := &RequestContext{
-			correlationID: certutil.RandomString(IDSize),
+			ID: certutil.RandomString(IDSize),
 		}
 		ctx = context.WithValue(ctx, keyContext, rctx)
-		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 		v = rctx
 	}
-	cid := v.(*RequestContext).correlationID
+	cid := v.(*RequestContext).ID
 	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
 }
 
@@ -190,10 +198,10 @@ func WithMetaFromContext(ctx context.Context) context.Context {
 func WithMetaFromRequest(req *http.Request) context.Context {
 	cid := correlationID(req)
 	rctx := &RequestContext{
-		correlationID: cid,
+		ID: cid,
 	}
 	ctx := context.WithValue(req.Context(), keyContext, rctx)
-	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
 }
 
@@ -204,9 +212,9 @@ func NewFromContext(ctx context.Context) context.Context {
 		cid = certutil.RandomString(IDSize)
 	}
 	rctx := &RequestContext{
-		correlationID: cid,
+		ID: cid,
 	}
 	ctx = context.WithValue(context.Background(), keyContext, rctx)
-	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.correlationID)
+	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
 }

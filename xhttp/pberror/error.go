@@ -7,112 +7,82 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 )
 
-// server-side error
+// grpc error
 var (
 	ErrGRPCTimeout          = status.New(codes.Unavailable, "request timed out").Err()
 	ErrGRPCPermissionDenied = status.New(codes.PermissionDenied, "permission denied").Err()
 	ErrGRPCInvalidArgument  = status.New(codes.InvalidArgument, "invalid argument").Err()
-
-	errStringToError = map[string]error{
-		ErrorDesc(ErrGRPCTimeout):          ErrGRPCTimeout,
-		ErrorDesc(ErrGRPCPermissionDenied): ErrGRPCPermissionDenied,
-		ErrorDesc(ErrGRPCInvalidArgument):  ErrGRPCInvalidArgument,
-	}
 )
 
-// client-side error
-var (
-	ErrTimeout          = Error(ErrGRPCTimeout)
-	ErrPermissionDenied = Error(ErrGRPCPermissionDenied)
-	ErrInvalidArgument  = Error(ErrGRPCInvalidArgument)
-)
-
-// GRPCError defines gRPC server errors.
-type GRPCError struct {
-	requestID string
-	code      codes.Code
-	desc      string
+// New returns new GRPC error
+func New(code codes.Code, msgFormat string, vals ...interface{}) error {
+	return status.New(code, fmt.Sprintf(msgFormat, vals...)).Err()
 }
 
-// RequestID returns request ID
-func (e GRPCError) RequestID() string {
-	return e.requestID
-}
+// NewFromCtx returns new GRPC error
+func NewFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals ...interface{}) error {
+	e := status.New(code, fmt.Sprintf(msgFormat, vals...))
 
-// Code returns grpc/codes.Code.
-func (e GRPCError) Code() codes.Code {
-	return e.code
-}
-
-// GRPCStatus interface implementation
-func (e GRPCError) GRPCStatus() *status.Status {
-	return status.New(e.code, e.desc)
-}
-
-func (e GRPCError) Error() string {
-	return e.desc
-}
-
-// Error returns GRPCError
-func Error(err error) error {
-	if err == nil {
-		return nil
-	}
-	verr, ok := errStringToError[ErrorDesc(err)]
-	if !ok {
-		// not gRPC error
-		return err
-	}
-	ev, ok := status.FromError(verr)
-	var desc string
-	if ok {
-		desc = ev.Message()
-	} else {
-		desc = verr.Error()
-	}
-
-	e := GRPCError{code: ev.Code(), desc: desc}
-	if ctx, ok := err.(correlation.Correlation); ok {
-		e.requestID = ctx.CorrelationID()
-		if e.requestID != "" {
-			e.desc = fmt.Sprintf("request %s: ", e.requestID) + desc
+	if v := correlation.Value(ctx); v != nil {
+		cid := correlationInfo{
+			anypb.Any{
+				TypeUrl: "@correlation.id",
+				Value:   []byte(v.ID),
+			},
 		}
+
+		e, _ = e.WithDetails(&cid)
 	}
 
-	return e
+	return e.Err()
 }
 
-// ErrorDesc returns error description
-func ErrorDesc(err error) string {
+type correlationInfo struct {
+	anypb.Any
+}
+
+// Message returns gRPC error description
+func Message(err error) string {
 	if s, ok := status.FromError(err); ok {
 		return s.Message()
 	}
 	return err.Error()
 }
 
-// New returns new GRPCError
-func New(code codes.Code, msgFormat string, vals ...interface{}) error {
-	return GRPCError{
-		code: code,
-		desc: fmt.Sprintf(msgFormat, vals...),
+// Error returns error message
+func Error(err error) string {
+	cid := CorrelationID(err)
+	msg := Message(err)
+	if cid != "" {
+		return fmt.Sprintf("request %s: %s", cid, msg)
 	}
+	return msg
 }
 
-// NewFromCtx returns new GRPCError
-func NewFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals ...interface{}) error {
-	e := GRPCError{
-		code: code,
-		desc: fmt.Sprintf(msgFormat, vals...),
+// Code returns gRPC error code
+func Code(err error) codes.Code {
+	if s, ok := status.FromError(err); ok {
+		return s.Code()
 	}
+	return codes.Internal
+}
 
-	if ctx := correlation.ID(ctx); ctx != "" {
-		e.requestID = ctx
-		if e.requestID != "" {
-			e.desc = fmt.Sprintf("request %s: ", e.requestID) + e.desc
+// CorrelationID returns correlation ID from GRPC error
+func CorrelationID(err error) string {
+	if s, ok := status.FromError(err); ok {
+		for _, d := range s.Details() {
+			switch val := d.(type) {
+			case *anypb.Any:
+				if val.TypeUrl == "@correlation.id" {
+					return string(val.Value)
+				}
+			case *correlationInfo:
+				return string(val.Value)
+			}
 		}
 	}
-
-	return e
+	return ""
 }

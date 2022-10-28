@@ -1,13 +1,18 @@
 package httperror
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/ugorji/go/codec"
+	"google.golang.org/grpc/status"
 )
 
 // Error represents a single error from API.
@@ -35,6 +40,25 @@ func New(status int, code string, msgFormat string, vals ...interface{}) *Error 
 		Code:       code,
 		Message:    fmt.Sprintf(msgFormat, vals...),
 	}
+}
+
+// NewFromPb returns Error instance, from gRPC error
+func NewFromPb(err error) *Error {
+	if e, ok := err.(*Error); ok {
+		return e
+	}
+	if st, ok := status.FromError(err); ok {
+		hs := statusCode[st.Code()]
+		return &Error{
+			HTTPStatus: hs,
+			Code:       httpCode[hs],
+			Message:    st.Message(),
+			RequestID:  pberror.CorrelationID(err),
+			Cause:      err,
+		}
+	}
+
+	return New(http.StatusInternalServerError, CodeUnexpected, err.Error()).WithCause(err)
 }
 
 // InvalidParam returns Error instance with InvalidParam code
@@ -242,3 +266,13 @@ func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	}
 	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
 }
+
+// IsTimeout returns true for timeout error
+func IsTimeout(err error) bool {
+	str := err.Error()
+	return errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
+		slices.StringContainsOneOf(str, timeoutErrors)
+}
+
+var timeoutErrors = []string{"timeout", "deadline"}
