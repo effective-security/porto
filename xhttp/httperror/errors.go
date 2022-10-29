@@ -11,7 +11,6 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/pberror"
-	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 	"google.golang.org/grpc/status"
 )
@@ -55,7 +54,7 @@ func NewFromPb(err error) *Error {
 			Code:       httpCode[hs],
 			Message:    st.Message(),
 			RequestID:  pberror.CorrelationID(err),
-			cause:      errors.WithStack(err),
+			//cause:      errors.WithStack(err),
 		}
 	}
 
@@ -195,6 +194,9 @@ type ManyError struct {
 	Message string `json:"message,omitempty"`
 
 	Errors map[string]*Error `json:"errors,omitempty"`
+
+	// Cause is the first original error
+	cause error `json:"-"`
 }
 
 func (m *ManyError) Error() string {
@@ -222,6 +224,11 @@ func (m *ManyError) CorrelationID() string {
 	return m.RequestID
 }
 
+// Cause returns original error
+func (m *ManyError) Cause() error {
+	return m.cause
+}
+
 // NewMany builds new ManyError instance, build message string along the way
 func NewMany(status int, code string, msgFormat string, vals ...interface{}) *ManyError {
 	return &ManyError{
@@ -239,6 +246,9 @@ func (m *ManyError) Add(key string, err error) *ManyError {
 	}
 	if m.Errors == nil {
 		m.Errors = make(map[string]*Error)
+	}
+	if m.cause == nil {
+		m.cause = err
 	}
 	if gErr, ok := err.(*Error); ok {
 		m.Errors[key] = gErr

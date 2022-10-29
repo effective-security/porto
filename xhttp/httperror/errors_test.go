@@ -94,6 +94,7 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 	many.RequestID = "123"
 	many.Add("one", errors.Errorf("test error 1"))
 	many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
+	assert.EqualError(t, many.Cause(), "test error 1")
 
 	manyNil := &httperror.ManyError{HTTPStatus: http.StatusBadRequest}
 	manyNil.Add("one", errors.Errorf("test error 1"))
