@@ -107,7 +107,7 @@ func httpError(bv interface{}, r *http.Request) {
 			"msg", e.Message,
 			"fn", fn,
 			"ln", line,
-			"err", e.Cause,
+			"err", e.Cause(),
 		)
 	}
 }
