@@ -282,3 +282,18 @@ func IsTimeout(err error) bool {
 }
 
 var timeoutErrors = []string{"timeout", "deadline"}
+
+// Status returns HTTP status from error
+func Status(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+
+	switch e := err.(type) {
+	case *Error:
+		return e.HTTPStatus
+	case *ManyError:
+		return e.HTTPStatus
+	}
+	return statusCode[status.Code(err)]
+}

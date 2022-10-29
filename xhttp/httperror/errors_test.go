@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 )
 
 func TestErrorCode_JSON(t *testing.T) {
@@ -188,4 +189,11 @@ func TestError_NewFromPb(t *testing.T) {
 	assert.Equal(t, "unexpected: test", httperror.NewFromPb(err2).Error())
 
 	assert.Equal(t, "unavailable: request timed out", httperror.NewFromPb(pberror.ErrGRPCTimeout).Error())
+}
+
+func TestError_Status(t *testing.T) {
+	assert.Equal(t, http.StatusOK, httperror.Status(nil))
+	assert.Equal(t, http.StatusNotFound, httperror.Status(httperror.NotFound("test")))
+	assert.Equal(t, http.StatusNotFound, httperror.Status(pberror.New(codes.NotFound, "test")))
+	assert.Equal(t, http.StatusInternalServerError, httperror.Status(errors.New("test")))
 }
