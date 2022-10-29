@@ -8,6 +8,7 @@ import (
 	goErrors "errors"
 	"io"
 	"net/http"
+	"path"
 	"runtime"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
+	"google.golang.org/grpc/status"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "xhttp")
@@ -66,8 +68,8 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 		}
 
 		// you should really be using Error to get a good error response returned
-		logger.ContextKV(r.Context(), xlog.WARNING, "reason", "generic_error", "type", bv, "err", bv)
-		WriteJSON(w, r, httperror.Unexpected(bv.Error()))
+		// logger.ContextKV(r.Context(), xlog.WARNING, "reason", "generic_error", "type", bv, "err", bv)
+		WriteJSON(w, r, httperror.NewFromPb(bv))
 		return
 
 	default:
@@ -89,27 +91,53 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 
 func httpError(bv interface{}, r *http.Request) {
 	if e, ok := bv.(*httperror.Error); ok {
-		// notice that we're using 2, so it will actually log where
-		// the error happened, 0 = this function, we don't want that.
-		_, fn, line, _ := runtime.Caller(2)
-
-		sv := xlog.WARNING
-		typ := "API_ERROR"
-		if e.HTTPStatus >= 500 {
-			sv = xlog.ERROR
-			typ = "INTERNAL_ERROR"
+		logError(r, e.HTTPStatus, e.Code, e.Message, e.Cause())
+	} else if e, ok := bv.(*httperror.ManyError); ok {
+		logError(r, e.HTTPStatus, e.Code, e.Message, e.Cause())
+	} else if err, ok := bv.(error); ok {
+		var he *httperror.Error
+		if goErrors.As(err, &he) {
+			logError(r, he.HTTPStatus, he.Code, he.Message, he.Cause())
+		} else if se, ok := err.(interface {
+			GRPCStatus() *status.Status
+		}); ok {
+			st := se.GRPCStatus()
+			logError(r, int(st.Code()), "rpc", st.Message(), nil)
+		} else {
+			logError(r, http.StatusInternalServerError, httperror.CodeUnexpected, err.Error(), nil)
 		}
-		logger.ContextKV(r.Context(), sv,
-			"type", typ,
-			"path", r.URL.Path,
-			"status", e.HTTPStatus,
-			"code", e.Code,
-			"msg", e.Message,
-			"fn", fn,
-			"ln", line,
-			"err", e.Cause(),
-		)
 	}
+}
+
+func logError(r *http.Request, status int, code, message string, cause error) {
+	// notice that we're using 2, so it will actually log where
+	// the error happened, 0 = this function, we don't want that.
+	_, fn, line, _ := runtime.Caller(3)
+
+	ctx := r.Context()
+	sv := xlog.WARNING
+	typ := "API_ERROR"
+	if status >= 500 {
+		sv = xlog.ERROR
+		typ = "INTERNAL_ERROR"
+	}
+	if cause != nil {
+		if sv == xlog.ERROR {
+			// for ERROR log with stack
+			logger.ContextKV(ctx, sv, "err", cause)
+		} else {
+			logger.ContextKV(ctx, sv, "err", cause.Error())
+		}
+	}
+	logger.ContextKV(ctx, sv,
+		"type", typ,
+		"path", r.URL.Path,
+		"status", status,
+		"code", code,
+		"msg", message,
+		"fn", path.Base(fn),
+		"ln", line,
+	)
 }
 
 // WritePlainJSON will serialize the supplied body parameter as a http response.
