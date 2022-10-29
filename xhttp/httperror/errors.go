@@ -2,7 +2,7 @@ package httperror
 
 import (
 	"context"
-	"errors"
+	goerrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +11,7 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/pberror"
+	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 	"google.golang.org/grpc/status"
 )
@@ -30,7 +31,7 @@ type Error struct {
 	Message string `json:"message"`
 
 	// Cause is the original error
-	Cause error `json:"-"`
+	cause error `json:"-"`
 }
 
 // New returns Error instance, building the message string along the way
@@ -54,11 +55,39 @@ func NewFromPb(err error) *Error {
 			Code:       httpCode[hs],
 			Message:    st.Message(),
 			RequestID:  pberror.CorrelationID(err),
-			Cause:      err,
+			cause:      errors.WithStack(err),
 		}
 	}
 
 	return New(http.StatusInternalServerError, CodeUnexpected, err.Error()).WithCause(err)
+}
+
+// WithCause adds the cause error
+func (e *Error) WithCause(err error) *Error {
+	e.cause = err
+	return e
+}
+
+// CorrelationID implements the Correlation interface,
+// and returns request ID
+func (e *Error) CorrelationID() string {
+	return e.RequestID
+}
+
+// Error implements the standard error interface
+func (e *Error) Error() string {
+	if e == nil {
+		return "nil"
+	}
+	if e.RequestID != "" {
+		return fmt.Sprintf("request %s: %s: %s", e.RequestID, e.Code, e.Message)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// Cause returns original error
+func (e *Error) Cause() error {
+	return e.cause
 }
 
 // InvalidParam returns Error instance with InvalidParam code
@@ -151,29 +180,6 @@ func Conflict(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusConflict, CodeConflict, msgFormat, vals...)
 }
 
-// WithCause adds the cause error
-func (e *Error) WithCause(err error) *Error {
-	e.Cause = err
-	return e
-}
-
-// CorrelationID implements the Correlation interface,
-// and returns request ID
-func (e *Error) CorrelationID() string {
-	return e.RequestID
-}
-
-// Error implements the standard error interface
-func (e *Error) Error() string {
-	if e == nil {
-		return "nil"
-	}
-	if e.RequestID != "" {
-		return fmt.Sprintf("request %s: %s: %s", e.RequestID, e.Code, e.Message)
-	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
-}
-
 // ManyError identifies many errors from API.
 type ManyError struct {
 	// HTTPStatus contains the HTTP status code that should be used for this error
@@ -237,7 +243,7 @@ func (m *ManyError) Add(key string, err error) *ManyError {
 	if gErr, ok := err.(*Error); ok {
 		m.Errors[key] = gErr
 	} else {
-		m.Errors[key] = &Error{Code: CodeUnexpected, Message: err.Error(), Cause: err}
+		m.Errors[key] = &Error{Code: CodeUnexpected, Message: err.Error(), cause: err}
 	}
 	return m
 }
@@ -270,8 +276,8 @@ func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 // IsTimeout returns true for timeout error
 func IsTimeout(err error) bool {
 	str := err.Error()
-	return errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled) ||
+	return goerrors.Is(err, context.DeadlineExceeded) ||
+		goerrors.Is(err, context.Canceled) ||
 		slices.StringContainsOneOf(str, timeoutErrors)
 }
 
