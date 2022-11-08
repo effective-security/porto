@@ -94,7 +94,7 @@ var httpCode = map[int]string{
 }
 
 // See: https://cloud.google.com/apis/design/errors
-var statusCode = map[codes.Code]int{
+var codeStatus = map[codes.Code]int{
 	// OK is returned on success.
 	codes.OK: http.StatusOK,
 
@@ -257,4 +257,27 @@ var statusCode = map[codes.Code]int{
 	// authentication metadata is invalid or a Credentials callback fails,
 	// but also expect authentication middleware to generate it.
 	codes.Unauthenticated: 401,
+}
+
+var statusCode = map[string]codes.Code{
+	CodeAccountNotFound:         codes.NotFound,
+	CodeBadNonce:                codes.InvalidArgument,
+	CodeConflict:                codes.AlreadyExists,
+	CodeConnection:              codes.Unknown,
+	CodeContentLengthRequired:   codes.InvalidArgument,
+	CodeFailedToReadRequestBody: codes.InvalidArgument,
+	CodeForbidden:               codes.PermissionDenied,
+	CodeInvalidContentType:      codes.InvalidArgument,
+	CodeInvalidJSON:             codes.InvalidArgument,
+	CodeInvalidParam:            codes.InvalidArgument,
+	CodeInvalidRequest:          codes.InvalidArgument,
+	CodeMalformed:               codes.InvalidArgument,
+	CodeNotFound:                codes.NotFound,
+	CodeNotReady:                codes.Unavailable,
+	CodeRateLimitExceeded:       codes.ResourceExhausted,
+	CodeRequestFailed:           codes.Unknown,
+	CodeRequestTooLarge:         codes.InvalidArgument,
+	CodeTooEarly:                codes.ResourceExhausted,
+	CodeUnauthorized:            codes.Unauthenticated,
+	CodeUnexpected:              codes.Unknown,
 }
