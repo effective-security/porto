@@ -48,7 +48,7 @@ func NewFromPb(err error) *Error {
 		return e
 	}
 	if st, ok := status.FromError(err); ok {
-		hs := statusCode[st.Code()]
+		hs := codeStatus[st.Code()]
 		return &Error{
 			HTTPStatus: hs,
 			Code:       httpCode[hs],
@@ -59,6 +59,11 @@ func NewFromPb(err error) *Error {
 	}
 
 	return New(http.StatusInternalServerError, CodeUnexpected, err.Error()).WithCause(err)
+}
+
+// GRPCStatus returns gRPC status
+func (e *Error) GRPCStatus() *status.Status {
+	return status.New(statusCode[e.Code], e.Message)
 }
 
 // WithCause adds the cause error
@@ -199,6 +204,11 @@ type ManyError struct {
 	cause error `json:"-"`
 }
 
+// GRPCStatus returns gRPC status
+func (m *ManyError) GRPCStatus() *status.Status {
+	return status.New(statusCode[m.Code], m.Message)
+}
+
 func (m *ManyError) Error() string {
 	if m == nil {
 		return "nil"
@@ -305,5 +315,5 @@ func Status(err error) int {
 	case *ManyError:
 		return e.HTTPStatus
 	}
-	return statusCode[status.Code(err)]
+	return codeStatus[status.Code(err)]
 }

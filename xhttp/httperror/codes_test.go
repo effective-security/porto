@@ -58,6 +58,7 @@ func Test_StatusCodes(t *testing.T) {
 		t.Run(tc.httpErr.Code, func(t *testing.T) {
 			assert.Equal(t, tc.expStatus, tc.httpErr.HTTPStatus)
 			assert.Equal(t, tc.expMsg, tc.httpErr.Error())
+			assert.NotNil(t, tc.httpErr.GRPCStatus())
 		})
 	}
 }
