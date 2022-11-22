@@ -37,6 +37,9 @@ func Test_Factory(t *testing.T) {
 	assert.NoError(t, err)
 	_, err = f.ForHost("https://localhost:4000")
 	assert.NoError(t, err)
+	_, err = f.ForHost("https://unknown")
+	assert.NoError(t, err)
+	assert.Nil(t, f.ConfigForHost("https://unknown"))
 
 	_, err = f.CreateClient("default")
 	assert.NoError(t, err)
