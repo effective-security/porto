@@ -23,11 +23,7 @@ jobs:
           --header "Accept: application/vnd.github.v3+json" \
           https://api.github.com/repos/${{ github.repository }}
   UnitTest:
-    strategy:
-      matrix:
-        go-version: [1.18.x]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     env:
       ITEST_IMAGE_TAG: rc-${{ github.event.number }}
       COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
@@ -44,13 +40,13 @@ jobs:
           GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
           GIT_USER: ${{ secrets.GIT_USER }}
 
-      - name: Install Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: ${{ matrix.go-version }}
-
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: go.mod
 
       - name: Prepare
         run: make vars tools generate

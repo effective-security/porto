@@ -144,12 +144,13 @@ func TestDbTime(t *testing.T) {
 	nbl := nb.Local()
 
 	tcases := []struct {
-		val xdb.Time
-		exp time.Time
+		val    xdb.Time
+		exp    time.Time
+		isZero bool
 	}{
-		{val: xdb.Time{}, exp: time.Time{}},
-		{val: xdb.Time(nb), exp: nb},
-		{val: xdb.Time(nbl), exp: nb},
+		{val: xdb.Time{}, exp: time.Time{}, isZero: true},
+		{val: xdb.Time(nb), exp: nb, isZero: false},
+		{val: xdb.Time(nbl), exp: nb, isZero: false},
 	}
 
 	for _, tc := range tcases {
@@ -161,6 +162,14 @@ func TestDbTime(t *testing.T) {
 			drv = v
 		}
 		assert.Equal(t, tc.exp, drv)
+
+		if tc.isZero {
+			assert.True(t, tc.val.IsZero())
+			assert.Nil(t, tc.val.Ptr())
+		} else {
+			assert.False(t, tc.val.IsZero())
+			assert.NotNil(t, tc.val.Ptr())
+		}
 
 		var val2 xdb.Time
 		err = val2.Scan(dr)

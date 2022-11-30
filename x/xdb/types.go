@@ -42,6 +42,20 @@ func (ns Time) UTC() time.Time {
 	return time.Time(ns).UTC()
 }
 
+// IsZero reports whether t represents the zero time instant, January 1, year 1, 00:00:00 UTC.
+func (ns Time) IsZero() bool {
+	return time.Time(ns).IsZero()
+}
+
+// Ptr returns pointer to Time, or nil if the time is zero
+func (ns Time) Ptr() *time.Time {
+	t := time.Time(ns)
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
 // Strings de/encodes the string slice to/from a SQL string.
 type Strings []string
 
