@@ -26,19 +26,22 @@ const (
 	GuestRoleName = "guest"
 
 	// TLSUserRoleName defines a generic role name for an authenticated user
-	TLSUserRoleName = "tls_authenticated"
+	TLSUserRoleName = "tls_user"
 
 	// JWTUserRoleName defines a generic role name for an authenticated user
-	JWTUserRoleName = "jwt_authenticated"
+	JWTUserRoleName = "jwt_user"
 
 	// DPoPUserRoleName defines a generic role name for an authenticated user
-	DPoPUserRoleName = "dpop_authenticated"
+	DPoPUserRoleName = "dpop_user"
 
 	// DefaultSubjectClaim defines default JWT Subject claim
 	DefaultSubjectClaim = "sub"
 
 	// DefaultRoleClaim defines default Role claim
 	DefaultRoleClaim = "email"
+
+	// DefaultTenantClaim defines default Tenant claim
+	DefaultTenantClaim = "tenant"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -85,6 +88,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	if config.DPoP.Enabled {
 		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
 		prov.config.DPoP.RoleClaim = slices.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
+		prov.config.DPoP.TenantClaim = slices.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
@@ -95,6 +99,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	if config.JWT.Enabled {
 		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
 		prov.config.JWT.RoleClaim = slices.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
+		prov.config.JWT.TenantClaim = slices.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -266,14 +271,19 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 	}
 
 	subj := claims.String(p.config.DPoP.SubjectClaim)
+	tenant := claims.String(p.config.DPoP.TenantClaim)
 	roleClaim := claims.String(p.config.DPoP.RoleClaim)
 	role := p.dpopRoles[roleClaim]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
 
-	logger.ContextKV(r.Context(), xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
-	return identity.NewIdentity(role, subj, claims, auth, tokenType), nil
+	logger.ContextKV(r.Context(), xlog.DEBUG,
+		"role", role,
+		"tenant", tenant,
+		"subject", subj,
+		"type", tokenType)
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
 func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error) {
@@ -303,13 +313,18 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 	}
 
 	subj := claims.String(p.config.JWT.SubjectClaim)
+	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
 	role := p.jwtRoles[roleClaim]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj, "tokenType", tokenType)
-	return identity.NewIdentity(role, subj, claims, auth, tokenType), nil
+	logger.KV(xlog.DEBUG,
+		"role", role,
+		"tenant", tenant,
+		"subject", subj,
+		"type", tokenType)
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {
@@ -329,7 +344,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		if len(peer.EmailAddresses) > 0 {
 			claims["email"] = peer.EmailAddresses[0]
 		}
-		return identity.NewIdentity(role, peer.Subject.CommonName, claims, "", ""), nil
+		return identity.NewIdentity(role, peer.Subject.CommonName, "", claims, "", ""), nil
 	}
 
 	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)

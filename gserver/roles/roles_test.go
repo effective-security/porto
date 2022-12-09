@@ -38,8 +38,9 @@ func Test_All(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 
 	claims := jwt.MapClaims{
-		"sub":   "12234",
-		"email": "denis@trusty.com",
+		"sub":    "12234",
+		"email":  "denis@trusty.com",
+		"tenant": "t12341234",
 		"cnf": map[string]interface{}{
 			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
@@ -89,6 +90,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -100,6 +102,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -125,6 +128,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 

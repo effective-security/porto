@@ -429,7 +429,7 @@ func (c *Provider) checkAccess(r *http.Request) error {
 
 	idn := c.requestRoleMapper(r)
 	if !c.isAllowed(r.Context(), r.URL.Path, idn) {
-		return errors.Errorf("%s role not allowed", idn.String())
+		return errors.Errorf("%s not allowed", idn.String())
 	}
 
 	return nil
@@ -475,7 +475,7 @@ func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		idn := c.grpcRoleMapper(ctx)
 		if !c.isAllowed(ctx, info.FullMethod, idn) {
-			return nil, status.Errorf(codes.PermissionDenied, "%s role not allowed", idn.String())
+			return nil, status.Errorf(codes.PermissionDenied, "%s not allowed", idn.String())
 		}
 
 		return handler(ctx, req)

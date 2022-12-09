@@ -25,12 +25,14 @@ func Test_Identity(t *testing.T) {
 	i := identity{role: "netmgmt", subject: "Ekspand"}
 	assert.Equal(t, "netmgmt", i.Role())
 	assert.Equal(t, "Ekspand", i.Subject())
-	assert.Equal(t, "netmgmt/Ekspand", i.String())
+	assert.Equal(t, "Ekspand:netmgmt", i.String())
+	assert.Empty(t, i.Tenant())
 
-	id := NewIdentity("netmgmt", "Ekspand", nil, "", "")
+	id := NewIdentity("netmgmt", "Ekspand", "org", nil, "", "")
 	assert.Equal(t, "netmgmt", id.Role())
 	assert.Equal(t, "Ekspand", id.Subject())
-	assert.Equal(t, "netmgmt/Ekspand", id.String())
+	assert.Equal(t, "org", id.Tenant())
+	assert.Equal(t, "org/Ekspand:netmgmt", id.String())
 }
 
 func Test_ForRequest(t *testing.T) {
@@ -56,7 +58,7 @@ func Test_ClientIP(t *testing.T) {
 func Test_AddToContext(t *testing.T) {
 	ctx := AddToContext(
 		context.Background(),
-		NewRequestContext(NewIdentity("r", "n", map[string]interface{}{"email": "test"}, "", "")),
+		NewRequestContext(NewIdentity("r", "n", "", map[string]interface{}{"email": "test"}, "", "")),
 	)
 
 	rqCtx := FromContext(ctx)
@@ -130,7 +132,7 @@ func Test_grpcFromContext(t *testing.T) {
 
 	t.Run("with_custom_id", func(t *testing.T) {
 		def := func(ctx context.Context) (Identity, error) {
-			return NewIdentity("test", "", nil, "", ""), nil
+			return NewIdentity("test", "", "", nil, "", ""), nil
 		}
 		unary := NewAuthUnaryInterceptor(def)
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
