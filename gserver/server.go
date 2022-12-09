@@ -73,6 +73,8 @@ type Server struct {
 	authz    *authz.Provider
 	identity roles.IdentityProvider
 	disco    discovery.Discovery
+
+	opts options
 }
 
 // Start returns running Server
@@ -81,6 +83,7 @@ func Start(
 	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
+	opts ...Option,
 ) (e *Server, err error) {
 	serving := false
 	defer func() {
@@ -98,7 +101,7 @@ func Start(
 		e = nil
 	}()
 
-	e, err = newServer(name, cfg, container, serviceFactories)
+	e, err = newServer(name, cfg, container, serviceFactories, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +160,7 @@ func newServer(
 	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
+	opts ...Option,
 ) (*Server, error) {
 	var err error
 
@@ -177,6 +181,10 @@ func newServer(
 		//sctxs: make(map[string]*serveCtx),
 		stopc:     make(chan struct{}),
 		startedAt: time.Now(),
+	}
+
+	for _, o := range opts {
+		o.apply(&e.opts)
 	}
 
 	for _, svc := range cfg.Services {

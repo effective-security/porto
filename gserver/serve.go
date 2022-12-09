@@ -215,6 +215,10 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		go func() { errHandler(gsInsecure.Serve(grpcL)) }()
 
 		handler := router.Handler()
+		for _, other := range s.opts.handlers {
+			handler = other(handler)
+		}
+
 		handler = configureHandlers(s, handler)
 
 		srv := &http.Server{
@@ -343,10 +347,16 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		grpc_prometheus.UnaryServerInterceptor,
 		s.authz.NewUnaryInterceptor(),
 	}
+	if len(s.opts.unary) > 0 {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, s.opts.unary...)
+	}
 
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		newStreamInterceptor(s),
 		grpc_prometheus.StreamServerInterceptor,
+	}
+	if len(s.opts.stream) > 0 {
+		chainStreamInterceptors = append(chainStreamInterceptors, s.opts.stream...)
 	}
 
 	opts = append(opts, grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(chainUnaryInterceptors...)))
