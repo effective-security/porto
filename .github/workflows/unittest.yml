@@ -9,19 +9,7 @@ on:
   pull_request:
 
 jobs:
-  context-info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJSON(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      - name: Repo info
-        run: |
-          curl -s \
-          --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
-          --header "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}
+ 
   UnitTest:
     runs-on: ubuntu-latest
     env:

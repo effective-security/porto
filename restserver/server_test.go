@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -28,13 +29,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const projectPath = "../"
-
 var tlsConnectionForAdmin = &tls.ConnectionState{
 	PeerCertificates: []*x509.Certificate{
 		{
 			Subject: pkix.Name{
-				CommonName:   "admin",
+				CommonName:   "Admin Trusted",
 				Organization: []string{"effective-security"},
 			},
 		},
@@ -55,7 +54,7 @@ var tlsConnectionForAdminUntrusted = &tls.ConnectionState{
 	PeerCertificates: []*x509.Certificate{
 		{
 			Subject: pkix.Name{
-				CommonName:   "admin",
+				CommonName:   "Admin Untrusted",
 				Organization: []string{"effective-security"},
 			},
 		},
@@ -76,7 +75,7 @@ var tlsConnectionForClient = &tls.ConnectionState{
 	PeerCertificates: []*x509.Certificate{
 		{
 			Subject: pkix.Name{
-				CommonName:   "client",
+				CommonName:   "Client User",
 				Organization: []string{"effective-security"},
 			},
 		},
@@ -97,7 +96,7 @@ var tlsConnectionForClientFromOtherOrg = &tls.ConnectionState{
 	PeerCertificates: []*x509.Certificate{
 		{
 			Subject: pkix.Name{
-				CommonName:   "client",
+				CommonName:   "Client Untrusted",
 				Organization: []string{"someorg"},
 			},
 		},
@@ -267,7 +266,7 @@ func Test_NewServerWithCustomHandler(t *testing.T) {
 	}()
 
 	// register for signals, and wait to be shutdown
-	signal.Notify(sigs, os.Interrupt, os.Kill, syscall.SIGTERM, syscall.SIGUSR2, syscall.SIGABRT)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR2, syscall.SIGABRT)
 	// Block until a signal is received.
 	<-sigs
 	server.StopHTTP()
@@ -492,7 +491,7 @@ func Test_Authz(t *testing.T) {
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"guest/client role not allowed"}`, cid), w.Body.String())
+		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:guest not allowed"}`, cid), w.Body.String())
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
 
@@ -550,7 +549,7 @@ func Test_Authz(t *testing.T) {
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"client role not allowed"}`, cid), w.Body.String())
+		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:client not allowed"}`, cid), w.Body.String())
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
 
@@ -563,7 +562,7 @@ func Test_Authz(t *testing.T) {
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"client role not allowed"}`, cid), w.Body.String())
+		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client Untrusted:client not allowed"}`, cid), w.Body.String())
 		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
 	})
 
@@ -589,17 +588,23 @@ func identityMapperFromCN(r *http.Request) (identity.Identity, error) {
 		role = identity.GuestRoleName
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
-		role = r.TLS.PeerCertificates[0].Subject.CommonName
+		role = "user"
+
+		if strings.Contains(name, "Admin") {
+			role = "admin"
+		} else if strings.Contains(name, "Client") {
+			role = "client"
+		}
+
 	}
-	return identity.NewIdentity(role, name, nil, "", ""), nil
+	return identity.NewIdentity(role, name, "", nil, "", ""), nil
 }
 
 func identityMapperFromCNMust(r *http.Request) (identity.Identity, error) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil, errors.New("missing client certificate")
 	}
-	return identity.NewIdentity(r.TLS.PeerCertificates[0].Subject.CommonName,
-		r.TLS.PeerCertificates[0].Subject.CommonName, nil, "", ""), nil
+	return identity.NewIdentity("user", r.TLS.PeerCertificates[0].Subject.CommonName, "", nil, "", ""), nil
 }
 
 type serviceX struct {
