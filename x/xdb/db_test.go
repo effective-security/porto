@@ -147,10 +147,11 @@ func TestDbTime(t *testing.T) {
 		val    xdb.Time
 		exp    time.Time
 		isZero bool
+		str    string
 	}{
-		{val: xdb.Time{}, exp: time.Time{}, isZero: true},
-		{val: xdb.Time(nb), exp: nb, isZero: false},
-		{val: xdb.Time(nbl), exp: nb, isZero: false},
+		{val: xdb.Time{}, exp: time.Time{}, isZero: true, str: ""},
+		{val: xdb.Time(nb), exp: nb, isZero: false, str: "2022-04-01T16:11:15Z"},
+		{val: xdb.Time(nbl), exp: nb, isZero: false, str: "2022-04-01T16:11:15Z"},
 	}
 
 	for _, tc := range tcases {
@@ -170,6 +171,7 @@ func TestDbTime(t *testing.T) {
 			assert.False(t, tc.val.IsZero())
 			assert.NotNil(t, tc.val.Ptr())
 		}
+		assert.Equal(t, tc.str, tc.val.String())
 
 		var val2 xdb.Time
 		err = val2.Scan(dr)
