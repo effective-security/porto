@@ -49,7 +49,7 @@ func (ns Time) IsZero() bool {
 
 // Ptr returns pointer to Time, or nil if the time is zero
 func (ns Time) Ptr() *time.Time {
-	t := time.Time(ns)
+	t := ns.UTC()
 	if t.IsZero() {
 		return nil
 	}
