@@ -215,10 +215,6 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		go func() { errHandler(gsInsecure.Serve(grpcL)) }()
 
 		handler := router.Handler()
-		for _, other := range s.opts.handlers {
-			handler = other(handler)
-		}
-
 		handler = configureHandlers(s, handler)
 
 		srv := &http.Server{
@@ -267,6 +263,10 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	// NOTE: the handlers are executed in the reverse order
+	// therefore configure additional first
+	for _, other := range s.opts.handlers {
+		handler = other(handler)
+	}
 
 	// service ready
 	handler = ready.NewServiceStatusVerifier(s, handler)

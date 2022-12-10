@@ -127,7 +127,7 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	lg.ServeHTTP(w, r)
 	logLine := tw.String()
 	// cid is random
-	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=200 bytes=11 time=0 remote=\"\" agent=\"no-agent\"\n", logLine)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=200 bytes=11 time=0 agent=\"no-agent\"\n", logLine)
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {

@@ -282,12 +282,12 @@ func Test_AccessLogs(t *testing.T) {
 
 	t.Run("logs", func(t *testing.T) {
 		buf.Reset()
-		shouldLog("/", "bobby", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"bobby\" user=\"test\" email=\"\" path=\"/\" node=\"\"\n")
-		shouldLog("/bob", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bob\" node=\"\"\n")
-		shouldLog("/bar", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\"\n")
-		shouldLog("/bar", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\"\n")
-		shouldLog("/foo/eve", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\"\n")
-		shouldLog("/foo/eve", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\"\n")
+		shouldLog("/", "bobby", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" path=\"/\"\n")
+		shouldLog("/bob", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" path=\"/bob\"\n")
+		shouldLog("/bar", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" path=\"/bar\" node=\"bar\"\n")
+		shouldLog("/bar", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" path=\"/bar\" node=\"bar\"\n")
+		shouldLog("/foo/eve", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" path=\"/foo/eve\" node=\"eve\"\n")
+		shouldLog("/foo/eve", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" path=\"/foo/eve\" node=\"eve\"\n")
 	})
 
 	t.Run("nologs", func(t *testing.T) {
