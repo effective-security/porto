@@ -20,7 +20,7 @@ type Identity interface {
 	Role() string
 	Subject() string
 	Tenant() string
-	Claims() map[string]interface{}
+	Claims() jwt.MapClaims
 	AccessToken() string
 	TokenType() string
 }
@@ -91,7 +91,7 @@ func (c identity) TokenType() string {
 }
 
 // Claims returns application specific user info
-func (c identity) Claims() map[string]interface{} {
+func (c identity) Claims() jwt.MapClaims {
 	res := jwt.MapClaims{}
 	res.Add(c.claims)
 	return res

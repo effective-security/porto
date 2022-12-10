@@ -69,8 +69,9 @@ func Test_NewIdentityWithClaims(t *testing.T) {
 	r = WithTestIdentity(r, NewIdentity("role1", "name1", "", u, "", ""))
 	ctx := FromRequest(r)
 	assert.Equal(t, "name1:role1", ctx.Identity().String())
-	assert.Equal(t, "denis@ekspand.com", ctx.Identity().Claims()["email"])
-	assert.Equal(t, "org", ctx.Identity().Claims()["tenant"])
+	claims := ctx.Identity().Claims()
+	assert.Equal(t, "denis@ekspand.com", claims.String("email"))
+	assert.Equal(t, "org", claims["tenant"])
 }
 
 func Test_WithTestIdentityServeHTTP(t *testing.T) {

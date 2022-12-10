@@ -67,7 +67,7 @@ func Test_AddToContext(t *testing.T) {
 	identity := rqCtx.Identity()
 	require.Equal(t, "n", identity.Subject())
 	require.Equal(t, "r", identity.Role())
-	require.Equal(t, "test", identity.Claims()["email"])
+	require.Equal(t, "test", identity.Claims().String("email"))
 }
 
 func Test_FromContext(t *testing.T) {
