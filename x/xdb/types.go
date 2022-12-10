@@ -56,6 +56,16 @@ func (ns Time) Ptr() *time.Time {
 	return &t
 }
 
+// String returns string in RFC3339 format,
+// if it's Zero time, an empty string is returned
+func (ns Time) String() string {
+	t := ns.UTC()
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
+
 // Strings de/encodes the string slice to/from a SQL string.
 type Strings []string
 
