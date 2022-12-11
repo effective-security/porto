@@ -186,8 +186,8 @@ func TestDbTime(t *testing.T) {
 
 	now = now.Add(time.Hour)
 	now2 := xnow.Add(time.Hour)
-	assert.Equal(t, now.Unix(), now2.Unix())
-	assert.Equal(t, xafter.UTC().Unix(), now2.Unix())
+	assert.Equal(t, now.Unix(), now2.UTC().Unix())
+	assert.Equal(t, xafter.UTC().Unix(), now2.UTC().Unix())
 }
 
 func TestDbNameFromConnection(t *testing.T) {
