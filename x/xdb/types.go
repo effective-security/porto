@@ -37,6 +37,24 @@ func (ns Time) Value() (driver.Value, error) {
 	}.Value()
 }
 
+// Now returns Time in UTC,
+// with Second presicions
+func Now() Time {
+	return Time(time.Now().Truncate(time.Second).UTC())
+}
+
+// FromNow returns Time in UTC after now,
+// with Second presicions
+func FromNow(after time.Duration) Time {
+	return Time(time.Now().Add(after).Truncate(time.Second).UTC())
+}
+
+// Add returns Time in UTC after this thime,
+// with Second presicions
+func (ns Time) Add(after time.Duration) time.Time {
+	return time.Time(ns).Add(after).Truncate(time.Second).UTC()
+}
+
 // UTC returns t with the location set to UTC.
 func (ns Time) UTC() time.Time {
 	return time.Time(ns).UTC()
