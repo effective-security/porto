@@ -89,12 +89,17 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 				clientIP: clientIP,
 			}
 
+			var email string
+			if claims := idn.Claims(); len(claims) > 0 {
+				email = claims.String("email")
+			}
 			ctx := r.Context()
 			role := idn.Role()
 			if role != "guest" {
 				ctx = xlog.ContextWithKV(ctx,
 					"tenant", idn.Tenant(),
 					"user", idn.Subject(),
+					"email", email,
 					"role", role)
 			}
 			r = r.WithContext(context.WithValue(ctx, keyContext, rctx))
