@@ -178,6 +178,16 @@ func TestDbTime(t *testing.T) {
 		require.NoError(t, err)
 		assert.EqualValues(t, tc.val.UTC(), val2)
 	}
+
+	now := time.Now()
+	xnow := xdb.Now()
+	xafter := xdb.FromNow(time.Hour)
+	assert.Equal(t, xnow.UTC().Unix(), now.Unix())
+
+	now = now.Add(time.Hour)
+	now2 := xnow.Add(time.Hour)
+	assert.Equal(t, now.Unix(), now2.Unix())
+	assert.Equal(t, xafter.UTC().Unix(), now2.Unix())
 }
 
 func TestDbNameFromConnection(t *testing.T) {
