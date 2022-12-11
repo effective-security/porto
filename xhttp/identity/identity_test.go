@@ -77,12 +77,18 @@ func Test_NewIdentityWithClaims(t *testing.T) {
 func Test_WithTestIdentityServeHTTP(t *testing.T) {
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := FromRequest(r)
-		assert.Equal(t, "org/name2:role1", caller.Identity().String())
+		idn := caller.Identity()
+		assert.Equal(t, "denis@ekspand.com", idn.Claims().String("email"))
+		assert.Equal(t, "org/name2:role1", idn.String())
 	})
 	rw := httptest.NewRecorder()
 	handler := NewContextHandler(d, nil)
 	r, _ := http.NewRequest("GET", "/test", nil)
-	r = WithTestIdentity(r, NewIdentity("role1", "name2", "org", nil, "", ""))
+	u := jwt.MapClaims{
+		"email":  "denis@ekspand.com",
+		"tenant": "org",
+	}
+	r = WithTestIdentity(r, NewIdentity("role1", "name2", "org", u, "", ""))
 	handler.ServeHTTP(rw, r)
 }
 

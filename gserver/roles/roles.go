@@ -270,6 +270,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
+	email := claims.String("email")
 	subj := claims.String(p.config.DPoP.SubjectClaim)
 	tenant := claims.String(p.config.DPoP.TenantClaim)
 	roleClaim := claims.String(p.config.DPoP.RoleClaim)
@@ -282,6 +283,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		"role", role,
 		"tenant", tenant,
 		"subject", subj,
+		"email", email,
 		"type", tokenType)
 	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
@@ -312,6 +314,7 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 		return nil, err
 	}
 
+	email := claims.String("email")
 	subj := claims.String(p.config.JWT.SubjectClaim)
 	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
@@ -323,6 +326,7 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 		"role", role,
 		"tenant", tenant,
 		"subject", subj,
+		"email", email,
 		"type", tokenType)
 	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
