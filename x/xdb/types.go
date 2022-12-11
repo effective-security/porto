@@ -51,8 +51,8 @@ func FromNow(after time.Duration) Time {
 
 // Add returns Time in UTC after this thime,
 // with Second presicions
-func (ns Time) Add(after time.Duration) time.Time {
-	return time.Time(ns).Add(after).Truncate(time.Second).UTC()
+func (ns Time) Add(after time.Duration) Time {
+	return Time(time.Time(ns).Add(after).Truncate(time.Second).UTC())
 }
 
 // UTC returns t with the location set to UTC.
