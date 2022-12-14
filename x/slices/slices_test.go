@@ -360,3 +360,9 @@ func TestSlices_StringUpto(t *testing.T) {
 	assert.Equal(t, "11", StringUpto("11", 2))
 	assert.Equal(t, "11", StringUpto("11", 3))
 }
+
+func Test_removeDuplicates(t *testing.T) {
+	dups := []string{"12", "45", "45", "78", "12", "secdi"}
+	noDups := UniqueStrings(dups)
+	assert.Equal(t, len(noDups), 4)
+}
