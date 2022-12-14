@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/x/xdb"
+	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,9 @@ func TestDbTime(t *testing.T) {
 	now2 := xnow.Add(time.Hour)
 	assert.Equal(t, now.Unix(), now2.UTC().Unix())
 	assert.Equal(t, xafter.UTC().Unix(), now2.UTC().Unix())
+
+	assert.Equal(t, `"2022-04-01T16:11:15Z"`, xlog.EscapedString(xdb.Time(nbl)))
+	assert.Equal(t, `""`, xlog.EscapedString(xdb.Time{}))
 }
 
 func TestDbNameFromConnection(t *testing.T) {

@@ -222,3 +222,17 @@ func Float64SlicesEqual(a, b []float64) bool {
 	}
 	return true
 }
+
+// UniqueStrings removes duplicates from the given list
+func UniqueStrings(dups []string) []string {
+	keys := make(map[string]bool)
+	list := []string{}
+
+	for _, entry := range dups {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
