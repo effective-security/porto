@@ -2,6 +2,7 @@ package xdb_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -192,6 +193,12 @@ func TestDbTime(t *testing.T) {
 
 	assert.Equal(t, `"2022-04-01T16:11:15Z"`, xlog.EscapedString(xdb.Time(nbl)))
 	assert.Equal(t, `""`, xlog.EscapedString(xdb.Time{}))
+
+	b, err := json.Marshal(xnow)
+	require.NoError(t, err)
+	var xnow2 xdb.Time
+	require.NoError(t, json.Unmarshal(b, &xnow2))
+	assert.Equal(t, xnow, xnow2)
 }
 
 func TestDbNameFromConnection(t *testing.T) {
