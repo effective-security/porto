@@ -1,6 +1,7 @@
 package xdb
 
 import (
+	"bytes"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
@@ -65,6 +66,11 @@ func (ns Time) IsZero() bool {
 	return time.Time(ns).IsZero()
 }
 
+// IsNil reports whether t represents the zero time instant, January 1, year 1, 00:00:00 UTC.
+func (ns Time) IsNil() bool {
+	return time.Time(ns).IsZero()
+}
+
 // Ptr returns pointer to Time, or nil if the time is zero
 func (ns Time) Ptr() *time.Time {
 	t := ns.UTC()
@@ -87,12 +93,20 @@ func (ns Time) String() string {
 // MarshalJSON implements the json.Marshaler interface.
 // The time is a quoted string in RFC 3339 format, with sub-second precision added if present.
 func (ns Time) MarshalJSON() ([]byte, error) {
+	t := time.Time(ns)
+	if t.IsZero() {
+		return []byte(`""`), nil
+	}
 	return time.Time(ns).MarshalJSON()
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
 // The time is expected to be a quoted string in RFC 3339 format.
 func (ns *Time) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || bytes.Equal([]byte(`""`), data) {
+		*ns = Time{}
+		return nil
+	}
 	return errors.WithStack(json.Unmarshal([]byte(data), (*time.Time)(ns)))
 }
 

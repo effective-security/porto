@@ -174,6 +174,7 @@ func TestDbTime(t *testing.T) {
 			assert.NotNil(t, tc.val.Ptr())
 		}
 		assert.Equal(t, tc.str, tc.val.String())
+		assert.Equal(t, tc.val.IsZero(), tc.val.IsNil())
 
 		var val2 xdb.Time
 		err = val2.Scan(dr)
@@ -190,15 +191,37 @@ func TestDbTime(t *testing.T) {
 	now2 := xnow.Add(time.Hour)
 	assert.Equal(t, now.Unix(), now2.UTC().Unix())
 	assert.Equal(t, xafter.UTC().Unix(), now2.UTC().Unix())
+}
 
-	assert.Equal(t, `"2022-04-01T16:11:15Z"`, xlog.EscapedString(xdb.Time(nbl)))
+func TestDbTimeEncode(t *testing.T) {
+	nb, err := time.Parse(time.RFC3339, "2022-04-01T16:11:15.182Z")
+	require.NoError(t, err)
+	xct := xdb.Time(nb)
+
+	assert.Equal(t, `"2022-04-01T16:11:15Z"`, xlog.EscapedString(xct))
 	assert.Equal(t, `""`, xlog.EscapedString(xdb.Time{}))
 
-	b, err := json.Marshal(xnow)
+	b, err := json.Marshal(xct)
 	require.NoError(t, err)
 	var xnow2 xdb.Time
 	require.NoError(t, json.Unmarshal(b, &xnow2))
-	assert.Equal(t, xnow, xnow2)
+	assert.Equal(t, xct, xnow2)
+
+	b, err = json.Marshal(xdb.Time{})
+	assert.NoError(t, err)
+	assert.Equal(t, `""`, string(b))
+
+	foo := struct {
+		CreatedAt xdb.Time `json:"created_at,omitempty"`
+		UpdatedAt xdb.Time `json:"updated_at,omitempty"`
+	}{
+		CreatedAt: xct,
+	}
+	b, err = json.Marshal(foo)
+	require.NoError(t, err)
+	assert.Equal(t, `{"created_at":"2022-04-01T16:11:15.182Z","updated_at":""}`, string(b))
+
+	require.NoError(t, json.Unmarshal(b, &foo))
 }
 
 func TestDbNameFromConnection(t *testing.T) {
