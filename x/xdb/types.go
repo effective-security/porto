@@ -84,6 +84,18 @@ func (ns Time) String() string {
 	return t.Format(time.RFC3339)
 }
 
+// MarshalJSON implements the json.Marshaler interface.
+// The time is a quoted string in RFC 3339 format, with sub-second precision added if present.
+func (ns Time) MarshalJSON() ([]byte, error) {
+	return time.Time(ns).MarshalJSON()
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface.
+// The time is expected to be a quoted string in RFC 3339 format.
+func (ns *Time) UnmarshalJSON(data []byte) error {
+	return errors.WithStack(json.Unmarshal([]byte(data), (*time.Time)(ns)))
+}
+
 // Strings de/encodes the string slice to/from a SQL string.
 type Strings []string
 
