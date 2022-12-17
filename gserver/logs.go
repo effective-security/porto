@@ -22,6 +22,7 @@ var (
 	keyForReqPerf       = []string{"grpc", "request", "perf"}
 	keyForReqSuccessful = []string{"grpc", "request", "status", "successful"}
 	keyForReqFailed     = []string{"grpc", "request", "status", "failed"}
+	keyForReqRole       = []string{"grpc", "request", "status", "role"}
 )
 
 func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
@@ -89,7 +90,6 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 
 	tags := []metrics.Tag{
 		{Name: "method", Value: info.FullMethod},
-		{Name: "role", Value: role},
 		{Name: "status", Value: code.String()},
 	}
 
@@ -100,6 +100,8 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	} else {
 		metrics.IncrCounter(keyForReqFailed, 1, tags...)
 	}
+	metrics.IncrCounter(keyForReqRole, 1,
+		append(tags, metrics.Tag{Name: "role", Value: role})...)
 }
 
 func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {

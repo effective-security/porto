@@ -492,7 +492,8 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:guest not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("must_have_TLS", func(t *testing.T) {
@@ -507,7 +508,8 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	server, _ := startServer(true, identityMapperFromCN)
@@ -523,8 +525,9 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		assertCounter("authztest.http.request.status.successful;method=GET;role=admin;status=200;uri=/v1/allow", 1)
-		assertSample("authztest.http.request.perf;method=GET;role=admin;status=200;uri=/v1/allow")
+		assertCounter("authztest.http.request.role;method=GET;status=200;uri=/v1/allow;role=admin", 1)
+		assertCounter("authztest.http.request.status.successful;method=GET;status=200;uri=/v1/allow", 1)
+		assertSample("authztest.http.request.perf;method=GET;status=200;uri=/v1/allow")
 	})
 
 	t.Run("any_root_admin_to_allow_200", func(t *testing.T) {
@@ -537,7 +540,8 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, `{"Method":"GET","Path":"/v1/allow"}`, w.Body.String())
 
-		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("client_to_allow_401", func(t *testing.T) {
@@ -550,7 +554,8 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:client not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 2)
+		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("other_org_client_to_allow_401", func(t *testing.T) {
@@ -563,7 +568,8 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client Untrusted:client not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.failed;method=GET;role=guest;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 3)
+		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("client_to_allowany_200", func(t *testing.T) {
@@ -575,8 +581,9 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		assertCounter("authztest.http.request.status.successful;method=GET;role=client;status=200;uri=/v1/allowany", 1)
-		assertSample("authztest.http.request.perf;method=GET;role=client;status=200;uri=/v1/allowany")
+		assertCounter("authztest.http.request.role;method=GET;status=200;uri=/v1/allowany;role=client", 1)
+		assertCounter("authztest.http.request.status.successful;method=GET;status=200;uri=/v1/allowany", 2)
+		assertSample("authztest.http.request.perf;method=GET;status=200;uri=/v1/allowany")
 	})
 }
 
