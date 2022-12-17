@@ -492,7 +492,7 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:guest not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.unauthorized;method=GET;status=401;uri=/v1/allow", 1)
 		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
@@ -508,7 +508,7 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.unauthorized;method=GET;status=401;uri=/v1/allow", 1)
 		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
@@ -540,7 +540,7 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, `{"Method":"GET","Path":"/v1/allow"}`, w.Body.String())
 
-		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 1)
+		assertCounter("authztest.http.request.status.unauthorized;method=GET;status=401;uri=/v1/allow", 1)
 		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
@@ -554,7 +554,7 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client User:client not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 2)
+		assertCounter("authztest.http.request.status.unauthorized;method=GET;status=401;uri=/v1/allow", 2)
 		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
@@ -568,7 +568,7 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"Client Untrusted:client not allowed"}`, cid), w.Body.String())
-		assertCounter("authztest.http.request.status.invalid;method=GET;status=401;uri=/v1/allow", 3)
+		assertCounter("authztest.http.request.status.unauthorized;method=GET;status=401;uri=/v1/allow", 3)
 		assertCounter("authztest.http.request.role;method=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 

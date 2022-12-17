@@ -81,6 +81,7 @@ func Test_RequestMetrics(t *testing.T) {
 	req(http.MethodPost, "/bar", http.StatusBadRequest)
 	req(http.MethodPost, "/unavailable", http.StatusServiceUnavailable)
 	req(http.MethodPost, "/notfound", http.StatusNotFound)
+	req(http.MethodPost, "/unauthorized", http.StatusUnauthorized)
 
 	assertSample("test.http.request.perf;method=GET;status=200;uri=/", 1)
 	assertSample("test.http.request.perf;method=GET;status=200;uri=/foo", 1)
@@ -93,6 +94,7 @@ func Test_RequestMetrics(t *testing.T) {
 	assertCounter("test.http.request.status.invalid;method=POST;status=400;uri=/bar", 2)
 	assertCounter("test.http.request.status.failed;method=POST;status=503;uri=/unavailable", 1)
 	assertCounter("test.http.request.status.not_found;method=POST;status=404;uri=/notfound", 1)
+	assertCounter("test.http.request.status.unauthorized;method=POST;status=401;uri=/unauthorized", 1)
 
 	assertCounter("test.http.request.role;method=GET;status=200;uri=/;role=admin", 1)
 	assertCounter("test.http.request.role;method=GET;status=200;uri=/foo;role=admin", 1)
