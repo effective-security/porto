@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/effective-security/metrics"
+	"github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
@@ -16,13 +16,6 @@ import (
 
 const (
 	warnUnaryRequestLatency = 300 * time.Millisecond
-)
-
-var (
-	keyForReqPerf       = []string{"grpc", "request", "perf"}
-	keyForReqSuccessful = []string{"grpc", "request", "status", "successful"}
-	keyForReqFailed     = []string{"grpc", "request", "status", "failed"}
-	keyForReqRole       = []string{"grpc", "request", "status", "role"}
 )
 
 func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
@@ -88,20 +81,9 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		//"user", idx.Identity().Subject(),
 	)
 
-	tags := []metrics.Tag{
-		{Name: "method", Value: info.FullMethod},
-		{Name: "status", Value: code.String()},
-	}
-
-	metrics.MeasureSince(keyForReqPerf, startTime, tags...)
-
-	if code == codes.OK {
-		metrics.IncrCounter(keyForReqSuccessful, 1, tags...)
-	} else {
-		metrics.IncrCounter(keyForReqFailed, 1, tags...)
-	}
-	metrics.IncrCounter(keyForReqRole, 1,
-		append(tags, metrics.Tag{Name: "role", Value: role})...)
+	codeName := code.String()
+	metricskey.GRPCReqPerf.MeasureSince(startTime, info.FullMethod, codeName)
+	metricskey.GRPCReqByRole.IncrCounter(1, info.FullMethod, codeName, role)
 }
 
 func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {

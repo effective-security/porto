@@ -5,18 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/effective-security/metrics"
+	"github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/xhttp/identity"
-)
-
-var (
-	keyForHTTPReqPerf            = []string{"http", "request", "perf"}
-	keyForHTTPReqNotFound        = []string{"http", "request", "status", "not_found"}
-	keyForHTTPReqNotUnauthorized = []string{"http", "request", "status", "unauthorized"}
-	keyForHTTPReqSuccessful      = []string{"http", "request", "status", "successful"}
-	keyForHTTPReqFailed          = []string{"http", "request", "status", "failed"}
-	keyForHTTPReqInvalid         = []string{"http", "request", "status", "invalid"}
-	keyForHTTPReqRole            = []string{"http", "request", "role"}
 )
 
 // a http.Handler that records execution metrics of the wrapper handler
@@ -52,25 +42,7 @@ func (rm *requestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := identity.FromRequest(r).Identity().Role()
 	sc := rc.StatusCode()
 
-	tags := []metrics.Tag{
-		{Name: "method", Value: r.Method},
-		{Name: "status", Value: rm.statusCode(sc)},
-		{Name: "uri", Value: r.URL.Path},
-	}
-
-	if sc == 404 {
-		metrics.IncrCounter(keyForHTTPReqNotFound, 1, tags...)
-	} else if sc == 401 {
-		metrics.IncrCounter(keyForHTTPReqNotUnauthorized, 1, tags...)
-	} else if sc >= 500 {
-		metrics.IncrCounter(keyForHTTPReqFailed, 1, tags...)
-	} else if sc >= 400 {
-		metrics.IncrCounter(keyForHTTPReqInvalid, 1, tags...)
-	} else {
-		metrics.MeasureSince(keyForHTTPReqPerf, start, tags...)
-		metrics.IncrCounter(keyForHTTPReqSuccessful, 1, tags...)
-	}
-
-	metrics.IncrCounter(keyForHTTPReqRole, 1,
-		append(tags, metrics.Tag{Name: "role", Value: role})...)
+	status := rm.statusCode(sc)
+	metricskey.HTTPReqPerf.MeasureSince(start, r.Method, status, r.URL.Path)
+	metricskey.HTTPReqByRole.IncrCounter(1, r.Method, status, r.URL.Path, role)
 }
