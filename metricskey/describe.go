@@ -30,3 +30,12 @@ var (
 		Help:         "rpc_requests_role provides counts for gRPC request by role.",
 	}
 )
+
+// Metrics returns slice of metrics from this repo
+var Metrics = []*metrics.Describe{
+	&HTTPReqPerf,
+	&HTTPReqByRole,
+	&GRPCReqPerf,
+	&GRPCReqPerf,
+	&GRPCReqByRole,
+}
