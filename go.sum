@@ -386,10 +386,8 @@ github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3
 github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/edsrzf/mmap-go v0.0.0-20170320065105-0bce6a688712/go.mod h1:YO35OhQPt3KJa3ryjFM5Bs14WD66h8eGKpfaBNrHW5M=
-github.com/effective-security/metrics v0.2.0 h1:gVf+RSEaT9627owrITfJVtR5xd+EweCsZ2bbUAk8HAg=
-github.com/effective-security/metrics v0.2.0/go.mod h1:5HJWZjd08Gr7HYeo4OCNGKksMxKr3UzhggmYkHEQqIo=
-github.com/effective-security/metrics v0.2.1-0.20221218183442-90b6efd94f42 h1:8PsmmcwY8epnjN+WrJsU5x/I51W9gwoLnl2d1/lHWrQ=
-github.com/effective-security/metrics v0.2.1-0.20221218183442-90b6efd94f42/go.mod h1:5HJWZjd08Gr7HYeo4OCNGKksMxKr3UzhggmYkHEQqIo=
+github.com/effective-security/metrics v0.2.1-0.20221218203929-49902db10a3c h1:zzDmF7opUDcQt1ApWa6wJ+aJUfgxR/BIJbRQqaSPtNI=
+github.com/effective-security/metrics v0.2.1-0.20221218203929-49902db10a3c/go.mod h1:5HJWZjd08Gr7HYeo4OCNGKksMxKr3UzhggmYkHEQqIo=
 github.com/effective-security/xlog v0.0.0-20221214133118-bc39e998ba43 h1:XU+rmUDjS5HP6jYU9AYz2uBV16+l3ir/7j6EIIsCVNs=
 github.com/effective-security/xlog v0.0.0-20221214133118-bc39e998ba43/go.mod h1:K/Rrf1LAhR7UpCKxAmiqe/vzeMySs57MYIGsolAWGNo=
 github.com/effective-security/xpki v0.5.0 h1:6Exz6R5cI2Q3DktQsqdBJoXhRm1qTuLFo3loiqfKPGM=
