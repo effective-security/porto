@@ -53,6 +53,16 @@ func StringContainsOneOf(item string, items []string) bool {
 	return false
 }
 
+// StringStartsWithOneOf returns true if one of items slice is a prefix of specified value.
+func StringStartsWithOneOf(value string, items []string) bool {
+	for _, x := range items {
+		if strings.HasPrefix(value, x) {
+			return true
+		}
+	}
+	return false
+}
+
 // ContainsStringEqualFold returns true if the items slice contains a value equal to item
 // ignoring case [i.e. using EqualFold]
 // Note that this can end up traversing the entire slice, and so is only really
