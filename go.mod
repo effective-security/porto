@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/deckarep/golang-set v1.7.1
-	github.com/effective-security/metrics v0.2.1-0.20221218203929-49902db10a3c
+	github.com/effective-security/metrics v0.2.1-0.20221220182901-702b43b6fd7b
 	github.com/effective-security/xlog v0.0.0-20221214133118-bc39e998ba43
 	github.com/effective-security/xpki v0.5.0
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
