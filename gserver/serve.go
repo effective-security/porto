@@ -236,7 +236,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = configureHandlers(s, handler)
 
 		// mux between http and grpc
-		handler = grpcHandlerFunc(gsSecure, handler)
+		handler = sctx.grpcHandlerFunc(gsSecure, handler)
 
 		srv := &http.Server{
 			Handler:   handler,
@@ -379,19 +379,39 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 // grpcHandlerFunc returns an http.Handler that delegates to grpcServer on incoming gRPC
 // connections or otherHandler otherwise. Given in gRPC docs.
-func grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
+func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
 	if otherHandler == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			grpcServer.ServeHTTP(w, r)
 		})
 	}
+
+	allowedOrigins := ""
+	if sctx.cfg.CORS != nil && len(sctx.cfg.CORS.AllowedOrigins) > 0 {
+		allowedOrigins = strings.Join(sctx.cfg.CORS.AllowedOrigins, ",")
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
 		if r.ProtoMajor == 2 && strings.Contains(ct, "application/grpc") {
-			//logger.Debugf(">>> scr=grpcHandlerFunc, handle=grpcServer, method=%s, url=%s", r.Method, r.URL.String())
+			grpcWeb := ct == "application/grpc-web+proto"
+			if grpcWeb {
+				r.Header.Set(header.ContentType, "application/grpc")
+				if allowedOrigins != "" {
+					w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+				}
+			}
+			// logger.ContextKV(r.Context(), xlog.DEBUG,
+			// 	"method", r.Method,
+			// 	"ct", ct,
+			// 	"url", r.URL.String())
 			grpcServer.ServeHTTP(w, r)
 		} else {
-			//logger.Debugf(">>> scr=grpcHandlerFunc, handle=otherHandler, ct=%s, proto_ver=%d/%d", ct, r.ProtoMinor, r.ProtoMajor)
+			// logger.ContextKV(r.Context(), xlog.DEBUG,
+			// 	"handle", "otherHandler",
+			// 	"ct", ct,
+			// 	"proto_ver_minor", ct, r.ProtoMinor,
+			// 	"proto_ver_major", r.ProtoMajor)
 			otherHandler.ServeHTTP(w, r)
 		}
 	})
