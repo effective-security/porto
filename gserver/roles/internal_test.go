@@ -61,8 +61,8 @@ func Test_dumpDM(t *testing.T) {
 			exp: nil,
 		},
 		{
-			md:  metadata.New(map[string]string{"k1": "v1", "k2": "v2"}),
-			exp: []any{"k1", "v1", "k2", "v2"},
+			md:  metadata.New(map[string]string{"k1": "v1"}),
+			exp: []any{"k1", "v1"},
 		},
 	}
 	for _, tc := range tcases {

@@ -344,8 +344,8 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
-		grpc_prometheus.UnaryServerInterceptor,
 		s.authz.NewUnaryInterceptor(),
+		grpc_prometheus.UnaryServerInterceptor,
 	}
 	if len(s.opts.unary) > 0 {
 		chainUnaryInterceptors = append(chainUnaryInterceptors, s.opts.unary...)
@@ -387,18 +387,33 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	allowedOrigins := ""
-	if sctx.cfg.CORS != nil && len(sctx.cfg.CORS.AllowedOrigins) > 0 {
-		allowedOrigins = strings.Join(sctx.cfg.CORS.AllowedOrigins, ",")
+	exposedHeaders := ""
+	if sctx.cfg.CORS != nil {
+		if len(sctx.cfg.CORS.AllowedOrigins) > 0 {
+			allowedOrigins = strings.Join(sctx.cfg.CORS.AllowedOrigins, ",")
+		}
+		if len(sctx.cfg.CORS.ExposedHeaders) > 0 {
+			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ",")
+		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			grpcWeb := ct == header.ApplicationGRPCWebProto
+			wh := w.Header()
 			if grpcWeb {
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
 				if allowedOrigins != "" {
-					w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+					wh.Set("Access-Control-Allow-Origin", allowedOrigins)
+				}
+				if exposedHeaders != "" {
+					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
+				}
+				wh.Set(header.ContentType, header.ApplicationGRPC)
+
+				w = &proxyWriter{
+					rw: w,
 				}
 			}
 			if sctx.cfg.DebugLogs {
@@ -415,6 +430,11 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					"url", r.URL.String())
 			}
 			grpcServer.ServeHTTP(w, r)
+			if grpcWeb && sctx.cfg.DebugLogs {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"method", r.Method,
+					"headers", wh)
+			}
 		} else {
 			if sctx.cfg.DebugLogs && r.URL.Path != "/healthz" {
 				logger.ContextKV(r.Context(), xlog.DEBUG,
@@ -437,4 +457,32 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
+}
+
+// the proxy is a workaround to disable premature Flush for Grpc-Web
+type proxyWriter struct {
+	rw http.ResponseWriter
+}
+
+// Header proxy
+func (p *proxyWriter) Header() http.Header {
+	return p.rw.Header()
+}
+
+// Write proxy
+func (p *proxyWriter) Write(data []byte) (int, error) {
+	return p.rw.Write(data)
+}
+
+// WriteHeader proxy
+func (p *proxyWriter) WriteHeader(statusCode int) {
+	p.rw.WriteHeader(statusCode)
+}
+
+// Flush proxy
+func (p *proxyWriter) Flush() {
+	// do nothing
+	// Looks like a bug in
+	// func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status)
+	logger.KV(xlog.DEBUG, "reason", "not_supported")
 }
