@@ -437,7 +437,7 @@ func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error) {
 		delegate: delegate,
 		config:   c.Clone(),
 	}
-	logger.KV(xlog.INFO, "config", h.config.treeAsText())
+	logger.KV(xlog.DEBUG, "config", h.config.treeAsText())
 	return h, nil
 }
 

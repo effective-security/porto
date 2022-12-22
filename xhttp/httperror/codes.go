@@ -259,6 +259,11 @@ var codeStatus = map[codes.Code]int{
 	codes.Unauthenticated: 401,
 }
 
+// HTTPStatusFromRPC returns HTTP status
+func HTTPStatusFromRPC(c codes.Code) int {
+	return codeStatus[c]
+}
+
 var statusCode = map[string]codes.Code{
 	CodeAccountNotFound:         codes.NotFound,
 	CodeBadNonce:                codes.InvalidArgument,

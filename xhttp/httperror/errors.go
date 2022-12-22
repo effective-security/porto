@@ -48,7 +48,7 @@ func NewFromPb(err error) *Error {
 		return e
 	}
 	if st, ok := status.FromError(err); ok {
-		hs := codeStatus[st.Code()]
+		hs := HTTPStatusFromRPC(st.Code())
 		return &Error{
 			HTTPStatus: hs,
 			Code:       httpCode[hs],
