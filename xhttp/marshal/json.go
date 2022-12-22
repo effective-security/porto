@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
 
@@ -83,13 +84,20 @@ func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder {
 func EncodeBytes(printSetting PrettyPrintSetting, value interface{}) ([]byte, error) {
 	var b []byte
 	err := codec.NewEncoderBytes(&b, encoderHandle(printSetting)).Encode(value)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to encode")
+	}
 	return b, err
 }
 
 // DecodeBytes is a helper that takes the supplied json and decodes it into
 // the supplied result instance.
 func DecodeBytes(data []byte, result interface{}) error {
-	return codec.NewDecoderBytes(data, DecoderHandle()).Decode(result)
+	err := codec.NewDecoderBytes(data, DecoderHandle()).Decode(result)
+	if err != nil {
+		return errors.Wrap(err, "failed to decode")
+	}
+	return nil
 }
 
 // Decode will read the json from the supplied reader,
@@ -97,7 +105,11 @@ func DecodeBytes(data []byte, result interface{}) error {
 func Decode(r io.Reader, result interface{}) error {
 	// codec can make many little reads from the reader, so wrap it in a buffered reader
 	// to keep perf lively
-	return codec.NewDecoder(bufio.NewReader(r), DecoderHandle()).Decode(result)
+	err := codec.NewDecoder(bufio.NewReader(r), DecoderHandle()).Decode(result)
+	if err != nil {
+		return errors.Wrap(err, "unable to decode")
+	}
+	return nil
 }
 
 // DecodeBody will read the json from the HTTP request body,

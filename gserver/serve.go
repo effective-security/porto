@@ -342,8 +342,8 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		correlation.NewAuthUnaryInterceptor(),
-		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		s.newLogUnaryInterceptor(),
+		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		grpc_prometheus.UnaryServerInterceptor,
 		s.authz.NewUnaryInterceptor(),
 	}
@@ -393,7 +393,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
-		if r.ProtoMajor == 2 && strings.HasPrefix(ct, header.ApplicationGRPC) {
+		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			grpcWeb := ct == header.ApplicationGRPCWebProto
 			if grpcWeb {
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
@@ -401,17 +401,35 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 				}
 			}
-			// logger.ContextKV(r.Context(), xlog.DEBUG,
-			// 	"method", r.Method,
-			// 	"ct", ct,
-			// 	"url", r.URL.String())
+			if sctx.cfg.DebugLogs {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"method", r.Method,
+					"ct", ct,
+					"remote", r.RemoteAddr,
+					"agent", r.UserAgent(),
+					"content-type", r.Header.Get(header.ContentType),
+					"accept", r.Header.Get(header.Accept),
+					"content-length", r.ContentLength,
+					"proto_ver_minor", r.ProtoMinor,
+					"proto_ver_major", r.ProtoMajor,
+					"url", r.URL.String())
+			}
 			grpcServer.ServeHTTP(w, r)
 		} else {
-			// logger.ContextKV(r.Context(), xlog.DEBUG,
-			// 	"handle", "otherHandler",
-			// 	"ct", ct,
-			// 	"proto_ver_minor", ct, r.ProtoMinor,
-			// 	"proto_ver_major", r.ProtoMajor)
+			if sctx.cfg.DebugLogs && r.URL.Path != "/healthz" {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"handle", "otherHandler",
+					"ct", ct,
+					"remote", r.RemoteAddr,
+					"agent", r.UserAgent(),
+					"content-type", r.Header.Get(header.ContentType),
+					"accept", r.Header.Get(header.Accept),
+					"content-length", r.ContentLength,
+					"method", r.Method,
+					"url", r.URL.String(),
+					"proto_ver_minor", r.ProtoMinor,
+					"proto_ver_major", r.ProtoMajor)
+			}
 			otherHandler.ServeHTTP(w, r)
 		}
 	})

@@ -64,9 +64,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	}
 
 	l := xlog.TRACE
-	if logger.LevelAt(xlog.DEBUG) {
-		l = xlog.DEBUG
-	} else if expensiveRequest {
+	if expensiveRequest {
 		l = xlog.WARNING
 	}
 

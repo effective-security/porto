@@ -120,7 +120,11 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 		var err error
 		id, err = identityMapper(ctx)
 		if err != nil {
-			return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err)
+			logger.ContextKV(ctx, xlog.DEBUG,
+				"reason", "access_denied",
+				"method", info.FullMethod,
+				"err", err.Error())
+			return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err.Error())
 		}
 		if id == nil {
 			id = guestIdentity

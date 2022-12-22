@@ -244,6 +244,7 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 				return p.jwtIdentity(token, typ)
 			}
 		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
 	} else {
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_metadata_incoming")
 	}
