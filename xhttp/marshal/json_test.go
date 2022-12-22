@@ -62,7 +62,7 @@ func Test_Decode(t *testing.T) {
 	var r AStruct
 	err := Decode(bytes.NewReader(j), &r)
 	assert.Error(t, err)
-	assert.Equal(t, "json decode error [pos 21]: no matching struct field found when decoding stream map with key C", err.Error())
+	assert.Equal(t, "unable to decode: json decode error [pos 21]: no matching struct field found when decoding stream map with key C", err.Error())
 }
 
 func Test_DecodeBody(t *testing.T) {
@@ -80,8 +80,8 @@ func Test_DecodeBody(t *testing.T) {
 	var res AStruct
 	err = DecodeBody(w, r, &res)
 	require.Error(t, err)
-	assert.Equal(t, "json decode error [pos 5]: no matching struct field found when decoding stream map with key C", err.Error())
-	assert.Equal(t, `{"code":"invalid_json","message":"failed to decode '*marshal.AStruct': json decode error [pos 5]: no matching struct field found when decoding stream map with key C"}`,
+	assert.Equal(t, "unable to decode: json decode error [pos 5]: no matching struct field found when decoding stream map with key C", err.Error())
+	assert.Equal(t, `{"code":"invalid_json","message":"failed to decode '*marshal.AStruct': unable to decode: json decode error [pos 5]: no matching struct field found when decoding stream map with key C"}`,
 		w.Body.String())
 }
 

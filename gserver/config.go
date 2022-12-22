@@ -13,6 +13,9 @@ import (
 
 // Config contains the configuration of the server
 type Config struct {
+	// DebugLogs allows to add extra debog logs
+	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
+
 	// Description provides description of the server
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 

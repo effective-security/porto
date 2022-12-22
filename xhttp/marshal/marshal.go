@@ -129,12 +129,17 @@ func logError(r *http.Request, status int, code, message string, cause error) {
 			logger.ContextKV(ctx, sv, "err", cause.Error())
 		}
 	}
+
 	logger.ContextKV(ctx, sv,
 		"type", typ,
 		"path", r.URL.Path,
 		"status", status,
 		"code", code,
 		"msg", message,
+		"agent", r.UserAgent(),
+		"content-type", r.Header.Get(header.ContentType),
+		"accept", r.Header.Get(header.Accept),
+		"content-length", r.ContentLength,
 		"fn", path.Base(fn),
 		"ln", line,
 	)

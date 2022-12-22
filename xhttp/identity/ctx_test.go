@@ -14,6 +14,7 @@ import (
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 func TestMain(m *testing.M) {
@@ -119,9 +120,13 @@ func Test_FromContext(t *testing.T) {
 }
 
 func Test_grpcFromContext(t *testing.T) {
+	info := &grpc.UnaryServerInfo{
+		FullMethod: "test",
+	}
+
 	t.Run("default_guest", func(t *testing.T) {
 		unary := NewAuthUnaryInterceptor(GuestIdentityForContext)
-		unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 			rt := FromContext(ctx)
 			require.NotNil(t, rt)
 			require.NotNil(t, rt.Identity())
@@ -150,7 +155,7 @@ func Test_grpcFromContext(t *testing.T) {
 			return nil, errors.New("invalid request")
 		}
 		unary := NewAuthUnaryInterceptor(def)
-		_, err := unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 			return nil, errors.New("some error")
 		})
 		require.Error(t, err)
