@@ -275,6 +275,7 @@ func (m *ManyError) HasErrors() bool {
 
 // WriteHTTPResponse implements how to serialize this error into a HTTP Response
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
+	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(e.HTTPStatus)
 	if e.RequestID == "" {
@@ -285,6 +286,7 @@ func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 
 // WriteHTTPResponse implements how to serialize this error into a HTTP Response
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
+	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(m.HTTPStatus)
 	if m.RequestID == "" {

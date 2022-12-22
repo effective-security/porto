@@ -393,10 +393,10 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
-		if r.ProtoMajor == 2 && strings.Contains(ct, "application/grpc") {
-			grpcWeb := ct == "application/grpc-web+proto"
+		if r.ProtoMajor == 2 && strings.HasPrefix(ct, header.ApplicationGRPC) {
+			grpcWeb := ct == header.ApplicationGRPCWebProto
 			if grpcWeb {
-				r.Header.Set(header.ContentType, "application/grpc")
+				r.Header.Set(header.ContentType, header.ApplicationGRPC)
 				if allowedOrigins != "" {
 					w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 				}
