@@ -2,6 +2,8 @@ package roles
 
 // IdentityMap contains configuration for the roles
 type IdentityMap struct {
+	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
+
 	// TLS identity map
 	TLS TLSIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map

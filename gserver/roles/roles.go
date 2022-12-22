@@ -153,19 +153,35 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	return false
 }
 
+func tokenType(auth string) (token string, tokenType string) {
+	if auth == "" {
+		return
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) == 2 {
+		tokenType = parts[0]
+		token = parts[1]
+	} else {
+		token = auth
+		tokenType = "Bearer"
+	}
+	return
+}
+
 // IdentityFromRequest returns identity from the request
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
 	peers := getPeerCertAndCount(r)
-	logger.ContextKV(r.Context(), xlog.DEBUG,
-		"dpop_enabled", p.config.DPoP.Enabled,
-		"jwt_enabled", p.config.JWT.Enabled,
-		"tls_enabled", p.config.TLS.Enabled,
-		"certs_present", peers)
+	// logger.ContextKV(r.Context(), xlog.DEBUG,
+	// 	"dpop_enabled", p.config.DPoP.Enabled,
+	// 	"jwt_enabled", p.config.JWT.Enabled,
+	// 	"tls_enabled", p.config.TLS.Enabled,
+	// 	"certs_present", peers)
 
 	authHeader := r.Header.Get(header.Authorization)
+	token, typ := tokenType(authHeader)
+
 	if p.config.DPoP.Enabled {
-		if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
-			token := authHeader[5:]
+		if strings.EqualFold(typ, "DPoP") {
 			id, err := p.dpopIdentity(r, token, "DPoP")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
@@ -176,8 +192,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	}
 
 	if p.config.JWT.Enabled {
-		if strings.ToLower(slices.StringUpto(authHeader, 7)) == "bearer " {
-			token := authHeader[7:]
+		if strings.EqualFold(typ, "Bearer") {
 			id, err := p.jwtIdentity(token, "Bearer")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
@@ -207,13 +222,30 @@ func getPeerCertAndCount(r *http.Request) int {
 	return 0
 }
 
+func dumpDM(md metadata.MD) []any {
+	var res []any
+	for k, v := range md {
+		if len(v) > 0 {
+			res = append(res, k, v[0])
+		}
+	}
+	return res
+}
+
 // IdentityFromContext returns identity from context
 func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, error) {
-	if p.config.JWT.Enabled {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
-			return p.jwtIdentity(md[tcredentials.TokenFieldNameGRPC][0], "Bearer")
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		if p.config.DebugLogs {
+			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
 		}
+		if p.config.JWT.Enabled && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
+			if token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0]); typ != "" {
+				return p.jwtIdentity(token, typ)
+			}
+		}
+	} else {
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_metadata_incoming")
 	}
 
 	if p.config.TLS.Enabled {
@@ -228,6 +260,9 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 				}
 			}
 		}
+	}
+	if p.config.DebugLogs {
+		logger.ContextKV(ctx, xlog.DEBUG, "role", "guest")
 	}
 	return identity.GuestIdentityForContext(ctx)
 }
@@ -301,17 +336,20 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 	if p.at != nil {
 		claims, err = p.at.Claims(context.Background(), auth)
 		if err != nil {
-			return nil, err
+			return nil, errors.WithMessage(err, "unable to extract claims from access token")
 		}
 		if claims != nil {
 			err = claims.Valid(cfg)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if claims == nil {
 		claims, err = p.jwt.ParseToken(auth, cfg)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to parse JWT token")
+		}
 	}
 
 	email := claims.String("email")
