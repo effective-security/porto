@@ -27,13 +27,8 @@ func TestError_Error(t *testing.T) {
 	e := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "Bob")
 	assert.Equal(t, "invalid_json: Bob", e.Error())
 
-<<<<<<< Updated upstream
-	e.WithCause(errors.New("some other error"))
-	assert.Equal(t, "invalid_json: Bob", e.Error())
-=======
 	_ = e.WithCause(errors.New("some other error"))
-	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
->>>>>>> Stashed changes
+	assert.Equal(t, "invalid_json: Bob", e.Error())
 }
 
 func TestError_Nil(t *testing.T) {
@@ -89,15 +84,9 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 	single := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2")
 
 	many := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 2 errors!")
-<<<<<<< Updated upstream
-	many.Add("one", errors.Errorf("test error 1"))
-	many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
-=======
-	many.RequestID = "123"
+
 	_ = many.Add("one", errors.Errorf("test error 1"))
 	_ = many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
-	assert.EqualError(t, many.Cause(), "test error 1")
->>>>>>> Stashed changes
 
 	manyNil := &httperror.ManyError{HTTPStatus: http.StatusBadRequest}
 	_ = manyNil.Add("one", errors.Errorf("test error 1"))
