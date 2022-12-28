@@ -193,14 +193,14 @@ func New(cfg *Config) (*Provider, error) {
 // human readable text format.
 func (c *Provider) treeAsText() string {
 	o := bytes.NewBuffer(make([]byte, 0, 256))
-	io.WriteString(o, "\n")
+	_, _ = io.WriteString(o, "\n")
 	roles := func(o io.Writer, n *pathNode) {
 		if n.allowAny() {
-			io.WriteString(o, "[Any]")
+			_, _ = io.WriteString(o, "[Any]")
 			return
 		}
 		if (n.allow & allowAnyRole) != 0 {
-			io.WriteString(o, "[Any Role]")
+			_, _ = io.WriteString(o, "[Any Role]")
 			return
 		}
 		if len(n.allowedRoles) == 0 {
@@ -292,7 +292,7 @@ func (c *Provider) Clone() *Provider {
 		cfg:               &Config{},
 	}
 
-	copier.Copy(p.cfg, c.cfg)
+	_ = copier.Copy(p.cfg, c.cfg)
 
 	return p
 }

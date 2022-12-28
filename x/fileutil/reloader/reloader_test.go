@@ -37,7 +37,7 @@ func Test_Reloader(t *testing.T) {
 	require.NotNil(t, k)
 	defer k.Close()
 
-	k.Reload()
+	_ = k.Reload()
 
 	loadedAt := k.LoadedAt()
 	assert.True(t, loadedAt.After(now), "loaded time must be after test start time")

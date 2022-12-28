@@ -35,7 +35,7 @@ func NewIdentity(role, subject string, claims map[string]interface{}) Identity {
 		claims:  jwt.MapClaims{},
 	}
 	if claims != nil {
-		id.claims.Add(claims)
+		_ = id.claims.Add(claims)
 	}
 	return id
 }
@@ -66,7 +66,7 @@ func (c identity) Role() string {
 // Claims returns application specific user info
 func (c identity) Claims() map[string]interface{} {
 	res := jwt.MapClaims{}
-	res.Add(c.claims)
+	_ = res.Add(c.claims)
 	return res
 }
 

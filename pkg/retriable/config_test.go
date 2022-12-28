@@ -64,7 +64,7 @@ func TestKeys(t *testing.T) {
 	defer os.RemoveAll(client.StorageFolder)
 
 	assert.Panics(t, func() {
-		client.SaveKey(nil)
+		_, _ = client.SaveKey(nil)
 	})
 
 	_, _, err = client.LoadKey("TestKeys")

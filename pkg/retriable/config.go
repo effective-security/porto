@@ -274,7 +274,7 @@ func (c *Client) WithAuthorization() error {
 // access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
 func (c *Client) StoreAuthToken(token string) error {
 	folder := ExpandStorageFolder(c.StorageFolder)
-	os.MkdirAll(folder, 0755)
+	_ = os.MkdirAll(folder, 0755)
 	err := os.WriteFile(path.Join(folder, authTokenFileName), []byte(token), 0600)
 	if err != nil {
 		return errors.WithMessagef(err, "unable to store token")

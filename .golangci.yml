@@ -1,0 +1,15 @@
+run:
+  skip-files:
+    - ".*_test\\.go$"
+
+linters:
+  enable:
+    - revive
+
+issues:
+  exclude:
+    - S1040 # type assertion to the same type: rawBody already has type io.ReadSeeker (gosimple)
+    - S1030 # should use w.String() instead of string(w.Bytes()) (gosimple)
+    - SA1019 # tc.gtc.OverrideServerName is deprecated: use grpc.WithAuthority instead. Will be supported throughout 1.x. (staticcheck)
+    - SA1019 # "io/ioutil" has been deprecated since Go 1.16: As of Go 1.16, the same functionality is now provided by package io or package os, and those implementations should be preferred in new code. See the specific function documentation for details. (staticcheck)
+    - SA1019 # "io/ioutil" has been deprecated since Go 1.16: As of Go 1.16, the same functionality is now provided by package io or package os, and those implementations should be preferred in new code. See the specific function documentation for details. (staticcheck)

@@ -202,12 +202,12 @@ func (m *ManyError) HasErrors() bool {
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(e.HTTPStatus)
-	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
 }
 
 // WriteHTTPResponse implements how to serialize this error into a HTTP Response
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(m.HTTPStatus)
-	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
 }

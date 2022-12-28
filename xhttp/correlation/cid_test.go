@@ -37,7 +37,7 @@ func Test_grpcFromContext(t *testing.T) {
 		unary := NewAuthUnaryInterceptor()
 		var cid1 string
 		var rctx context.Context
-		unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, _ = unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
 			cid1 = ID(ctx)
 			assert.NotEmpty(t, cid1)
 			rctx = ctx
@@ -47,7 +47,7 @@ func Test_grpcFromContext(t *testing.T) {
 		assert.Equal(t, cid1, cid2)
 
 		octx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(header.XCorrelationID, "1234567890"))
-		unary(octx, nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, _ = unary(octx, nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
 			cid1 = ID(ctx)
 			assert.Contains(t, cid1, "1234567890")
 			rctx = ctx

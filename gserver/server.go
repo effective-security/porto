@@ -119,7 +119,7 @@ func Start(
 	) error {
 		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
 		if err != nil {
-			logger.KV(xlog.ERROR, "err", err)
+			//logger.KV(xlog.ERROR, "err", err)
 			return err
 		}
 		e.identity = iden
@@ -145,7 +145,7 @@ func Start(
 
 	// Register services
 	for _, svc := range e.services {
-		e.disco.Register(e.Name(), svc)
+		_ = e.disco.Register(e.Name(), svc)
 	}
 
 	serving = true
@@ -272,7 +272,7 @@ func (e *Server) Close() {
 func stopServers(ctx context.Context, ss *servers) {
 	shutdownNow := func() {
 		// first, close the http.Server
-		ss.http.Shutdown(ctx)
+		_ = ss.http.Shutdown(ctx)
 		// then close grpc.Server; cancels all active RPCs
 		ss.grpc.Stop()
 	}

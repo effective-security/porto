@@ -13,6 +13,6 @@ func TestPostgres(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Panics(t, func() {
-		migrate.Postgres("test", "testdata", 1, 1, &sql.DB{})
+		_ = migrate.Postgres("test", "testdata", 1, 1, &sql.DB{})
 	})
 }

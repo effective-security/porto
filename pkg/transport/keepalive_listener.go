@@ -55,8 +55,8 @@ func (kln *keepaliveListener) Accept() (net.Conn, error) {
 	// detection time: tcp_keepalive_time + tcp_keepalive_probes + tcp_keepalive_intvl
 	// default on linux:  30 + 8 * 30
 	// default on osx:    30 + 8 * 75
-	kac.SetKeepAlive(true)
-	kac.SetKeepAlivePeriod(30 * time.Second)
+	_ = kac.SetKeepAlive(true)
+	_ = kac.SetKeepAlivePeriod(30 * time.Second)
 	return c, nil
 }
 
@@ -77,8 +77,8 @@ func (l *tlsKeepaliveListener) Accept() (net.Conn, error) {
 	// detection time: tcp_keepalive_time + tcp_keepalive_probes + tcp_keepalive_intvl
 	// default on linux:  30 + 8 * 30
 	// default on osx:    30 + 8 * 75
-	kac.SetKeepAlive(true)
-	kac.SetKeepAlivePeriod(30 * time.Second)
+	_ = kac.SetKeepAlive(true)
+	_ = kac.SetKeepAlivePeriod(30 * time.Second)
 	c = tls.Server(c, l.config)
 	return c, nil
 }

@@ -38,8 +38,8 @@ func TestHttp_ResponseCapture(t *testing.T) {
 	rw.Header().Add("Content-Type", "text/plain")
 	rw.WriteHeader(http.StatusNotFound)
 	body := []byte("/foo not found")
-	rw.Write(body)
-	rw.Write(body) // write this 2 to ensure we're accumulate bytes written
+	_, _ = rw.Write(body)
+	_, _ = rw.Write(body) // write this 2 to ensure we're accumulate bytes written
 	if rc.StatusCode() != http.StatusNotFound {
 		t.Errorf("ResponseCapture didn't report the expected status code set by the caller, got %d", rc.StatusCode())
 	}
