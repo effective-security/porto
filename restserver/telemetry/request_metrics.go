@@ -5,14 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/effective-security/metrics"
+	"github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/xhttp/identity"
-)
-
-var (
-	keyForHTTPReqPerf       = []string{"http", "request", "perf"}
-	keyForHTTPReqSuccessful = []string{"http", "request", "status", "successful"}
-	keyForHTTPReqFailed     = []string{"http", "request", "status", "failed"}
 )
 
 // a http.Handler that records execution metrics of the wrapper handler
@@ -48,18 +42,7 @@ func (rm *requestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := identity.FromRequest(r).Identity().Role()
 	sc := rc.StatusCode()
 
-	tags := []metrics.Tag{
-		{Name: "method", Value: r.Method},
-		{Name: "role", Value: role},
-		{Name: "status", Value: rm.statusCode(sc)},
-		{Name: "uri", Value: r.URL.Path},
-	}
-
-	metrics.MeasureSince(keyForHTTPReqPerf, start, tags...)
-
-	if sc >= 400 {
-		metrics.IncrCounter(keyForHTTPReqFailed, 1, tags...)
-	} else {
-		metrics.IncrCounter(keyForHTTPReqSuccessful, 1, tags...)
-	}
+	status := rm.statusCode(sc)
+	metricskey.HTTPReqPerf.MeasureSince(start, r.Method, status, r.URL.Path)
+	metricskey.HTTPReqByRole.IncrCounter(1, r.Method, status, r.URL.Path, role)
 }

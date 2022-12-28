@@ -7,7 +7,6 @@ import (
 
 	"github.com/effective-security/porto/pkg/crlcache"
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/pkg/errors"
 )
 
 // TLSInfo provides TLS configuration
@@ -87,11 +86,11 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		info.TrustedCAFile,
 		info.ClientAuthType)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	if err = tlsconfig.UpdateCipherSuites(info.tlsCfg, info.CipherSuites); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	logger.Infof(info.String())
@@ -102,7 +101,7 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		info.KeyFile,
 		5*time.Minute)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	//  TODO: tlsloader.WithOCSPStaple(cfg.OCSPFile)

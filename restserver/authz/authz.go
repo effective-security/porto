@@ -36,12 +36,10 @@ import (
 	"strings"
 
 	"github.com/effective-security/porto/x/math"
-	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
-	"github.com/effective-security/xpki/jwt"
 	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -372,19 +370,12 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 
 // isAllowed returns true if access to 'path' is allowed for the specified role.
 func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Identity) bool {
-	cid := correlation.ID(ctx)
 	role := idn.Role()
-	subj := idn.Subject()
-	claims := jwt.MapClaims(idn.Claims())
-	email := claims.String("email")
 
 	if len(path) == 0 || path[0] != '/' {
-		logger.KV(xlog.NOTICE, "status", "denied",
-			"invalid_path", path,
-			"role", role,
-			"user", subj,
-			"email", email,
-			"ctx", cid)
+		logger.ContextKV(ctx, xlog.NOTICE,
+			"status", "denied",
+			"invalid_path", path)
 		return false
 	}
 
@@ -398,30 +389,18 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 	res := allowAny || allowRole
 	if res {
 		if allowRole && c.cfg.LogAllowed {
-			logger.KV(xlog.NOTICE, "status", "allowed",
-				"role", role,
-				"user", subj,
-				"email", email,
+			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",
 				"path", path,
-				"node", node.value,
-				"ctx", cid)
+				"node", node.value)
 		} else if c.cfg.LogAllowedAny {
-			logger.KV(xlog.NOTICE, "status", "allowed_any",
-				"role", role,
-				"user", subj,
-				"email", email,
+			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed_any",
 				"path", path,
-				"node", node.value,
-				"ctx", cid)
+				"node", node.value)
 		}
 	} else if c.cfg.LogDenied {
-		logger.KV(xlog.NOTICE, "status", "denied",
-			"role", role,
-			"user", subj,
-			"email", email,
+		logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
 			"path", path,
-			"node", node.value,
-			"ctx", cid)
+			"node", node.value)
 	}
 	return res
 }
@@ -435,7 +414,7 @@ func (c *Provider) checkAccess(r *http.Request) error {
 
 	idn := c.requestRoleMapper(r)
 	if !c.isAllowed(r.Context(), r.URL.Path, idn) {
-		return errors.Errorf("%s role not allowed", idn.String())
+		return errors.Errorf("%s not allowed", idn.String())
 	}
 
 	return nil
@@ -458,7 +437,7 @@ func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error) {
 		delegate: delegate,
 		config:   c.Clone(),
 	}
-	logger.KV(xlog.INFO, "config", h.config.treeAsText())
+	logger.KV(xlog.DEBUG, "config", h.config.treeAsText())
 	return h, nil
 }
 
@@ -481,7 +460,7 @@ func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		idn := c.grpcRoleMapper(ctx)
 		if !c.isAllowed(ctx, info.FullMethod, idn) {
-			return nil, status.Errorf(codes.PermissionDenied, "%s role not allowed", idn.String())
+			return nil, status.Errorf(codes.PermissionDenied, "%s not allowed", idn.String())
 		}
 
 		return handler(ctx, req)

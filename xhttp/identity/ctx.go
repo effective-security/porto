@@ -74,20 +74,35 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 		v := r.Context().Value(keyContext)
 		if v == nil {
 			clientIP := ClientIPFromRequest(r)
-			identity, err := identityMapper(r)
+			idn, err := identityMapper(r)
 			if err != nil {
-				logger.KV(xlog.WARNING, "reason", "identityMapper", "ip", clientIP, "err", err.Error())
+				logger.ContextKV(r.Context(), xlog.WARNING,
+					"reason", "identityMapper",
+					"ip", clientIP,
+					"err", err.Error())
 				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
 				return
 			}
 
 			rctx = &RequestContext{
-				identity: identity,
+				identity: idn,
 				clientIP: clientIP,
 			}
-			r = r.WithContext(context.WithValue(r.Context(), keyContext, rctx))
-		} else {
-			rctx = v.(*RequestContext)
+
+			var email string
+			if claims := idn.Claims(); len(claims) > 0 {
+				email = claims.String("email")
+			}
+			ctx := r.Context()
+			role := idn.Role()
+			if role != "guest" {
+				ctx = xlog.ContextWithKV(ctx,
+					"tenant", idn.Tenant(),
+					"user", idn.Subject(),
+					"email", email,
+					"role", role)
+			}
+			r = r.WithContext(context.WithValue(ctx, keyContext, rctx))
 		}
 
 		delegate.ServeHTTP(w, r)
@@ -95,7 +110,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 	return http.HandlerFunc(h)
 }
 
-var guestIdentity = NewIdentity(GuestRoleName, "", nil)
+var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "")
 
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context
@@ -105,12 +120,20 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 		var err error
 		id, err = identityMapper(ctx)
 		if err != nil {
-			return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err)
+			logger.ContextKV(ctx, xlog.DEBUG,
+				"reason", "access_denied",
+				"method", info.FullMethod,
+				"err", err.Error())
+			return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err.Error())
 		}
 		if id == nil {
 			id = guestIdentity
 		}
 		ctx = AddToContext(ctx, NewRequestContext(id))
+		role := id.Role()
+		if role != "guest" {
+			ctx = xlog.ContextWithKV(ctx, "user", id.Subject(), "role", role)
+		}
 
 		return handler(ctx, req)
 	}

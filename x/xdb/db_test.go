@@ -2,10 +2,12 @@ package xdb_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/effective-security/porto/x/xdb"
+	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,6 +112,33 @@ func TestStrings(t *testing.T) {
 	}
 }
 
+func TestMetadata(t *testing.T) {
+	tcases := []struct {
+		val xdb.Metadata
+		exp string
+	}{
+		{val: xdb.Metadata{"one": "two"}, exp: "{\"one\":\"two\"}"},
+		{val: xdb.Metadata{}, exp: ""},
+		{val: nil, exp: ""},
+	}
+
+	for _, tc := range tcases {
+		dr, err := tc.val.Value()
+		require.NoError(t, err)
+
+		var drv string
+		if v, ok := dr.(string); ok {
+			drv = v
+		}
+		assert.Equal(t, tc.exp, drv)
+
+		var val2 xdb.Metadata
+		err = val2.Scan(dr)
+		require.NoError(t, err)
+		assert.Equal(t, len(tc.val), len(val2))
+	}
+}
+
 func TestDbTime(t *testing.T) {
 	nb, err := time.Parse(time.RFC3339, "2022-04-01T16:11:15.182Z")
 	require.NoError(t, err)
@@ -117,12 +146,14 @@ func TestDbTime(t *testing.T) {
 	nbl := nb.Local()
 
 	tcases := []struct {
-		val xdb.Time
-		exp time.Time
+		val    xdb.Time
+		exp    time.Time
+		isZero bool
+		str    string
 	}{
-		{val: xdb.Time{}, exp: time.Time{}},
-		{val: xdb.Time(nb), exp: nb},
-		{val: xdb.Time(nbl), exp: nb},
+		{val: xdb.Time{}, exp: time.Time{}, isZero: true, str: ""},
+		{val: xdb.Time(nb), exp: nb, isZero: false, str: "2022-04-01T16:11:15Z"},
+		{val: xdb.Time(nbl), exp: nb, isZero: false, str: "2022-04-01T16:11:15Z"},
 	}
 
 	for _, tc := range tcases {
@@ -135,13 +166,91 @@ func TestDbTime(t *testing.T) {
 		}
 		assert.Equal(t, tc.exp, drv)
 
+		if tc.isZero {
+			assert.True(t, tc.val.IsZero())
+			assert.Nil(t, tc.val.Ptr())
+		} else {
+			assert.False(t, tc.val.IsZero())
+			assert.NotNil(t, tc.val.Ptr())
+		}
+		assert.Equal(t, tc.str, tc.val.String())
+		assert.Equal(t, tc.val.IsZero(), tc.val.IsNil())
+
 		var val2 xdb.Time
 		err = val2.Scan(dr)
 		require.NoError(t, err)
 		assert.EqualValues(t, tc.val.UTC(), val2)
 	}
+
+	now := time.Now()
+	xnow := xdb.Now()
+	xafter := xdb.FromNow(time.Hour)
+	assert.Equal(t, xnow.UTC().Unix(), now.Unix())
+
+	now = now.Add(time.Hour)
+	now2 := xnow.Add(time.Hour)
+	assert.Equal(t, now.Unix(), now2.UTC().Unix())
+	assert.Equal(t, xafter.UTC().Unix(), now2.UTC().Unix())
+}
+
+func TestDbTimeEncode(t *testing.T) {
+	nb, err := time.Parse(time.RFC3339, "2022-04-01T16:11:15.182Z")
+	require.NoError(t, err)
+	xct := xdb.Time(nb)
+
+	assert.Equal(t, `"2022-04-01T16:11:15Z"`, xlog.EscapedString(xct))
+	assert.Equal(t, `""`, xlog.EscapedString(xdb.Time{}))
+
+	b, err := json.Marshal(xct)
+	require.NoError(t, err)
+	var xnow2 xdb.Time
+	require.NoError(t, json.Unmarshal(b, &xnow2))
+	assert.Equal(t, xct, xnow2)
+
+	b, err = json.Marshal(xdb.Time{})
+	assert.NoError(t, err)
+	assert.Equal(t, `""`, string(b))
+
+	foo := struct {
+		CreatedAt xdb.Time `json:"created_at,omitempty"`
+		UpdatedAt xdb.Time `json:"updated_at,omitempty"`
+	}{
+		CreatedAt: xct,
+	}
+	b, err = json.Marshal(foo)
+	require.NoError(t, err)
+	assert.Equal(t, `{"created_at":"2022-04-01T16:11:15.182Z","updated_at":""}`, string(b))
+
+	require.NoError(t, json.Unmarshal(b, &foo))
 }
 
 func TestDbNameFromConnection(t *testing.T) {
 	assert.Equal(t, "scannerdb", xdb.DbNameFromConnection("host=localhost port=45432 user=postgres p=xxx sslmode=disable dbname=scannerdb"))
+}
+
+func TestNULLString(t *testing.T) {
+	tcases := []struct {
+		val xdb.NULLString
+		exp string
+	}{
+		{val: "one", exp: "one"},
+		{val: "", exp: ""},
+	}
+
+	for _, tc := range tcases {
+		val := tc.val
+		dr, err := val.Value()
+		require.NoError(t, err)
+
+		var drv string
+		if v, ok := dr.(string); ok {
+			drv = v
+		}
+		assert.Equal(t, tc.exp, drv)
+
+		var val2 xdb.NULLString
+		err = val2.Scan(dr)
+		require.NoError(t, err)
+		assert.EqualValues(t, val, val2)
+	}
 }

@@ -13,6 +13,11 @@ import (
 )
 
 func TestCorrelationID(t *testing.T) {
+	v := Value(context.Background())
+	assert.Nil(t, v)
+	v = Value(WithID(NewFromContext(context.Background())))
+	assert.NotNil(t, v)
+
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cid := ID(r.Context())
 		assert.NotEmpty(t, cid)
@@ -30,6 +35,14 @@ func TestCorrelationID(t *testing.T) {
 	ctx := WithID(r.Context())
 	assert.NotEmpty(t, ID(ctx))
 	assert.NotEmpty(t, ID(WithMetaFromRequest(r)))
+
+	ctx2 := WithMetaFromContext(context.Background())
+	cid := ID(ctx2)
+	assert.NotEmpty(t, ID(ctx2))
+
+	md, ok := metadata.FromOutgoingContext(ctx2)
+	require.True(t, ok)
+	assert.Equal(t, cid, md[CorrelationIDgRPCHeaderName][0])
 }
 
 func Test_grpcFromContext(t *testing.T) {

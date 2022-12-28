@@ -3,8 +3,6 @@ package retriable
 import (
 	"context"
 	"net/http"
-
-	"github.com/pkg/errors"
 )
 
 // HeadTo makes HEAD request against the specified hosts.
@@ -15,7 +13,7 @@ import (
 func (c *Client) HeadTo(ctx context.Context, hosts []string, path string) (http.Header, int, error) {
 	resp, err := c.executeRequest(ctx, http.MethodHead, hosts, path, nil)
 	if err != nil {
-		return nil, 0, errors.WithStack(err)
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	return resp.Header, resp.StatusCode, nil

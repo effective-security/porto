@@ -72,7 +72,6 @@ func TestSlices_ContainsStringEqualFold(t *testing.T) {
 }
 
 func TestSlices_StringContainsOneOf(t *testing.T) {
-	// TODO: daniel: test StringContainsOneOf
 	tcases := []struct {
 		str    string
 		slices []string
@@ -85,6 +84,25 @@ func TestSlices_StringContainsOneOf(t *testing.T) {
 	}
 	for idx, tc := range tcases {
 		res := StringContainsOneOf(tc.str, tc.slices)
+		if res != tc.exp {
+			t.Errorf("case %d failed", idx)
+		}
+	}
+}
+
+func TestSlices_StringStartsWithOneOf(t *testing.T) {
+	tcases := []struct {
+		str    string
+		slices []string
+		exp    bool
+	}{
+		{"Daniel", []string{"foo", "bar"}, false},
+		{"foo_Daniel", []string{"foo", "el"}, true},
+		{"daniel", []string{"foo", "da"}, true},
+		{"Daniel", []string{"foo", "Dan"}, true},
+	}
+	for idx, tc := range tcases {
+		res := StringStartsWithOneOf(tc.str, tc.slices)
 		if res != tc.exp {
 			t.Errorf("case %d failed", idx)
 		}
@@ -359,4 +377,10 @@ func TestSlices_StringUpto(t *testing.T) {
 	assert.Equal(t, "1", StringUpto("11", 1))
 	assert.Equal(t, "11", StringUpto("11", 2))
 	assert.Equal(t, "11", StringUpto("11", 3))
+}
+
+func Test_removeDuplicates(t *testing.T) {
+	dups := []string{"12", "45", "45", "78", "12", "secdi"}
+	noDups := UniqueStrings(dups)
+	assert.Equal(t, len(noDups), 4)
 }

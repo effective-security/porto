@@ -5,8 +5,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/effective-security/metrics"
-	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
@@ -17,12 +16,6 @@ import (
 
 const (
 	warnUnaryRequestLatency = 300 * time.Millisecond
-)
-
-var (
-	keyForReqPerf       = []string{"grpc", "request", "perf"}
-	keyForReqSuccessful = []string{"grpc", "request", "status", "successful"}
-	keyForReqFailed     = []string{"grpc", "request", "status", "failed"}
 )
 
 func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
@@ -61,47 +54,34 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 			if s, ok := status.FromError(err); ok {
 				code = s.Code()
 			} else {
-				logger.KV(xlog.ERROR, "err", err.Error())
+				logger.ContextKV(ctx, xlog.ERROR, "err", err.Error())
 			}
 		default:
-			logger.KV(xlog.ERROR,
-				"ctx", correlation.ID(ctx),
+			logger.ContextKV(ctx, xlog.ERROR,
 				"type", reflect.TypeOf(err),
 				"err", err.Error())
 		}
 	}
 
 	l := xlog.TRACE
-	if logger.LevelAt(xlog.DEBUG) {
-		l = xlog.DEBUG
-	} else if expensiveRequest {
+	if expensiveRequest {
 		l = xlog.WARNING
 	}
 
-	logger.KV(l,
+	logger.ContextKV(ctx, l,
 		"req", reflect.TypeOf(req),
 		"res", responseType,
 		"remote", remote,
 		"duration", duration.Milliseconds(),
 		"code", code,
-		"ctx", correlation.ID(ctx),
-		"role", role,
-		"user", idx.Identity().Subject(),
+		// use and role added to ctx
+		//"role", role,
+		//"user", idx.Identity().Subject(),
 	)
 
-	tags := []metrics.Tag{
-		{Name: "method", Value: info.FullMethod},
-		{Name: "role", Value: role},
-		{Name: "status", Value: code.String()},
-	}
-
-	metrics.MeasureSince(keyForReqPerf, startTime, tags...)
-
-	if code == codes.OK {
-		metrics.IncrCounter(keyForReqSuccessful, 1, tags...)
-	} else {
-		metrics.IncrCounter(keyForReqFailed, 1, tags...)
-	}
+	codeName := code.String()
+	metricskey.GRPCReqPerf.MeasureSince(startTime, info.FullMethod, codeName)
+	metricskey.GRPCReqByRole.IncrCounter(1, info.FullMethod, codeName, role)
 }
 
 func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {

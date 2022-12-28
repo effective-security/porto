@@ -3,8 +3,8 @@ package tlsconfig
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -23,13 +23,13 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "t
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
 	tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	var roots *x509.CertPool
 
 	if rootsFile != "" {
-		rootsBytes, err := ioutil.ReadFile(rootsFile)
+		rootsBytes, err := os.ReadFile(rootsFile)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -58,7 +58,7 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	var roots *x509.CertPool
 
 	if rootsFile != "" {
-		rootsBytes, err := ioutil.ReadFile(rootsFile)
+		rootsBytes, err := os.ReadFile(rootsFile)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -78,7 +78,7 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	if certFile != "" {
 		tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if tlscert.Leaf == nil && len(tlscert.Certificate) > 0 {
 			tlscert.Leaf, err = x509.ParseCertificate(tlscert.Certificate[0])
@@ -97,12 +97,12 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration) (*tls.Config, *KeypairReloader, error) {
 	tlsCfg, err := NewClientTLSFromFiles(certFile, keyFile, rootsFile)
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 
 	tlsloader, err := NewKeypairReloader("", certFile, keyFile, checkInterval)
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	tlsCfg.GetClientCertificate = tlsloader.GetClientCertificateFunc()
 
@@ -126,12 +126,12 @@ func NewHTTPTransportWithReloader(
 
 	tlsCfg, err := NewClientTLSFromFiles(certFile, keyFile, rootsFile)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	tlsloader, err := NewKeypairReloader("", certFile, keyFile, checkInterval)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	tripper := &HTTPTransport{

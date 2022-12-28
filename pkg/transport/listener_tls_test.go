@@ -168,6 +168,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 	require.NoError(t, err)
 
 	client := retriable.New(retriable.WithTLS(clientTLS)).WithTimeout(1 * time.Second)
+	client.Policy.TotalRetryLimit = 0
 	require.NotNil(t, client)
 
 	var wg sync.WaitGroup
@@ -191,7 +192,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 			"/v1/test", nil, w)
 
 		if assert.Error(t, err) {
-			assert.Contains(t, err.Error(), "connect: connection refused")
+			assert.Contains(t, err.Error(), "unexpected EOF")
 			t.Logf("error from %v: %s", tlsln.Addr().String(), err.Error())
 		}
 	}()

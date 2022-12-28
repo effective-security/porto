@@ -55,7 +55,7 @@ type servers struct {
 func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 	urls, err := cfg.ParseListenURLs()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	var tlsInfo *transport.TLSInfo
@@ -76,7 +76,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 
 		_, err = tlsInfo.ServerTLSWithReloader()
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
@@ -171,7 +171,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 
 		if sctx.network == "tcp" {
 			if sctx.listener, err = transport.NewKeepAliveListener(sctx.listener, sctx.network, nil); err != nil {
-				return nil, errors.WithStack(err)
+				return nil, err
 			}
 		}
 		// TODO: register profiler, tracer, etc
@@ -236,7 +236,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = configureHandlers(s, handler)
 
 		// mux between http and grpc
-		handler = grpcHandlerFunc(gsSecure, handler)
+		handler = sctx.grpcHandlerFunc(gsSecure, handler)
 
 		srv := &http.Server{
 			Handler:   handler,
@@ -263,6 +263,10 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	// NOTE: the handlers are executed in the reverse order
+	// therefore configure additional first
+	for _, other := range s.opts.handlers {
+		handler = other(handler)
+	}
 
 	// service ready
 	handler = ready.NewServiceStatusVerifier(s, handler)
@@ -338,15 +342,21 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		correlation.NewAuthUnaryInterceptor(),
-		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		s.newLogUnaryInterceptor(),
-		grpc_prometheus.UnaryServerInterceptor,
+		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		s.authz.NewUnaryInterceptor(),
+		grpc_prometheus.UnaryServerInterceptor,
+	}
+	if len(s.opts.unary) > 0 {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, s.opts.unary...)
 	}
 
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		newStreamInterceptor(s),
 		grpc_prometheus.StreamServerInterceptor,
+	}
+	if len(s.opts.stream) > 0 {
+		chainStreamInterceptors = append(chainStreamInterceptors, s.opts.stream...)
 	}
 
 	opts = append(opts, grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(chainUnaryInterceptors...)))
@@ -369,19 +379,77 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 // grpcHandlerFunc returns an http.Handler that delegates to grpcServer on incoming gRPC
 // connections or otherHandler otherwise. Given in gRPC docs.
-func grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
+func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
 	if otherHandler == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			grpcServer.ServeHTTP(w, r)
 		})
 	}
+
+	allowedOrigins := ""
+	exposedHeaders := ""
+	if sctx.cfg.CORS != nil {
+		if len(sctx.cfg.CORS.AllowedOrigins) > 0 {
+			allowedOrigins = strings.Join(sctx.cfg.CORS.AllowedOrigins, ",")
+		}
+		if len(sctx.cfg.CORS.ExposedHeaders) > 0 {
+			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ",")
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
-		if r.ProtoMajor == 2 && strings.Contains(ct, "application/grpc") {
-			//logger.Debugf(">>> scr=grpcHandlerFunc, handle=grpcServer, method=%s, url=%s", r.Method, r.URL.String())
+		if strings.HasPrefix(ct, header.ApplicationGRPC) {
+			grpcWeb := ct == header.ApplicationGRPCWebProto
+			wh := w.Header()
+			if grpcWeb {
+				r.Header.Set(header.ContentType, header.ApplicationGRPC)
+				if allowedOrigins != "" {
+					wh.Set("Access-Control-Allow-Origin", allowedOrigins)
+				}
+				if exposedHeaders != "" {
+					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
+				}
+				wh.Set(header.ContentType, header.ApplicationGRPC)
+
+				w = &proxyWriter{
+					rw: w,
+				}
+			}
+			if sctx.cfg.DebugLogs {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"method", r.Method,
+					"ct", ct,
+					"remote", r.RemoteAddr,
+					"agent", r.UserAgent(),
+					"content-type", r.Header.Get(header.ContentType),
+					"accept", r.Header.Get(header.Accept),
+					"content-length", r.ContentLength,
+					"proto_ver_minor", r.ProtoMinor,
+					"proto_ver_major", r.ProtoMajor,
+					"url", r.URL.String())
+			}
 			grpcServer.ServeHTTP(w, r)
+			if grpcWeb && sctx.cfg.DebugLogs {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"method", r.Method,
+					"headers", wh)
+			}
 		} else {
-			//logger.Debugf(">>> scr=grpcHandlerFunc, handle=otherHandler, ct=%s, proto_ver=%d/%d", ct, r.ProtoMinor, r.ProtoMajor)
+			if sctx.cfg.DebugLogs && r.URL.Path != "/healthz" {
+				logger.ContextKV(r.Context(), xlog.DEBUG,
+					"handle", "otherHandler",
+					"ct", ct,
+					"remote", r.RemoteAddr,
+					"agent", r.UserAgent(),
+					"content-type", r.Header.Get(header.ContentType),
+					"accept", r.Header.Get(header.Accept),
+					"content-length", r.ContentLength,
+					"method", r.Method,
+					"url", r.URL.String(),
+					"proto_ver_minor", r.ProtoMinor,
+					"proto_ver_major", r.ProtoMajor)
+			}
 			otherHandler.ServeHTTP(w, r)
 		}
 	})
@@ -389,4 +457,32 @@ func grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Ha
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
+}
+
+// the proxy is a workaround to disable premature Flush for Grpc-Web
+type proxyWriter struct {
+	rw http.ResponseWriter
+}
+
+// Header proxy
+func (p *proxyWriter) Header() http.Header {
+	return p.rw.Header()
+}
+
+// Write proxy
+func (p *proxyWriter) Write(data []byte) (int, error) {
+	return p.rw.Write(data)
+}
+
+// WriteHeader proxy
+func (p *proxyWriter) WriteHeader(statusCode int) {
+	p.rw.WriteHeader(statusCode)
+}
+
+// Flush proxy
+func (p *proxyWriter) Flush() {
+	// do nothing
+	// Looks like a bug in
+	// func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status)
+	logger.KV(xlog.DEBUG, "reason", "not_supported")
 }

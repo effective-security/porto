@@ -56,7 +56,7 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 
 	err := result.Reload()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	stopChan := make(chan struct{})
@@ -256,7 +256,7 @@ func (k *KeypairReloader) Close() error {
 		return errors.New("already closed")
 	}
 
-	logger.KV(xlog.INFO, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
+	logger.KV(xlog.DEBUG, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
 
 	k.closed = true
 	k.stopChan <- struct{}{}

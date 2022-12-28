@@ -2,10 +2,10 @@ package fileutil
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"strings"
 
+	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 )
@@ -22,7 +22,7 @@ const (
 func LoadConfigWithSchema(config string) (string, error) {
 	if strings.HasPrefix(config, FileSource) {
 		fn := strings.TrimPrefix(config, FileSource)
-		f, err := ioutil.ReadFile(fn)
+		f, err := os.ReadFile(fn)
 		if err != nil {
 			return config, errors.WithStack(err)
 		}
@@ -44,7 +44,7 @@ func LoadConfigWithSchema(config string) (string, error) {
 func SaveConfigWithSchema(path, value string) error {
 	if strings.HasPrefix(path, FileSource) {
 		fn := strings.TrimPrefix(path, FileSource)
-		err := ioutil.WriteFile(fn, []byte(value), 0644)
+		err := os.WriteFile(fn, []byte(value), 0644)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -79,4 +79,21 @@ func Unmarshal(file string, v interface{}) error {
 		}
 	}
 	return nil
+}
+
+// Marshal saves object to file
+func Marshal(fn string, value interface{}) error {
+	var data []byte
+	var err error
+	if strings.HasSuffix(fn, ".json") {
+		data, err = marshal.EncodeBytes(marshal.PrettyPrint, value)
+	} else {
+		data, err = yaml.Marshal(value)
+	}
+
+	if err != nil {
+		return errors.WithMessage(err, "failed to encode")
+	}
+
+	return os.WriteFile(fn, data, os.ModePerm)
 }
