@@ -121,6 +121,7 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, pri
 	if err := codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body); err != nil {
 		logger.KV(xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
 	}
+	_ = codec.NewEncoder(w, encoderHandle(printSetting)).Encode(body)
 }
 
 // NewRequest returns http.Request

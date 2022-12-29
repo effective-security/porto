@@ -86,9 +86,9 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 				clientIP: clientIP,
 			}
 			r = r.WithContext(context.WithValue(r.Context(), keyContext, rctx))
-		} else {
+		} /*else {
 			rctx = v.(*RequestContext)
-		}
+		}*/
 
 		delegate.ServeHTTP(w, r)
 	}
