@@ -73,6 +73,8 @@ type Server struct {
 	authz    *authz.Provider
 	identity roles.IdentityProvider
 	disco    discovery.Discovery
+
+	opts options
 }
 
 // Start returns running Server
@@ -81,6 +83,7 @@ func Start(
 	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
+	opts ...Option,
 ) (e *Server, err error) {
 	serving := false
 	defer func() {
@@ -98,9 +101,9 @@ func Start(
 		e = nil
 	}()
 
-	e, err = newServer(name, cfg, container, serviceFactories)
+	e, err = newServer(name, cfg, container, serviceFactories, opts...)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	err = container.Invoke(func(
@@ -119,7 +122,7 @@ func Start(
 	) error {
 		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
 		if err != nil {
-			//logger.KV(xlog.ERROR, "err", err)
+			logger.KV(xlog.ERROR, "err", err)
 			return err
 		}
 		e.identity = iden
@@ -135,7 +138,7 @@ func Start(
 			len(cfg.Authz.AllowAnyRole) > 0) {
 		e.authz, err = authz.New(cfg.Authz)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 	}
 
@@ -157,6 +160,7 @@ func newServer(
 	cfg *Config,
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
+	opts ...Option,
 ) (*Server, error) {
 	var err error
 
@@ -179,6 +183,10 @@ func newServer(
 		startedAt: time.Now(),
 	}
 
+	for _, o := range opts {
+		o.apply(&e.opts)
+	}
+
 	for _, svc := range cfg.Services {
 		sf := serviceFactories[svc]
 		if sf == nil {
@@ -195,7 +203,7 @@ func newServer(
 
 	e.sctxs, err = configureListeners(cfg)
 	if err != nil {
-		return e, errors.WithStack(err)
+		return e, err
 	}
 
 	for _, sctx := range e.sctxs {

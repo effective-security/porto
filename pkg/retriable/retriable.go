@@ -281,9 +281,9 @@ type Client struct {
 // New creates a new Client
 func New(opts ...ClientOption) *Client {
 	c := &Client{
-		Name: "retriable",
+		Name:       "retriable",
 		httpClient: &http.Client{
-			Timeout: time.Second * 30,
+			//Timeout: time.Second * 30,
 		},
 		Policy: DefaultPolicy(),
 	}
@@ -399,7 +399,7 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	c.httpClient.Timeout = timeout
+	c.Policy.RequestTimeout = timeout
 	return c
 }
 
@@ -446,6 +446,7 @@ func DefaultPolicy() Policy {
 			// Bad Gateway (502)
 			http.StatusBadGateway: DefaultShouldRetryFactory(5, time.Second, "gateway"),
 		},
+		//RequestTimeout:     6 * time.Second,
 		TotalRetryLimit:    5,
 		NonRetriableErrors: DefaultNonRetriableErrors,
 	}
@@ -501,7 +502,7 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 	}
 	resp, err := c.executeRequest(ctx, method, hosts, path, body)
 	if err != nil {
-		return nil, 0, errors.WithStack(err)
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
@@ -540,26 +541,25 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 	// NOTE: do not `defer cancel()` context as it will cause error
 	// when reading the body
 	ctx, _ = c.ensureContext(ctx, httpMethod, path)
+
 	ctx = correlation.WithID(ctx)
-	cid := correlation.ID(ctx)
+
 	for i, host := range hosts {
 		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
 		if err != nil {
-			logger.KV(xlog.WARNING,
+			logger.ContextKV(ctx, xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
 				"path", path,
-				"ctx", cid,
 				"err", err)
 		} else {
-			logger.KV(xlog.TRACE,
+			logger.ContextKV(ctx, xlog.DEBUG,
 				"client", c.Name,
 				"method", httpMethod,
 				"host", host,
 				"path", path,
-				"status", resp.StatusCode,
-				"ctx", cid)
+				"status", resp.StatusCode)
 		}
 
 		if !c.shouldTryDifferentHost(resp, err) {
@@ -581,10 +581,10 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 			}
 		}
 
-		logger.KV(xlog.WARNING,
-			"client", c.Name,
-			"host", host,
-			"err", many.Error())
+		// logger.KV(xlog.WARNING,
+		// 	"client", c.Name,
+		// 	"host", host,
+		// 	"err", many.Error())
 
 		// rewind the reader
 		if body != nil {
@@ -654,16 +654,14 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 
 	req, err := convertRequest(r)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
-	cid := correlation.ID(req.Context())
-
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
 		if req.body != nil {
 			body, err := req.body()
 			if err != nil {
-				return resp, errors.WithStack(err)
+				return resp, err
 			}
 			if c, ok := body.(io.ReadCloser); ok {
 				req.Request.Body = c
@@ -676,9 +674,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		resp, err = c.httpClient.Do(req.Request)
 		elapsed := time.Since(started)
 		if err != nil {
-			logger.KV(xlog.WARNING,
+			logger.ContextKV(r.Context(), xlog.WARNING,
 				"client", c.Name,
-				"ctx", cid,
 				"retries", retries,
 				"host", req.Host,
 				"elapsed", elapsed.String(),
@@ -699,9 +696,8 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			c.consumeResponseBody(resp)
 		}
 
-		logger.KV(xlog.WARNING,
+		logger.ContextKV(r.Context(), xlog.WARNING,
 			"client", c.Name,
-			"ctx", cid,
 			"retries", retries,
 			"description", desc,
 			"reason", reason,
@@ -749,7 +745,7 @@ func debugRequest(r *http.Request, body bool) {
 	if logger.LevelAt(xlog.DEBUG) {
 		b, err := httputil.DumpRequestOut(r, body)
 		if err != nil {
-			logger.KV(xlog.ERROR, "err", err.Error())
+			logger.ContextKV(r.Context(), xlog.ERROR, "err", err.Error())
 		} else {
 			logger.Debug(string(b))
 		}
@@ -794,7 +790,9 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to read body response to (%T) type", body)
 		}
 	default:
-		if err := json.NewDecoder(resp.Body).Decode(body); err != nil {
+		d := json.NewDecoder(resp.Body)
+		d.UseNumber()
+		if err := d.Decode(body); err != nil {
 			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to decode body response to (%T) type", body)
 		}
 	}
@@ -826,19 +824,18 @@ var DefaultNonRetriableErrors = []string{
 
 // ShouldRetry returns if connection should be retried
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
-	cid := correlation.ID(r.Context())
+	ctx := r.Context()
 	if err != nil {
 		errStr := err.Error()
-		logger.KV(xlog.WARNING,
+		logger.ContextKV(ctx, xlog.DEBUG,
 			"host", r.URL.Host,
 			"path", r.URL.Path,
-			"ctx", cid,
 			"retries", retries,
 			"err", errStr)
 
 		select {
-		case <-r.Context().Done():
-			err := r.Context().Err()
+		case <-ctx.Done():
+			err := ctx.Err()
 			if err == context.Canceled {
 				return false, 0, Cancelled
 			} else if err == context.DeadlineExceeded {
@@ -860,6 +857,11 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 				}
 			}
 		*/
+
+		if p.TotalRetryLimit <= retries {
+			return false, 0, LimitExceeded
+		}
+
 		if slices.StringContainsOneOf(errStr, p.NonRetriableErrors) {
 			return false, 0, NonRetriableError
 		}
@@ -876,12 +878,15 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		return false, 0, Success
 	}
 
-	logger.KV(xlog.WARNING,
+	logger.ContextKV(ctx, xlog.WARNING,
 		"host", r.URL.Host,
 		"path", r.URL.Path,
-		"ctx", cid,
 		"retries", retries,
 		"status", resp.StatusCode)
+
+	if p.TotalRetryLimit <= retries {
+		return false, 0, LimitExceeded
+	}
 
 	if resp.StatusCode == 404 {
 		return false, 0, NotFound
@@ -893,10 +898,6 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 
 	if resp.StatusCode < 500 {
 		return false, 0, NonRetriableError
-	}
-
-	if p.TotalRetryLimit <= retries {
-		return false, 0, LimitExceeded
 	}
 
 	if fn, ok := p.Retries[resp.StatusCode]; ok {

@@ -14,6 +14,7 @@ import (
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 func TestMain(m *testing.M) {
@@ -25,12 +26,14 @@ func Test_Identity(t *testing.T) {
 	i := identity{role: "netmgmt", subject: "Ekspand"}
 	assert.Equal(t, "netmgmt", i.Role())
 	assert.Equal(t, "Ekspand", i.Subject())
-	assert.Equal(t, "netmgmt/Ekspand", i.String())
+	assert.Equal(t, "Ekspand:netmgmt", i.String())
+	assert.Empty(t, i.Tenant())
 
-	id := NewIdentity("netmgmt", "Ekspand", nil)
+	id := NewIdentity("netmgmt", "Ekspand", "org", nil, "", "")
 	assert.Equal(t, "netmgmt", id.Role())
 	assert.Equal(t, "Ekspand", id.Subject())
-	assert.Equal(t, "netmgmt/Ekspand", id.String())
+	assert.Equal(t, "org", id.Tenant())
+	assert.Equal(t, "org/Ekspand:netmgmt", id.String())
 }
 
 func Test_ForRequest(t *testing.T) {
@@ -56,7 +59,7 @@ func Test_ClientIP(t *testing.T) {
 func Test_AddToContext(t *testing.T) {
 	ctx := AddToContext(
 		context.Background(),
-		NewRequestContext(NewIdentity("r", "n", map[string]interface{}{"email": "test"})),
+		NewRequestContext(NewIdentity("r", "n", "", map[string]interface{}{"email": "test"}, "", "")),
 	)
 
 	rqCtx := FromContext(ctx)
@@ -65,7 +68,7 @@ func Test_AddToContext(t *testing.T) {
 	identity := rqCtx.Identity()
 	require.Equal(t, "n", identity.Subject())
 	require.Equal(t, "r", identity.Role())
-	require.Equal(t, "test", identity.Claims()["email"])
+	require.Equal(t, "test", identity.Claims().String("email"))
 }
 
 func Test_FromContext(t *testing.T) {
@@ -117,9 +120,13 @@ func Test_FromContext(t *testing.T) {
 }
 
 func Test_grpcFromContext(t *testing.T) {
+	info := &grpc.UnaryServerInfo{
+		FullMethod: "test",
+	}
+
 	t.Run("default_guest", func(t *testing.T) {
 		unary := NewAuthUnaryInterceptor(GuestIdentityForContext)
-		_, _ = unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, _ = unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 			rt := FromContext(ctx)
 			require.NotNil(t, rt)
 			require.NotNil(t, rt.Identity())
@@ -130,7 +137,7 @@ func Test_grpcFromContext(t *testing.T) {
 
 	t.Run("with_custom_id", func(t *testing.T) {
 		def := func(ctx context.Context) (Identity, error) {
-			return NewIdentity("test", "", nil), nil
+			return NewIdentity("test", "", "", nil, "", ""), nil
 		}
 		unary := NewAuthUnaryInterceptor(def)
 		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
@@ -148,7 +155,7 @@ func Test_grpcFromContext(t *testing.T) {
 			return nil, errors.New("invalid request")
 		}
 		unary := NewAuthUnaryInterceptor(def)
-		_, err := unary(context.Background(), nil, nil, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 			return nil, errors.New("some error")
 		})
 		require.Error(t, err)

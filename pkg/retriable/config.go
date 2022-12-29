@@ -127,7 +127,7 @@ func (f *Factory) ForHost(hostname string) (*Client, error) {
 		logger.KV(xlog.TRACE, "host", hostname, "cfg", cfg)
 		return Create(*cfg)
 	}
-	logger.KV(xlog.TRACE, "reason", "config_not_found", "host", hostname)
+	logger.KV(xlog.DEBUG, "reason", "config_not_found", "host", hostname)
 	return New(WithHosts([]string{hostname})), nil
 }
 
@@ -178,38 +178,61 @@ func Create(cfg ClientConfig) (*Client, error) {
 }
 
 // LoadAuthToken loads .auth_token file
-func LoadAuthToken(dir string) (string, error) {
+func LoadAuthToken(dir string) (*AuthToken, error) {
 	file := path.Join(dir, ".auth_token")
 	t, err := os.ReadFile(file)
 	if err != nil {
-		return "", errors.WithStack(err)
+		return nil, errors.WithMessage(err, "credentials not found")
 	}
-	return string(t), nil
+	return ParseAuthToken(string(t))
+}
+
+// AuthToken provides auth token info
+type AuthToken struct {
+	Raw          string
+	AccessToken  string
+	RefreshToken string
+	TokenType    string
+	DpopJkt      string
+	Expires      *time.Time
+}
+
+// Expired returns true if expiry is present on the token,
+// and is behind the current time
+func (t *AuthToken) Expired() bool {
+	return t.Expires != nil && t.Expires.Before(time.Now())
 }
 
 // ParseAuthToken parses stored token and validates expiration
-func ParseAuthToken(rawToken string) (accessToken, tokenType, dpopjkt string, err error) {
-	tokenType = "Bearer"
-	accessToken = rawToken
-	if strings.Contains(accessToken, "=") {
-		vals, err2 := url.ParseQuery(accessToken)
-		if err2 != nil {
-			err = errors.WithMessagef(err2, "failed to parse token values")
-			return
+func ParseAuthToken(rawToken string) (*AuthToken, error) {
+	t := &AuthToken{
+		Raw:         rawToken,
+		TokenType:   "Bearer",
+		AccessToken: rawToken,
+	}
+	if strings.Contains(rawToken, "=") {
+		vals, err := url.ParseQuery(rawToken)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to parse token values")
 		}
-		accessToken = slices.StringsCoalesce(getValue(vals, "access_token"), getValue(vals, "id_token"), getValue(vals, "token"))
-		dpopjkt = getValue(vals, "dpop_jkt")
+		t.AccessToken = slices.StringsCoalesce(getValue(vals, "access_token"),
+			getValue(vals, "id_token"),
+			getValue(vals, "token"))
+		t.RefreshToken = getValue(vals, "refresh_token")
+		t.DpopJkt = getValue(vals, "dpop_jkt")
+
 		exp := getValue(vals, "exp")
 		if exp != "" {
-			ux, err2 := strconv.ParseInt(exp, 10, 64)
-			if err2 == nil && time.Now().After(time.Unix(ux, 0)) {
-				err = errors.Errorf("authorization: token expired")
-				return
+			ux, err := strconv.ParseInt(exp, 10, 64)
+			if err != nil {
+				return nil, errors.WithMessagef(err, "invalid exp value")
 			}
+			expires := time.Unix(ux, 0)
+			t.Expires = &expires
 		}
 	}
 
-	return
+	return t, nil
 }
 
 // ExpandStorageFolder returns expanded StorageFolder
@@ -222,6 +245,15 @@ func ExpandStorageFolder(dir string) string {
 	return dir
 }
 
+// LoadAuthToken returns AuthToken
+func (c *Client) LoadAuthToken() (*AuthToken, error) {
+	val := os.Getenv(c.EnvAuthTokenName)
+	if val != "" {
+		return ParseAuthToken(val)
+	}
+	return LoadAuthToken(ExpandStorageFolder(c.StorageFolder))
+}
+
 // WithAuthorization sets Authorization token
 func (c *Client) WithAuthorization() error {
 	host := c.CurrentHost()
@@ -232,39 +264,29 @@ func (c *Client) WithAuthorization() error {
 		return nil
 	}
 
-	var (
-		err         error
-		accessToken string
-		jkt         string
-		tokenType   string
-	)
-
-	accessToken = os.Getenv(c.EnvAuthTokenName)
-	if accessToken == "" {
-		accessToken, _ = LoadAuthToken(ExpandStorageFolder(c.StorageFolder))
-	}
-	if accessToken == "" {
-		return errors.Errorf("authorization: credentials not found")
-	}
-
-	accessToken, tokenType, jkt, err = ParseAuthToken(accessToken)
+	at, err := c.LoadAuthToken()
 	if err != nil {
 		return err
 	}
 
-	if jkt != "" {
-		k, _, err := c.LoadKey(jkt)
+	if at.Expired() {
+		return errors.Errorf("authorization: token expired")
+	}
+
+	tktype := at.TokenType
+	if at.DpopJkt != "" {
+		k, _, err := c.LoadKey(at.DpopJkt)
 		if err != nil {
 			return errors.WithMessage(err, "unable to load key for DPoP")
 		}
-		tokenType = "DPoP"
+		tktype = "DPoP"
 		c.signer, err = dpop.NewSigner(k.Key.(crypto.Signer))
 		if err != nil {
 			return errors.WithMessage(err, "unable to create signer")
 		}
 	}
 
-	c.AddHeader(header.Authorization, tokenType+" "+accessToken)
+	c.AddHeader(header.Authorization, tktype+" "+at.AccessToken)
 
 	return nil
 }

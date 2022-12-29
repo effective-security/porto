@@ -158,7 +158,7 @@ func TestConfig_Allow(t *testing.T) {
 	t.Log(c.treeAsText())
 
 	check := func(path, role string, allowed bool) {
-		idn := identity.NewIdentity(role, "test", nil)
+		idn := identity.NewIdentity(role, "test", "", nil, "", "")
 		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/foo", "bob", true)
@@ -208,7 +208,7 @@ func TestConfig_AllowAny(t *testing.T) {
 	})
 	require.NoError(t, err)
 	check := func(path, role string, allowed bool) {
-		idn := identity.NewIdentity(role, "test", nil)
+		idn := identity.NewIdentity(role, "test", "", nil, "", "")
 		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/", "alice", false)
@@ -275,19 +275,19 @@ func Test_AccessLogs(t *testing.T) {
 
 	shouldLog := func(path, service, expLog string) {
 		buf.Reset()
-		c.isAllowed(ctx, path, identity.NewIdentity(service, "test", nil))
+		c.isAllowed(ctx, path, identity.NewIdentity(service, "test", "", nil, "", ""))
 		result := buf.String()
 		assert.Equal(t, expLog, result, "Unexpected log output for isAllowed(%q, %q)", path, service)
 	}
 
 	t.Run("logs", func(t *testing.T) {
 		buf.Reset()
-		shouldLog("/", "bobby", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"bobby\" user=\"test\" email=\"\" path=\"/\" node=\"\" ctx=\"\"\n")
-		shouldLog("/bob", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bob\" node=\"\" ctx=\"\"\n")
-		shouldLog("/bar", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\" ctx=\"\"\n")
-		shouldLog("/bar", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/bar\" node=\"bar\" ctx=\"\"\n")
-		shouldLog("/foo/eve", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" role=\"svc_eve\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\" ctx=\"\"\n")
-		shouldLog("/foo/eve", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" role=\"svc_bob\" user=\"test\" email=\"\" path=\"/foo/eve\" node=\"eve\" ctx=\"\"\n")
+		shouldLog("/", "bobby", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" path=\"/\"\n")
+		shouldLog("/bob", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed_any\" path=\"/bob\"\n")
+		shouldLog("/bar", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" path=\"/bar\" node=\"bar\"\n")
+		shouldLog("/bar", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" path=\"/bar\" node=\"bar\"\n")
+		shouldLog("/foo/eve", "svc_eve", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"allowed\" path=\"/foo/eve\" node=\"eve\"\n")
+		shouldLog("/foo/eve", "svc_bob", "time=2021-04-01T00:00:00Z level=N pkg=authz func=isAllowed status=\"denied\" path=\"/foo/eve\" node=\"eve\"\n")
 	})
 
 	t.Run("nologs", func(t *testing.T) {
@@ -295,12 +295,12 @@ func Test_AccessLogs(t *testing.T) {
 		c.cfg.LogAllowed = false
 		c.cfg.LogDenied = false
 		buf.Reset()
-		c.isAllowed(ctx, "/", identity.NewIdentity("bobby", "test", nil))
-		c.isAllowed(ctx, "/bob", identity.NewIdentity("svc_bob", "test", nil))
-		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_bob", "test", nil))
-		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_eve", "test", nil))
-		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_eve", "test", nil))
-		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_bob", "test", nil))
+		c.isAllowed(ctx, "/", identity.NewIdentity("bobby", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bob", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
 		assert.Empty(t, buf.Bytes())
 	})
 }
@@ -326,8 +326,8 @@ func TestConfig_Clone(t *testing.T) {
 	c.Allow("/foo", "alice")
 	require.NotNil(t, clone.requestRoleMapper, "Config.Clone() didn't clone roleMapper")
 	assert.Equal(t, "bob", clone.requestRoleMapper(nil).Role(), "Config.Clone() has a roleMapper set, but it doesn't appear to be ours!")
-	assert.False(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("alise", "test", nil)), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
-	assert.True(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("bob", "test", nil)), "Config.Clone() return a clone that's missing an Allow() from the source")
+	assert.False(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("alise", "test", "", nil, "", "")), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
+	assert.True(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("bob", "test", "", nil, "", "")), "Config.Clone() return a clone that's missing an Allow() from the source")
 }
 
 func TestConfig_checkAccess_defaultMapper(t *testing.T) {
@@ -336,10 +336,10 @@ func TestConfig_checkAccess_defaultMapper(t *testing.T) {
 
 	c.Allow("/foo", "bob")
 	r, _ := http.NewRequest(http.MethodGet, "/foo", nil)
-	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
+	assert.EqualError(t, c.checkAccess(r), "unknown:guest not allowed")
 
 	r, _ = http.NewRequest(http.MethodGet, "*", nil)
-	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
+	assert.EqualError(t, c.checkAccess(r), "unknown:guest not allowed")
 }
 
 func TestConfig_checkAccess_noTLS(t *testing.T) {
@@ -403,7 +403,7 @@ func TestConfig_Handler(t *testing.T) {
 			assert.Equal(t, header.ApplicationJSON, ct, "Unauthorized response should have an application/json contentType")
 
 			body := w.Body.String()
-			assert.JSONEq(t, `{"code":"unauthorized", "message":"bob/test role not allowed"}`, body)
+			assert.JSONEq(t, `{"code":"unauthorized", "message":"test:bob not allowed"}`, body)
 		}
 	}
 	testHandler("/who", true)
@@ -443,7 +443,7 @@ func TestNewUnaryInterceptor(t *testing.T) {
 	}
 	_, err = unary(context.Background(), nil, si, handler)
 	require.Error(t, err)
-	assert.Equal(t, `rpc error: code = PermissionDenied desc = guest role not allowed`, err.Error())
+	assert.Equal(t, `rpc error: code = PermissionDenied desc = unknown:guest not allowed`, err.Error())
 }
 
 func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
@@ -453,13 +453,13 @@ func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
 func roleMapper(role string) func(*http.Request) identity.Identity {
 	return func(*http.Request) identity.Identity {
-		return identity.NewIdentity(role, "test", nil)
+		return identity.NewIdentity(role, "test", "", nil, "", "")
 	}
 }
 
 func gRPCRoleMapper(role string) func(ctx context.Context) identity.Identity {
 	return func(ctx context.Context) identity.Identity {
-		return identity.NewIdentity(role, "test", nil)
+		return identity.NewIdentity(role, "test", "", nil, "", "")
 	}
 }
 

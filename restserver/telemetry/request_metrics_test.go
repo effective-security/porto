@@ -66,7 +66,7 @@ func Test_RequestMetrics(t *testing.T) {
 	req := func(method, uri string, sc int) {
 		r, err := http.NewRequest(method, uri, nil)
 		require.NoError(t, err)
-		r = identity.WithTestIdentity(r, identity.NewIdentity("admin", "10.0.0.1", nil))
+		r = identity.WithTestIdentity(r, identity.NewIdentity("admin", "10.0.0.1", "", nil, "", ""))
 
 		w := httptest.NewRecorder()
 		handlerStatusCode = sc
@@ -79,14 +79,15 @@ func Test_RequestMetrics(t *testing.T) {
 	req(http.MethodPost, "/", http.StatusBadRequest)
 	req(http.MethodPost, "/bar", http.StatusBadRequest)
 	req(http.MethodPost, "/bar", http.StatusBadRequest)
+	req(http.MethodPost, "/unavailable", http.StatusServiceUnavailable)
+	req(http.MethodPost, "/notfound", http.StatusNotFound)
+	req(http.MethodPost, "/unauthorized", http.StatusUnauthorized)
 
-	assertSample("test.http.request.perf;method=GET;role=admin;status=200;uri=/", 1)
-	assertSample("test.http.request.perf;method=GET;role=admin;status=200;uri=/foo", 1)
-	assertSample("test.http.request.perf;method=POST;role=admin;status=200;uri=/", 2)
+	assertSample("test_http_requests_perf;method=GET;status=200;uri=/", 1)
+	assertSample("test_http_requests_perf;method=GET;status=200;uri=/foo", 1)
+	assertSample("test_http_requests_perf;method=POST;status=200;uri=/", 2)
 
-	assertCounter("test.http.request.status.successful;method=GET;role=admin;status=200;uri=/", 1)
-	assertCounter("test.http.request.status.successful;method=GET;role=admin;status=200;uri=/foo", 1)
-	assertCounter("test.http.request.status.successful;method=POST;role=admin;status=200;uri=/", 2)
-	assertCounter("test.http.request.status.failed;method=POST;role=admin;status=400;uri=/", 1)
-	assertCounter("test.http.request.status.failed;method=POST;role=admin;status=400;uri=/bar", 2)
+	assertCounter("test_http_requests_role;method=GET;status=200;uri=/;role=admin", 1)
+	assertCounter("test_http_requests_role;method=GET;status=200;uri=/foo;role=admin", 1)
+	assertCounter("test_http_requests_role;method=POST;status=200;uri=/;role=admin", 2)
 }

@@ -38,8 +38,9 @@ func Test_All(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 
 	claims := jwt.MapClaims{
-		"sub":   "12234",
-		"email": "denis@trusty.com",
+		"sub":    "12234",
+		"email":  "denis@trusty.com",
+		"tenant": "t12341234",
 		"cnf": map[string]interface{}{
 			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
@@ -89,6 +90,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -100,6 +102,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -125,6 +128,7 @@ func Test_All(t *testing.T) {
 		id, err := p.IdentityFromContext(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
 	})
 
@@ -201,7 +205,7 @@ func TestInvalidIssuer(t *testing.T) {
 		assert.True(t, p.ApplicableForRequest(r))
 
 		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+		assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -231,7 +235,7 @@ func TestInvalidIssuer(t *testing.T) {
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
 		_, err := p.IdentityFromContext(ctx)
-		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+		assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
 	})
 }
 
@@ -284,7 +288,7 @@ func TestInvalidAudience(t *testing.T) {
 		assert.True(t, p.ApplicableForRequest(r))
 
 		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "token missing audience: expected_aud")
+		assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -314,7 +318,7 @@ func TestInvalidAudience(t *testing.T) {
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
 		_, err := p.IdentityFromContext(ctx)
-		assert.EqualError(t, err, "token missing audience: expected_aud")
+		assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
 	})
 }
 

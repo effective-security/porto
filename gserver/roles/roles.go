@@ -26,19 +26,22 @@ const (
 	GuestRoleName = "guest"
 
 	// TLSUserRoleName defines a generic role name for an authenticated user
-	TLSUserRoleName = "tls_authenticated"
+	TLSUserRoleName = "tls_user"
 
 	// JWTUserRoleName defines a generic role name for an authenticated user
-	JWTUserRoleName = "jwt_authenticated"
+	JWTUserRoleName = "jwt_user"
 
 	// DPoPUserRoleName defines a generic role name for an authenticated user
-	DPoPUserRoleName = "dpop_authenticated"
+	DPoPUserRoleName = "dpop_user"
 
 	// DefaultSubjectClaim defines default JWT Subject claim
 	DefaultSubjectClaim = "sub"
 
 	// DefaultRoleClaim defines default Role claim
 	DefaultRoleClaim = "email"
+
+	// DefaultTenantClaim defines default Tenant claim
+	DefaultTenantClaim = "tenant"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -85,6 +88,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	if config.DPoP.Enabled {
 		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
 		prov.config.DPoP.RoleClaim = slices.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
+		prov.config.DPoP.TenantClaim = slices.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
@@ -95,6 +99,7 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 	if config.JWT.Enabled {
 		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
 		prov.config.JWT.RoleClaim = slices.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
+		prov.config.JWT.TenantClaim = slices.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -148,35 +153,50 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	return false
 }
 
+func tokenType(auth string) (token string, tokenType string) {
+	if auth == "" {
+		return
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) == 2 {
+		tokenType = parts[0]
+		token = parts[1]
+	} else {
+		token = auth
+		tokenType = "Bearer"
+	}
+	return
+}
+
 // IdentityFromRequest returns identity from the request
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
 	peers := getPeerCertAndCount(r)
-	logger.KV(xlog.DEBUG,
-		"dpop_enabled", p.config.DPoP.Enabled,
-		"jwt_enabled", p.config.JWT.Enabled,
-		"tls_enabled", p.config.TLS.Enabled,
-		"certs_present", peers)
+	// logger.ContextKV(r.Context(), xlog.DEBUG,
+	// 	"dpop_enabled", p.config.DPoP.Enabled,
+	// 	"jwt_enabled", p.config.JWT.Enabled,
+	// 	"tls_enabled", p.config.TLS.Enabled,
+	// 	"certs_present", peers)
 
 	authHeader := r.Header.Get(header.Authorization)
+	token, typ := tokenType(authHeader)
+
 	if p.config.DPoP.Enabled {
-		if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
-			token := authHeader[5:]
-			id, err := p.dpopIdentity(r, token)
+		if strings.EqualFold(typ, "DPoP") {
+			id, err := p.dpopIdentity(r, token, "DPoP")
 			if err != nil {
-				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
-				return nil, errors.WithStack(err)
+				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
+				return nil, err
 			}
 			return id, nil
 		}
 	}
 
 	if p.config.JWT.Enabled {
-		if strings.ToLower(slices.StringUpto(authHeader, 7)) == "bearer " {
-			token := authHeader[7:]
-			id, err := p.jwtIdentity(token)
+		if strings.EqualFold(typ, "Bearer") {
+			id, err := p.jwtIdentity(token, "Bearer")
 			if err != nil {
-				logger.KV(xlog.TRACE, "token", token, "err", err.Error())
-				return nil, errors.WithStack(err)
+				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
+				return nil, err
 			}
 			return id, nil
 		}
@@ -185,7 +205,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.TLS.Enabled && peers > 0 {
 		id, err := p.tlsIdentity(r.TLS)
 		if err == nil {
-			logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
+			logger.ContextKV(r.Context(), xlog.DEBUG, "type", "TLS", "role", id)
 			return id, nil
 		}
 	}
@@ -202,13 +222,31 @@ func getPeerCertAndCount(r *http.Request) int {
 	return 0
 }
 
+func dumpDM(md metadata.MD) []any {
+	var res []any
+	for k, v := range md {
+		if len(v) > 0 {
+			res = append(res, k, v[0])
+		}
+	}
+	return res
+}
+
 // IdentityFromContext returns identity from context
 func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, error) {
-	if p.config.JWT.Enabled {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
-			return p.jwtIdentity(md[tcredentials.TokenFieldNameGRPC][0])
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		if p.config.DebugLogs {
+			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
 		}
+		if p.config.JWT.Enabled && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
+			if token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0]); typ != "" {
+				return p.jwtIdentity(token, typ)
+			}
+		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
+	} else {
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_metadata_incoming")
 	}
 
 	if p.config.TLS.Enabled {
@@ -218,19 +256,22 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 			if ok && len(si.State.PeerCertificates) > 0 {
 				id, err := p.tlsIdentity(&si.State)
 				if err == nil {
-					logger.KV(xlog.DEBUG, "type", "TLS", "role", id)
+					logger.ContextKV(ctx, xlog.DEBUG, "type", "TLS", "role", id)
 					return id, nil
 				}
 			}
 		}
 	}
+	if p.config.DebugLogs {
+		logger.ContextKV(ctx, xlog.DEBUG, "role", "guest")
+	}
 	return identity.GuestIdentityForContext(ctx)
 }
 
-func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity, error) {
+func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identity.Identity, error) {
 	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	var claims jwt.MapClaims
@@ -243,7 +284,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 	if p.at != nil {
 		claims, err = p.at.Claims(r.Context(), auth)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		if claims != nil {
 			err = claims.Valid(cfg)
@@ -253,29 +294,36 @@ func (p *provider) dpopIdentity(r *http.Request, auth string) (identity.Identity
 		claims, err = p.jwt.ParseToken(auth, cfg)
 	}
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	tb, err := dpop.GetCnfClaim(claims)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if tb != res.Thumbprint {
-		logger.KV(xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
+		logger.ContextKV(r.Context(), xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
+	email := claims.String("email")
 	subj := claims.String(p.config.DPoP.SubjectClaim)
+	tenant := claims.String(p.config.DPoP.TenantClaim)
 	roleClaim := claims.String(p.config.DPoP.RoleClaim)
 	role := p.dpopRoles[roleClaim]
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
-	return identity.NewIdentity(role, subj, claims), nil
+	logger.ContextKV(r.Context(), xlog.DEBUG,
+		"role", role,
+		"tenant", tenant,
+		"subject", subj,
+		"email", email,
+		"type", tokenType)
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
-func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
+func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
 
@@ -288,27 +336,37 @@ func (p *provider) jwtIdentity(auth string) (identity.Identity, error) {
 	if p.at != nil {
 		claims, err = p.at.Claims(context.Background(), auth)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errors.WithMessage(err, "unable to extract claims from access token")
 		}
 		if claims != nil {
 			err = claims.Valid(cfg)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if claims == nil {
 		claims, err = p.jwt.ParseToken(auth, cfg)
-	}
-	if err != nil {
-		return nil, errors.WithStack(err)
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to parse JWT token")
+		}
 	}
 
+	email := claims.String("email")
 	subj := claims.String(p.config.JWT.SubjectClaim)
+	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
 	role := p.jwtRoles[roleClaim]
 	if role == "" {
 		role = p.config.JWT.DefaultAuthenticatedRole
 	}
-	logger.KV(xlog.DEBUG, "role", role, "subject", subj)
-	return identity.NewIdentity(role, subj, claims), nil
+	logger.KV(xlog.DEBUG,
+		"role", role,
+		"tenant", tenant,
+		"subject", subj,
+		"email", email,
+		"type", tokenType)
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {
@@ -321,13 +379,14 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		}
 		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
 		claims := map[string]interface{}{
-			"sub": peer.Subject.String(),
-			"iss": peer.Issuer.String(),
+			"sub":    peer.Subject.String(),
+			"iss":    peer.Issuer.String(),
+			"spiffe": spiffe,
 		}
 		if len(peer.EmailAddresses) > 0 {
 			claims["email"] = peer.EmailAddresses[0]
 		}
-		return identity.NewIdentity(role, peer.Subject.CommonName, claims), nil
+		return identity.NewIdentity(role, peer.Subject.CommonName, "", claims, "", ""), nil
 	}
 
 	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)

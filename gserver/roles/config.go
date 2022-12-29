@@ -2,6 +2,9 @@ package roles
 
 // IdentityMap contains configuration for the roles
 type IdentityMap struct {
+	// DebugLogs allows to add extra debog logs
+	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
+
 	// TLS identity map
 	TLS TLSIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map
@@ -36,6 +39,9 @@ type JWTIdentityMap struct {
 	// RoleClaim specifies claim name to be used for role mapping,
 	// by default it's `email`, but can be changed to `sub` etc
 	RoleClaim string `json:"role_claim" yaml:"role_claim"`
+	// TenantClaim specifies claim name to be used for tenant mapping,
+	// by default it's `tenant`, but can be changed to `org` etc
+	TenantClaim string `json:"tenant_claim" yaml:"tenant_claim"`
 	// Roles is a map of role to JWT identity
 	Roles map[string][]string `json:"roles" yaml:"roles"`
 }
