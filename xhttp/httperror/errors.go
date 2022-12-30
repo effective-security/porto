@@ -281,7 +281,7 @@ func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	if e.RequestID == "" {
 		e.RequestID = correlation.ID(r.Context())
 	}
-	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
 }
 
 // WriteHTTPResponse implements how to serialize this error into a HTTP Response
@@ -292,7 +292,7 @@ func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	if m.RequestID == "" {
 		m.RequestID = correlation.ID(r.Context())
 	}
-	codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
 }
 
 // IsTimeout returns true for timeout error

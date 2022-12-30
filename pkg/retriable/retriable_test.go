@@ -633,7 +633,7 @@ func Test_Retriable_DoWithRetry(t *testing.T) {
 		}
 		count++
 		w.WriteHeader(status)
-		io.WriteString(w, fmt.Sprintf(`{"count": "%d"}`, count))
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"count": "%d"}`, count))
 	}
 
 	server1 := httptest.NewServer(http.HandlerFunc(h))
@@ -669,7 +669,7 @@ func Test_RetriableBody(t *testing.T) {
 			return
 		}
 		// write request back
-		w.Write(q)
+		_, _ = w.Write(q)
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(h))

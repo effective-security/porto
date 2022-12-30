@@ -107,7 +107,7 @@ func makeTestHandler(t *testing.T, expURI, responseBody string) http.Handler {
 	h := func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, expURI, r.RequestURI, "received wrong URI")
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, responseBody)
+		_, _ = io.WriteString(w, responseBody)
 	}
 	return http.HandlerFunc(h)
 }

@@ -27,7 +27,7 @@ func (b *Builder) Container() *dig.Container {
 
 // WithConfig sets gserver.HTTPServerCfg
 func (b *Builder) WithConfig(c *gserver.Config) *Builder {
-	b.container.Provide(func() *gserver.Config {
+	_ = b.container.Provide(func() *gserver.Config {
 		return c
 	})
 	return b
@@ -35,7 +35,7 @@ func (b *Builder) WithConfig(c *gserver.Config) *Builder {
 
 // WithJwtSigner sets JWT Signer
 func (b *Builder) WithJwtSigner(j jwt.Signer) *Builder {
-	b.container.Provide(func() jwt.Signer {
+	_ = b.container.Provide(func() jwt.Signer {
 		return j
 	})
 	return b
@@ -43,7 +43,7 @@ func (b *Builder) WithJwtSigner(j jwt.Signer) *Builder {
 
 // WithJwtParser sets JWT Parser
 func (b *Builder) WithJwtParser(j jwt.Parser) *Builder {
-	b.container.Provide(func() jwt.Parser {
+	_ = b.container.Provide(func() jwt.Parser {
 		return j
 	})
 	return b
@@ -51,7 +51,7 @@ func (b *Builder) WithJwtParser(j jwt.Parser) *Builder {
 
 // WithAccessToken sets Access Token provider
 func (b *Builder) WithAccessToken(j roles.AccessToken) *Builder {
-	b.container.Provide(func() roles.AccessToken {
+	_ = b.container.Provide(func() roles.AccessToken {
 		return j
 	})
 	return b
@@ -59,7 +59,7 @@ func (b *Builder) WithAccessToken(j roles.AccessToken) *Builder {
 
 // WithDiscovery sets Discover
 func (b *Builder) WithDiscovery(d discovery.Discovery) *Builder {
-	b.container.Provide(func() discovery.Discovery {
+	_ = b.container.Provide(func() discovery.Discovery {
 		return d
 	})
 	return b

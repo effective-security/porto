@@ -31,7 +31,7 @@ func TestError_Error(t *testing.T) {
 	e.RequestID = "123"
 	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
 
-	e.WithCause(errors.New("some other error"))
+	_ = e.WithCause(errors.New("some other error"))
 	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
 }
 
@@ -66,9 +66,9 @@ func TestError_ManyError(t *testing.T) {
 
 func TestError_AddErrorToManyError(t *testing.T) {
 	me := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 42 errors!")
-	me.Add("one", errors.Errorf("test error 1"))
+	_ = me.Add("one", errors.Errorf("test error 1"))
 	assert.Equal(t, 1, len(me.Errors))
-	me.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
+	_ = me.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
 	assert.Equal(t, 2, len(me.Errors))
 	assert.True(t, me.HasErrors(), "many error contains two errors")
 	assert.Contains(t, me.Errors, "one")
@@ -77,7 +77,7 @@ func TestError_AddErrorToManyError(t *testing.T) {
 
 func TestError_AddErrorToNilManyError(t *testing.T) {
 	var me httperror.ManyError
-	me.Add("one", errors.Errorf("test error 1"))
+	_ = me.Add("one", errors.Errorf("test error 1"))
 	assert.Equal(t, 1, len(me.Errors))
 	me.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
 	assert.Equal(t, 2, len(me.Errors))
@@ -91,14 +91,18 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 	single.RequestID = "123"
 
 	many := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 2 errors!")
+
+	_ = many.Add("one", errors.Errorf("test error 1"))
+	_ = many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
+
 	many.RequestID = "123"
 	many.Add("one", errors.Errorf("test error 1"))
 	many.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
 	assert.EqualError(t, many.Cause(), "test error 1")
 
 	manyNil := &httperror.ManyError{HTTPStatus: http.StatusBadRequest}
-	manyNil.Add("one", errors.Errorf("test error 1"))
-	manyNil.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
+	_ = manyNil.Add("one", errors.Errorf("test error 1"))
+	_ = manyNil.Add("two", httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "test error 2"))
 
 	cases := []struct {
 		name     string

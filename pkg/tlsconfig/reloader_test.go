@@ -120,7 +120,7 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			k.Reload()
+			_ = k.Reload()
 		}()
 	}
 	wg.Wait()

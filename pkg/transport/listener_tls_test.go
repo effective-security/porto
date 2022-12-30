@@ -52,7 +52,7 @@ func TestNewTLSListener_Untrusted(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		srv.Serve(tlsln)
+		_ = srv.Serve(tlsln)
 	}()
 
 	wg.Add(1)
@@ -111,7 +111,7 @@ func TestNewTLSListener_Trusted(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		srv.Serve(tlsln)
+		_ = srv.Serve(tlsln)
 	}()
 
 	wg.Add(1)

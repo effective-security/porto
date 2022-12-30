@@ -42,7 +42,7 @@ func NewRequest(method, url string, rawBody io.ReadSeeker) (*Request, error) {
 	if rawBody != nil {
 		raw := rawBody.(io.ReadSeeker)
 		body = func() (io.Reader, error) {
-			raw.Seek(0, 0)
+			_, _ = raw.Seek(0, 0)
 			return ioutil.NopCloser(raw), nil
 		}
 		if lr, ok := raw.(lenReader); ok {

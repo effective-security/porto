@@ -314,7 +314,6 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
-
 	logger.ContextKV(r.Context(), xlog.DEBUG,
 		"role", role,
 		"tenant", tenant,

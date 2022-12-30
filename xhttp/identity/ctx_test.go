@@ -126,7 +126,7 @@ func Test_grpcFromContext(t *testing.T) {
 
 	t.Run("default_guest", func(t *testing.T) {
 		unary := NewAuthUnaryInterceptor(GuestIdentityForContext)
-		unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, _ = unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
 			rt := FromContext(ctx)
 			require.NotNil(t, rt)
 			require.NotNil(t, rt.Identity())

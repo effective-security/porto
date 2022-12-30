@@ -588,7 +588,7 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []
 
 		// rewind the reader
 		if body != nil {
-			body.Seek(0, 0)
+			_, _ = body.Seek(0, 0)
 		}
 	}
 
@@ -737,7 +737,7 @@ func (c *Client) shouldTryDifferentHost(resp *http.Response, err error) bool {
 // consumeResponseBody is a helper to safely consume the remaining response body
 func (c *Client) consumeResponseBody(r *http.Response) {
 	if r != nil && r.Body != nil {
-		io.Copy(ioutil.Discard, r.Body)
+		_, _ = io.Copy(ioutil.Discard, r.Body)
 	}
 }
 
@@ -776,7 +776,7 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 		bodyCopy := bytes.Buffer{}
 		bodyTee := io.TeeReader(resp.Body, &bodyCopy)
 		if err := json.NewDecoder(bodyTee).Decode(e); err != nil || e.Code == "" {
-			io.Copy(ioutil.Discard, bodyTee) // ensure all of body is read
+			_, _ = io.Copy(ioutil.Discard, bodyTee) // ensure all of body is read
 			// Unable to parse as Error, then return body as error
 			return resp.Header, resp.StatusCode, errors.New(bodyCopy.String())
 		}

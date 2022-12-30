@@ -55,7 +55,7 @@ func testNonceHandler() http.Handler {
 		w.Header().Add("X-Request-Method", r.Method)
 		w.Header().Add(DefaultReplayNonceHeader, certutil.RandomString(8))
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, `{"status":"ok"}`)
+		_, _ = io.WriteString(w, `{"status":"ok"}`)
 	}
 	return http.HandlerFunc(h)
 }

@@ -203,7 +203,7 @@ vet: build
 
 lint:
 	echo "Running lint"
-	go list ./... | grep -v /vendor/ | xargs -L1 golint -set_exit_status
+	golangci-lint run
 
 test: fmt vet lint
 	echo "Running test"

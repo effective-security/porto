@@ -62,5 +62,5 @@ func (th *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		th.t.Errorf("ultimate handler didn't see correct request")
 	}
 	w.WriteHeader(th.statusCode)
-	w.Write(th.responseBody)
+	_, _ = w.Write(th.responseBody)
 }

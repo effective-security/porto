@@ -42,7 +42,7 @@ func NewIdentity(role, subject, tenant string, claims map[string]interface{}, ac
 		tokenType:   tokenType,
 	}
 	if claims != nil {
-		id.claims.Add(claims)
+		_ = id.claims.Add(claims)
 	}
 	return id
 }
@@ -93,7 +93,7 @@ func (c identity) TokenType() string {
 // Claims returns application specific user info
 func (c identity) Claims() jwt.MapClaims {
 	res := jwt.MapClaims{}
-	res.Add(c.claims)
+	_ = res.Add(c.claims)
 	return res
 }
 

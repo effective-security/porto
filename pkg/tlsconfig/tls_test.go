@@ -173,7 +173,7 @@ func TestX509WithOCSP(t *testing.T) {
 	)
 
 	tmpDir := filepath.Join(os.TempDir(), "test-keyocsp")
-	os.MkdirAll(tmpDir, os.ModePerm)
+	_ = os.MkdirAll(tmpDir, os.ModePerm)
 	//defer os.RemoveAll(tmpDir)
 
 	ocspFile := filepath.Join(tmpDir, "test-server.ocsp")
@@ -201,7 +201,7 @@ func TestX509WithOCSP(t *testing.T) {
 	ocspRes, err := ocsp.CreateResponse(inter1.Certificate, inter1.Certificate, template, inter1.PrivateKey)
 	require.NoError(t, err)
 
-	os.WriteFile(ocspFile, ocspRes, os.ModePerm)
+	_ = os.WriteFile(ocspFile, ocspRes, os.ModePerm)
 
 	tlscrt, err := LoadX509KeyPairWithOCSP(serverCertFile, serverKeyFile)
 	require.NoError(t, err)

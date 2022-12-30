@@ -448,7 +448,7 @@ func TestNewUnaryInterceptor(t *testing.T) {
 
 func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hello"))
+	_, _ = w.Write([]byte("Hello"))
 }
 
 func roleMapper(role string) func(*http.Request) identity.Identity {

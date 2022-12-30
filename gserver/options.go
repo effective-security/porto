@@ -55,5 +55,3 @@ func newFuncOption(f func(*options)) *funcOption {
 		f: f,
 	}
 }
-
-type option func(c *options)

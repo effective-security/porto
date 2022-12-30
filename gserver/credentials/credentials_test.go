@@ -21,7 +21,7 @@ func TestOauthAccess(t *testing.T) {
 
 func TestBundle(t *testing.T) {
 	b := credentials.NewBundle(credentials.Config{})
-	b.NewWithMode("noop")
+	_, _ = b.NewWithMode("noop")
 	b.UpdateAuthToken("1234")
 
 	prpc := b.PerRPCCredentials()
@@ -32,5 +32,5 @@ func TestBundle(t *testing.T) {
 	tc := b.TransportCredentials()
 	tc.Info()
 	_ = tc.Clone()
-	tc.OverrideServerName("localhost")
+	_ = tc.OverrideServerName("localhost")
 }
