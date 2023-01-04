@@ -196,6 +196,12 @@ func TestDbTime(t *testing.T) {
 	assert.Equal(t, xnow, xdb.FromUnixMilli(ms))
 }
 
+func TestDbTimeParse(t *testing.T) {
+	withNano := xdb.ParseTime("2022-11-21T08:39:23.439786Z")
+	assert.False(t, withNano.IsZero())
+	assert.Equal(t, "2022-11-21T08:39:23Z", withNano.String())
+}
+
 func TestDbTimeEncode(t *testing.T) {
 	nb, err := time.Parse(time.RFC3339, "2022-04-01T16:11:15.182Z")
 	require.NoError(t, err)

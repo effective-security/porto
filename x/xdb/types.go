@@ -57,6 +57,12 @@ func FromUnixMilli(tm int64) Time {
 	return Time(time.Unix(sec, msec*int64(time.Millisecond)).UTC())
 }
 
+// ParseTime returns Time from RFC3339 format
+func ParseTime(val string) Time {
+	t, _ := time.Parse(time.RFC3339, val)
+	return Time(t)
+}
+
 // UnixMilli returns t as a Unix time, the number of milliseconds elapsed since January 1, 1970 UTC.
 func (ns Time) UnixMilli() int64 {
 	return time.Time(ns).UnixMilli()
