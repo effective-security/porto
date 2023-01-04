@@ -191,6 +191,9 @@ func TestDbTime(t *testing.T) {
 	now2 := xnow.Add(time.Hour)
 	assert.Equal(t, now.Unix(), now2.UTC().Unix())
 	assert.Equal(t, xafter.UTC().Unix(), now2.UTC().Unix())
+
+	ms := xnow.UnixMilli()
+	assert.Equal(t, xnow, xdb.FromUnixMilli(ms))
 }
 
 func TestDbTimeEncode(t *testing.T) {
