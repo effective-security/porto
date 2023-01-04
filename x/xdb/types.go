@@ -50,6 +50,18 @@ func FromNow(after time.Duration) Time {
 	return Time(time.Now().Add(after).Truncate(time.Second).UTC())
 }
 
+// FromUnixMilli returns Time from Unix milliseconds elapsed since January 1, 1970 UTC.
+func FromUnixMilli(tm int64) Time {
+	sec := tm / 1000
+	msec := tm % 1000
+	return Time(time.Unix(sec, msec*int64(time.Millisecond)).UTC())
+}
+
+// UnixMilli returns t as a Unix time, the number of milliseconds elapsed since January 1, 1970 UTC.
+func (ns Time) UnixMilli() int64 {
+	return time.Time(ns).UnixMilli()
+}
+
 // Add returns Time in UTC after this thime,
 // with Second presicions
 func (ns Time) Add(after time.Duration) Time {
