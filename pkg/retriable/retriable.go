@@ -78,20 +78,26 @@ type GenericHTTP interface {
 	HeadTo(ctx context.Context, hosts []string, path string) (http.Header, int, error)
 }
 
-// HTTPClient defines a number of generalized HTTP request handling wrappers
-type HTTPClient interface {
+// HeadRequester defines HTTP Head interface
+type HeadRequester interface {
 	// Head makes HEAD request.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// The client must be configured with the hosts list.
 	Head(ctx context.Context, path string) (http.Header, int, error)
+}
 
+// GetRequester defines HTTP Get interface
+type GetRequester interface {
 	// Get makes a GET request,
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// the resulting HTTP body will be decoded into the supplied body parameter, and the
 	// http status code returned.
 	// The client must be configured with the hosts list.
 	Get(ctx context.Context, path string, body interface{}) (http.Header, int, error)
+}
 
+// PostRequester defines HTTP Post interface
+type PostRequester interface {
 	// Post makes an HTTP POST to the supplied path, serializing requestBody to json and sending
 	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
 	// code (and potentially an error) returned. It'll try and map errors (statusCode >= 300)
@@ -99,7 +105,10 @@ type HTTPClient interface {
 	// client config.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+}
 
+// PutRequester defines HTTP Put interface
+type PutRequester interface {
 	// Put makes an HTTP PUT to the supplied path, serializing requestBody to json and sending
 	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
 	// code (and potentially an error) returned. It'll try and map errors (statusCode >= 300)
@@ -107,12 +116,24 @@ type HTTPClient interface {
 	// client config.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+}
 
+// DeleteRequester defines HTTP Delete interface
+type DeleteRequester interface {
 	// Delete makes a DELETE request,
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// the resulting HTTP body will be decoded into the supplied body parameter, and the
 	// http status code returned.
 	Delete(ctx context.Context, path string, body interface{}) (http.Header, int, error)
+}
+
+// HTTPClient defines a number of generalized HTTP request handling wrappers
+type HTTPClient interface {
+	HeadRequester
+	GetRequester
+	PostRequester
+	PutRequester
+	DeleteRequester
 }
 
 // ShouldRetry specifies a policy for handling retries. It is called
