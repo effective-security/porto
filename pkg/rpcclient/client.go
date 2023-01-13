@@ -82,6 +82,11 @@ func (c *Client) Conn() *grpc.ClientConn {
 	return c.conn
 }
 
+// Opts returns the current Call options
+func (c *Client) Opts() []grpc.CallOption {
+	return c.callOpts
+}
+
 func newClient(cfg *Config) (*Client, error) {
 
 	if cfg == nil || len(cfg.Endpoints) < 1 {
