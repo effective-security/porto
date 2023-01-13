@@ -21,5 +21,9 @@ func TestNew(t *testing.T) {
 
 	client, err := rpcclient.NewFromURL(lis.Addr().String())
 	require.NoError(t, err)
+
+	assert.NotEmpty(t, client.Opts())
+	assert.NotNil(t, client.Conn())
+
 	defer client.Close()
 }
