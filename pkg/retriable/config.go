@@ -4,24 +4,15 @@ import (
 	"crypto"
 	"net/url"
 	"os"
-	"path"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
-	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
-	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/yaml.v2"
-)
-
-const (
-	authTokenFileName = ".auth_token"
 )
 
 // Config of the client
@@ -149,8 +140,7 @@ func LoadClient(file string) (*Client, error) {
 // Create returns new Client from provided config
 func Create(cfg ClientConfig) (*Client, error) {
 	opts := []ClientOption{
-		WithEnvAuthTokenName(cfg.EnvAuthTokenName),
-		WithStorageFolder(cfg.StorageFolder),
+		WithStorage(OpenStorage(cfg.StorageFolder, cfg.EnvAuthTokenName)),
 		WithHosts(cfg.Hosts),
 	}
 
@@ -177,83 +167,6 @@ func Create(cfg ClientConfig) (*Client, error) {
 	return client, nil
 }
 
-// LoadAuthToken loads .auth_token file
-func LoadAuthToken(dir string) (*AuthToken, error) {
-	file := path.Join(dir, ".auth_token")
-	t, err := os.ReadFile(file)
-	if err != nil {
-		return nil, errors.WithMessage(err, "credentials not found")
-	}
-	return ParseAuthToken(string(t))
-}
-
-// AuthToken provides auth token info
-type AuthToken struct {
-	Raw          string
-	AccessToken  string
-	RefreshToken string
-	TokenType    string
-	DpopJkt      string
-	Expires      *time.Time
-}
-
-// Expired returns true if expiry is present on the token,
-// and is behind the current time
-func (t *AuthToken) Expired() bool {
-	return t.Expires != nil && t.Expires.Before(time.Now())
-}
-
-// ParseAuthToken parses stored token and validates expiration
-func ParseAuthToken(rawToken string) (*AuthToken, error) {
-	t := &AuthToken{
-		Raw:         rawToken,
-		TokenType:   "Bearer",
-		AccessToken: rawToken,
-	}
-	if strings.Contains(rawToken, "=") {
-		vals, err := url.ParseQuery(rawToken)
-		if err != nil {
-			return nil, errors.WithMessagef(err, "failed to parse token values")
-		}
-		t.AccessToken = slices.StringsCoalesce(getValue(vals, "access_token"),
-			getValue(vals, "id_token"),
-			getValue(vals, "token"))
-		t.RefreshToken = getValue(vals, "refresh_token")
-		t.DpopJkt = getValue(vals, "dpop_jkt")
-
-		exp := getValue(vals, "exp")
-		if exp != "" {
-			ux, err := strconv.ParseInt(exp, 10, 64)
-			if err != nil {
-				return nil, errors.WithMessagef(err, "invalid exp value")
-			}
-			expires := time.Unix(ux, 0)
-			t.Expires = &expires
-		}
-	}
-
-	return t, nil
-}
-
-// ExpandStorageFolder returns expanded StorageFolder
-func ExpandStorageFolder(dir string) string {
-	if dir == "" {
-		dirname, _ := os.UserHomeDir()
-		dir = path.Join(dirname, ".config", "httpclient")
-	}
-	dir, _ = homedir.Expand(dir)
-	return dir
-}
-
-// LoadAuthToken returns AuthToken
-func (c *Client) LoadAuthToken() (*AuthToken, error) {
-	val := os.Getenv(c.EnvAuthTokenName)
-	if val != "" {
-		return ParseAuthToken(val)
-	}
-	return LoadAuthToken(ExpandStorageFolder(c.StorageFolder))
-}
-
 // WithAuthorization sets Authorization token
 func (c *Client) WithAuthorization() error {
 	host := c.CurrentHost()
@@ -264,7 +177,7 @@ func (c *Client) WithAuthorization() error {
 		return nil
 	}
 
-	at, err := c.LoadAuthToken()
+	at, err := c.Storage.LoadAuthToken()
 	if err != nil {
 		return err
 	}
@@ -275,7 +188,7 @@ func (c *Client) WithAuthorization() error {
 
 	tktype := at.TokenType
 	if at.DpopJkt != "" {
-		k, _, err := c.LoadKey(at.DpopJkt)
+		k, _, err := c.Storage.LoadKey(at.DpopJkt)
 		if err != nil {
 			return errors.WithMessage(err, "unable to load key for DPoP")
 		}
@@ -289,30 +202,6 @@ func (c *Client) WithAuthorization() error {
 	c.AddHeader(header.Authorization, tktype+" "+at.AccessToken)
 
 	return nil
-}
-
-// StoreAuthToken persists auth token
-// the token format can be as opaque string, or as form encoded
-// access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
-func (c *Client) StoreAuthToken(token string) error {
-	folder := ExpandStorageFolder(c.StorageFolder)
-	_ = os.MkdirAll(folder, 0755)
-	err := os.WriteFile(path.Join(folder, authTokenFileName), []byte(token), 0600)
-	if err != nil {
-		return errors.WithMessagef(err, "unable to store token")
-	}
-	return nil
-}
-
-// LoadKey returns *jose.JSONWebKey
-func (c *Client) LoadKey(label string) (*jose.JSONWebKey, string, error) {
-	path := path.Join(ExpandStorageFolder(c.StorageFolder), label+".jwk")
-	return dpop.LoadKey(path)
-}
-
-// SaveKey saves the key to storage
-func (c *Client) SaveKey(k *jose.JSONWebKey) (string, error) {
-	return dpop.SaveKey(ExpandStorageFolder(c.StorageFolder), k)
 }
 
 // getValue returns a Query parameter
