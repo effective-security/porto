@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
@@ -268,20 +269,14 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 	})
 }
 
-// WithStorage allows to specify storage folder
-func WithStorage(storage *Storage) ClientOption {
-	return optionFunc(func(c *Client) {
-		c.Storage = storage
-	})
-}
-
 // Client is custom implementation of http.Client
 type Client struct {
 	Name             string
 	Policy           Policy // Rery policy for http requests
 	EnvAuthTokenName string
 	NonceProvider    NonceProvider
-	Storage          *Storage
+
+	Config ClientConfig
 
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
@@ -292,20 +287,45 @@ type Client struct {
 }
 
 // New creates a new Client
-func New(opts ...ClientOption) *Client {
+func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
+	dopts := []ClientOption{
+		WithHosts(cfg.Hosts),
+	}
+
+	if cfg.TLS != nil {
+		tlscfg, err := tlsconfig.NewClientTLSFromFiles(
+			cfg.TLS.CertFile,
+			cfg.TLS.KeyFile,
+			cfg.TLS.TrustedCAFile,
+		)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "failed to load TLS config")
+		}
+		dopts = append(dopts, WithTLS(tlscfg))
+	}
+
+	if cfg.Request != nil {
+		pol := DefaultPolicy()
+		pol.RequestTimeout = cfg.Request.Timeout
+		pol.TotalRetryLimit = cfg.Request.RetryLimit
+		dopts = append(dopts, WithPolicy(pol))
+	}
+
+	dopts = append(dopts, opts...)
+
 	c := &Client{
 		Name:       "retriable",
 		httpClient: &http.Client{
 			//Timeout: time.Second * 30,
 		},
-		Policy:  DefaultPolicy(),
-		Storage: OpenStorage("", ""),
+		Policy: DefaultPolicy(),
+		Config: cfg,
 	}
 
-	for _, opt := range opts {
+	for _, opt := range dopts {
 		opt.applyOption(c)
 	}
-	return c
+	return c, nil
 }
 
 // CurrentHost returns the current host

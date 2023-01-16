@@ -43,6 +43,12 @@ func Test_Factory(t *testing.T) {
 
 	_, err = f.CreateClient("default")
 	assert.NoError(t, err)
+
+	_, err = NewForHost("testdata/clients.yaml", "https://localhost:4000")
+	assert.NoError(t, err)
+
+	_, err = NewForHost("notfound", "https://localhost:4000")
+	assert.NoError(t, err)
 }
 
 func Test_Load(t *testing.T) {
@@ -59,33 +65,29 @@ func Test_Load(t *testing.T) {
 }
 
 func TestStorageKeys(t *testing.T) {
-	client, err := Create(ClientConfig{
-		Hosts:         []string{"https://notused"},
-		StorageFolder: path.Join(os.TempDir(), "test", "httpclient-keeys"),
-	})
-	require.NoError(t, err)
-	defer client.Storage.Clean()
+	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	defer storage.Clean()
 
 	assert.Panics(t, func() {
-		_, _ = client.Storage.SaveKey(nil)
+		_, _ = storage.SaveKey(nil)
 	})
 
-	_, _, err = client.Storage.LoadKey("TestKeys")
-	assert.EqualError(t, err, "open /tmp/test/httpclient-keeys/TestKeys.jwk: no such file or directory")
+	_, _, err := storage.LoadKey("TestKeys")
+	assert.EqualError(t, err, "open /tmp/test/httpclient-keys/TestKeys.jwk: no such file or directory")
 
 	k := &jose.JSONWebKey{
 		KeyID: "TestKeys",
 	}
-	_, err = client.Storage.SaveKey(k)
+	_, err = storage.SaveKey(k)
 	require.Error(t, err)
 
 	k.Key = []byte(`sym`)
 
-	_, err = client.Storage.SaveKey(k)
+	_, err = storage.SaveKey(k)
 	require.Error(t, err)
 
-	_, _, err = client.Storage.LoadKey("TestKeys")
-	assert.EqualError(t, err, "open /tmp/test/httpclient-keeys/TestKeys.jwk: no such file or directory")
+	_, _, err = storage.LoadKey("TestKeys")
+	assert.EqualError(t, err, "open /tmp/test/httpclient-keys/TestKeys.jwk: no such file or directory")
 }
 
 func TestWithAuthorization(t *testing.T) {
@@ -104,21 +106,23 @@ func TestWithAuthorization(t *testing.T) {
 	tk, err := js.Sign(jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
 	require.NoError(t, err)
 
-	client, err := Create(ClientConfig{
-		Hosts:         []string{"https://notused"},
-		StorageFolder: path.Join(os.TempDir(), "test", "httpclient-keeys"),
+	client, err := New(ClientConfig{
+		Hosts: []string{"https://notused"},
 	})
 	require.NoError(t, err)
-	defer client.Storage.Clean()
-	fn, err := client.Storage.SaveKey(dk)
+
+	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	defer storage.Clean()
+
+	fn, err := storage.SaveKey(dk)
 	require.NoError(t, err)
 	t.Log(fn)
 
 	t.Run("plain", func(t *testing.T) {
-		err = client.Storage.SaveAuthToken(tk)
+		err = storage.SaveAuthToken(tk)
 		require.NoError(t, err)
 
-		err = client.WithAuthorization()
+		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "Bearer")
 	})
@@ -129,10 +133,10 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)},
 		}
-		err = client.Storage.SaveAuthToken(vals.Encode())
+		err = storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
 
-		err = client.WithAuthorization()
+		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "DPoP")
 	})
@@ -143,10 +147,10 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Unix(), 10)},
 		}
-		err = client.Storage.SaveAuthToken(vals.Encode())
+		err = storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
 
-		err = client.WithAuthorization()
+		err = client.WithAuthorization(storage)
 		assert.EqualError(t, err, "authorization: token expired")
 	})
 }

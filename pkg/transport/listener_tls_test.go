@@ -103,7 +103,13 @@ func TestNewTLSListener_Trusted(t *testing.T) {
 	clientTLS, err := tlsconfig.NewClientTLSFromFiles("", "", serverRootFile)
 	require.NoError(t, err)
 
-	client := retriable.New(retriable.WithTLS(clientTLS))
+	client, err := retriable.New(
+		retriable.ClientConfig{
+			Hosts: []string{"https://" + tlsln.Addr().String()},
+		},
+		retriable.WithTLS(clientTLS),
+	)
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	var wg sync.WaitGroup
@@ -121,10 +127,7 @@ func TestNewTLSListener_Trusted(t *testing.T) {
 		t.Logf("sending to %v", tlsln.Addr().String())
 
 		w := bytes.NewBuffer([]byte{})
-		_, rt, err := client.Request(context.Background(),
-			http.MethodGet,
-			[]string{"https://" + tlsln.Addr().String()},
-			"/v1/test", nil, w)
+		_, rt, err := client.Get(context.Background(), "/v1/test", w)
 
 		assert.EqualError(t, err, "not_found: /v1/test")
 		assert.Equal(t, 404, rt)
@@ -167,7 +170,16 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 		serverRootFile)
 	require.NoError(t, err)
 
-	client := retriable.New(retriable.WithTLS(clientTLS)).WithTimeout(1 * time.Second)
+	client, err := retriable.New(
+		retriable.ClientConfig{
+			Hosts: []string{"https://" + tlsln.Addr().String()},
+		},
+		retriable.WithTLS(clientTLS),
+		retriable.WithTimeout(1*time.Second),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+
 	client.Policy.TotalRetryLimit = 0
 	require.NotNil(t, client)
 
@@ -186,10 +198,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 		t.Logf("sending to %v", tlsln.Addr().String())
 
 		w := bytes.NewBuffer([]byte{})
-		_, _, err := client.Request(context.Background(),
-			http.MethodGet,
-			[]string{"https://" + tlsln.Addr().String()},
-			"/v1/test", nil, w)
+		_, _, err := client.Get(context.Background(), "/v1/test", w)
 
 		if assert.Error(t, err) {
 			assert.Contains(t, err.Error(), "unexpected EOF")
