@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
+	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 )
@@ -36,6 +36,10 @@ type ClientConfig struct {
 	// EnvNameAuthToken specifies os.Env name for the Authorization token.
 	// if the token is DPoP, then a correponding JWK must be found in StorageFolder
 	EnvAuthTokenName string `json:"auth_token_env_name,omitempty" yaml:"auth_token_env_name,omitempty"`
+}
+
+func (c *ClientConfig) Storage() *Storage {
+	return OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
 }
 
 // RequestPolicy contains configuration info for Request policy
@@ -82,6 +86,8 @@ func NewFactory(cfg Config) (*Factory, error) {
 
 // LoadFactory returns new Factory
 func LoadFactory(file string) (*Factory, error) {
+	file, _ = homedir.Expand(file)
+
 	f, err := os.ReadFile(file)
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to load config")
@@ -100,9 +106,9 @@ func LoadFactory(file string) (*Factory, error) {
 // a client with default settings will be returned.
 func (f *Factory) CreateClient(clientName string) (*Client, error) {
 	if cfg, ok := f.cfg.Clients[clientName]; ok {
-		return Create(*cfg)
+		return New(*cfg)
 	}
-	return New(), nil
+	return New(ClientConfig{})
 }
 
 // ConfigForHost returns config for host
@@ -116,10 +122,30 @@ func (f *Factory) ConfigForHost(hostname string) *ClientConfig {
 func (f *Factory) ForHost(hostname string) (*Client, error) {
 	if cfg, ok := f.perHost[hostname]; ok {
 		logger.KV(xlog.TRACE, "host", hostname, "cfg", cfg)
-		return Create(*cfg)
+		return New(*cfg)
 	}
 	logger.KV(xlog.DEBUG, "reason", "config_not_found", "host", hostname)
-	return New(WithHosts([]string{hostname})), nil
+	return New(ClientConfig{Hosts: []string{hostname}})
+}
+
+func NewForHost(cfg, host string) (*Client, error) {
+	var rc *Client
+	f, err := LoadFactory(cfg)
+	if err == nil {
+		rc, err = f.ForHost(host)
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to create client")
+		}
+	}
+	if rc == nil {
+		rc, err = New(ClientConfig{
+			Hosts: []string{host}},
+		)
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to create client")
+		}
+	}
+	return rc, nil
 }
 
 // LoadClient returns new Client
@@ -134,41 +160,11 @@ func LoadClient(file string) (*Client, error) {
 		return nil, errors.WithMessage(err, "failed to parse config")
 	}
 
-	return Create(cfg)
-}
-
-// Create returns new Client from provided config
-func Create(cfg ClientConfig) (*Client, error) {
-	opts := []ClientOption{
-		WithStorage(OpenStorage(cfg.StorageFolder, cfg.EnvAuthTokenName)),
-		WithHosts(cfg.Hosts),
-	}
-
-	if cfg.TLS != nil {
-		tlscfg, err := tlsconfig.NewClientTLSFromFiles(
-			cfg.TLS.CertFile,
-			cfg.TLS.KeyFile,
-			cfg.TLS.TrustedCAFile,
-		)
-		if err != nil {
-			return nil, errors.WithMessagef(err, "failed to load TLS config")
-		}
-		opts = append(opts, WithTLS(tlscfg))
-	}
-
-	if cfg.Request != nil {
-		pol := DefaultPolicy()
-		pol.RequestTimeout = cfg.Request.Timeout
-		pol.TotalRetryLimit = cfg.Request.RetryLimit
-		opts = append(opts, WithPolicy(pol))
-	}
-
-	client := New(opts...)
-	return client, nil
+	return New(cfg)
 }
 
 // WithAuthorization sets Authorization token
-func (c *Client) WithAuthorization() error {
+func (c *Client) WithAuthorization(storage *Storage) error {
 	host := c.CurrentHost()
 	// Allow to use Bearer only over TLS connection
 	if !strings.HasPrefix(host, "https") &&
@@ -177,7 +173,11 @@ func (c *Client) WithAuthorization() error {
 		return nil
 	}
 
-	at, err := c.Storage.LoadAuthToken()
+	if storage == nil {
+		storage = c.Config.Storage()
+	}
+
+	at, err := storage.LoadAuthToken()
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (c *Client) WithAuthorization() error {
 
 	tktype := at.TokenType
 	if at.DpopJkt != "" {
-		k, _, err := c.Storage.LoadKey(at.DpopJkt)
+		k, _, err := storage.LoadKey(at.DpopJkt)
 		if err != nil {
 			return errors.WithMessage(err, "unable to load key for DPoP")
 		}

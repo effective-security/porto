@@ -17,7 +17,12 @@ func Test_Nonce(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := New().WithHosts([]string{server.URL})
+	client, err := New(ClientConfig{
+		Hosts: []string{server.URL},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, client)
+
 	client.NonceProvider = NewNonceProvider(client, "/nonce", DefaultReplayNonceHeader)
 
 	np := client.NonceProvider.(*nonceProvider)
@@ -26,7 +31,7 @@ func Test_Nonce(t *testing.T) {
 	ctx := context.Background()
 
 	var res map[string]interface{}
-	_, _, err := client.Get(ctx, "/test", &res)
+	_, _, err = client.Get(ctx, "/test", &res)
 	require.NoError(t, err)
 	assert.Len(t, np.nonces, 1)
 

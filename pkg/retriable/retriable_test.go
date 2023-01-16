@@ -96,7 +96,8 @@ func Test_New(t *testing.T) {
 	})
 
 	// create without options
-	c := retriable.New(mutateHook).WithName("test")
+	c, err := retriable.New(retriable.ClientConfig{}, mutateHook, retriable.WithName("test"))
+	require.NoError(t, err)
 	assert.NotNil(t, c)
 	assert.NotNil(t, c.WithPolicy(p))
 	assert.NotNil(t, c.WithTLS(nil))
@@ -104,13 +105,15 @@ func Test_New(t *testing.T) {
 	assert.Empty(t, c.CurrentHost())
 
 	// create with options
-	c = retriable.New(
+	c, err = retriable.New(
+		retriable.ClientConfig{},
 		retriable.WithName("test"),
 		retriable.WithPolicy(p),
 		retriable.WithTLS(nil),
 		retriable.WithTransport(nil),
 		retriable.WithTimeout(time.Second*300),
 	)
+	require.NoError(t, err)
 	assert.NotNil(t, c)
 	c.AddHeader("test", "for client")
 
@@ -120,7 +123,8 @@ func Test_New(t *testing.T) {
 		clientKeyFile,
 		clientRootFile)
 	require.NoError(t, err)
-	c = retriable.New().WithTLS(clientTls)
+	c, err = retriable.New(retriable.ClientConfig{}, retriable.WithTLS(clientTls))
+	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
@@ -183,19 +187,21 @@ func Test_Retriable_OK(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := retriable.New().
-		WithHeaders(map[string]string{
-			"X-Test-Token": "token1",
-		}).
-		WithPolicy(retriable.Policy{
+	client, err := retriable.New(retriable.ClientConfig{},
+		retriable.WithPolicy(retriable.Policy{
 			TotalRetryLimit: 2,
 			RequestTimeout:  time.Second,
-		}).
-		WithBeforeSendRequest(func(r *http.Request) *http.Request {
+		}),
+		retriable.WithBeforeSendRequest(func(r *http.Request) *http.Request {
 			r.Header.Set("X-Global", "WithBeforeSendRequest")
 			return r
-		})
+		}),
+	)
+	require.NoError(t, err)
 	require.NotNil(t, client)
+	client = client.WithHeaders(map[string]string{
+		"X-Test-Token": "token1",
+	})
 
 	ctx := context.Background()
 	hosts := []string{server.URL}
@@ -336,7 +342,8 @@ func Test_RetriableWithHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(h))
 	defer server.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	client.WithHeaders(map[string]string{
@@ -410,7 +417,8 @@ func Test_Retriable_StatusNoContent(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server.URL}
@@ -431,7 +439,8 @@ func Test_Retriable400(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server.URL, server.URL}
@@ -452,7 +461,8 @@ func Test_Retriable500(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server.URL, server.URL}
@@ -479,7 +489,8 @@ func Test_RetriableMulti500Error(t *testing.T) {
 	server2 := httptest.NewServer(h)
 	defer server2.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server1.URL, server2.URL}
@@ -509,7 +520,8 @@ func Test_RetriableMulti500Custom(t *testing.T) {
 	server2 := httptest.NewServer(h)
 	defer server2.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server1.URL, server2.URL}
@@ -534,7 +546,8 @@ func Test_RetriableTimeout(t *testing.T) {
 	server2 := httptest.NewServer(h)
 	defer server2.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	hosts := []string{server1.URL, server2.URL}
@@ -571,16 +584,18 @@ func Test_Retriable_WithReadTimeout(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client := retriable.New().
-		WithHeaders(map[string]string{
-			"X-Test-Token": "token1",
-		}).
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, client)
+
+	client = client.WithHeaders(map[string]string{
+		"X-Test-Token": "token1",
+	}).
 		WithPolicy(retriable.Policy{
 			TotalRetryLimit: 2,
 			RequestTimeout:  time.Second,
 		}).
 		WithTimeout(time.Microsecond * 1)
-	require.NotNil(t, client)
 
 	hosts := []string{server.URL}
 
@@ -602,7 +617,8 @@ func Test_Retriable_DoWithTimeout(t *testing.T) {
 	server1 := httptest.NewServer(h)
 	defer server1.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -639,7 +655,8 @@ func Test_Retriable_DoWithRetry(t *testing.T) {
 	server1 := httptest.NewServer(http.HandlerFunc(h))
 	defer server1.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	req, err := http.NewRequest(http.MethodPost, server1.URL+"/v1/test/do", strings.NewReader(`{"test":true}`))
@@ -675,7 +692,8 @@ func Test_RetriableBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(h))
 	defer server.Close()
 
-	client := retriable.New()
+	client, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
 	require.NotNil(t, client)
 
 	type response struct {
@@ -752,7 +770,9 @@ func (r *reader) Read(b []byte) (n int, err error) {
 
 func Test_DecodeResponse(t *testing.T) {
 	res := http.Response{StatusCode: http.StatusNotFound, Body: ioutil.NopCloser(bytes.NewBufferString(`{"code":"MY_CODE","message":"doesn't exist"}`))}
-	c := retriable.New()
+	c, err := retriable.New(retriable.ClientConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, c)
 
 	var body map[string]string
 	_, sc, err := c.DecodeResponse(&res, &body)

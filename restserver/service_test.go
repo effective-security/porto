@@ -190,9 +190,6 @@ func testHTTPService(t *testing.T, server restserver.Server) {
 }
 
 func testCORS(t *testing.T, server restserver.Server, expected bool) {
-	client := retriable.New()
-	require.NotNil(t, client)
-
 	w := httptest.NewRecorder()
 	r, err := http.NewRequest(http.MethodOptions, "/v1/test", nil)
 	require.NoError(t, err)
@@ -280,19 +277,22 @@ func (s *testSuite) Test_ServerWithServicesOverHTTPS() {
 			s.rootsFile)
 		require.NoError(t, err)
 
-		client := retriable.New(retriable.WithTLS(clientTls))
+		client, err := retriable.New(
+			retriable.ClientConfig{
+				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+			},
+			retriable.WithTLS(clientTls))
+		require.NoError(t, err)
 		require.NotNil(t, client)
-
-		hosts := []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())}
 
 		w := bytes.NewBuffer([]byte{})
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		_, status, err := client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
+		_, status, err := client.Get(ctx, "/v1/test", w)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, status)
-		res := string(w.Bytes())
+		res := w.String()
 		assert.Contains(t, res, "GET")
 	})
 	s.T().Run("with client cert / untrusted root", func(t *testing.T) {
@@ -302,7 +302,12 @@ func (s *testSuite) Test_ServerWithServicesOverHTTPS() {
 			s.clientRootFile)
 		require.NoError(t, err)
 
-		client := retriable.New().WithTLS(clientTls)
+		client, err := retriable.New(
+			retriable.ClientConfig{
+				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+			},
+			retriable.WithTLS(clientTls))
+		require.NoError(t, err)
 		require.NotNil(t, client)
 
 		hosts := []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())}
@@ -366,17 +371,20 @@ func (s *testSuite) Test_UntrustedServerWithServicesOverHTTPS() {
 			s.serverRootFile)
 		require.NoError(t, err)
 
-		client := retriable.New(retriable.WithTLS(clientTls))
+		client, err := retriable.New(
+			retriable.ClientConfig{
+				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+			},
+			retriable.WithTLS(clientTls))
+		require.NoError(t, err)
 		require.NotNil(t, client)
-
-		hosts := []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())}
 
 		w := bytes.NewBuffer([]byte{})
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		_, _, err = client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
+		_, _, err = client.Get(ctx, "/v1/test", w)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "tls: bad certificate")
 	})
@@ -388,17 +396,20 @@ func (s *testSuite) Test_UntrustedServerWithServicesOverHTTPS() {
 			s.clientRootFile)
 		require.NoError(t, err)
 
-		client := retriable.New(retriable.WithTLS(clientTls))
+		client, err := retriable.New(
+			retriable.ClientConfig{
+				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+			},
+			retriable.WithTLS(clientTls))
+		require.NoError(t, err)
 		require.NotNil(t, client)
-
-		hosts := []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())}
 
 		w := bytes.NewBuffer([]byte{})
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		_, _, err = client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
+		_, _, err = client.Get(ctx, "/v1/test", w)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
 	})
