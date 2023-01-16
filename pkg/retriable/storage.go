@@ -1,14 +1,22 @@
 package retriable
 
 import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/effective-security/porto/x/slices"
+	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
@@ -136,4 +144,95 @@ func ExpandStorageFolder(dir string) string {
 	}
 	dir, _ = homedir.Expand(dir)
 	return dir
+}
+
+// ListKeys returns list of DPoP keys in the storage
+func (c *Storage) ListKeys() ([]*KeyInfo, error) {
+	list := []*KeyInfo{}
+
+	// load from the folder
+	err := filepath.Walk(c.folder, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			logger.KV(xlog.ERROR, "path", path, "err", err.Error())
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jwk") {
+			logger.KV(xlog.DEBUG, "skip", path)
+			return nil
+		}
+
+		b, err := os.ReadFile(path)
+		if err != nil {
+			logger.KV(xlog.DEBUG, "skip", path, "err", err.Error())
+			return nil
+		}
+		k := new(jose.JSONWebKey)
+		err = json.Unmarshal(b, k)
+		if err != nil {
+			logger.KV(xlog.DEBUG, "skip", path, "err", err.Error())
+			return nil
+		}
+
+		ki, err := NewKeyInfo(k)
+		if err != nil {
+			logger.KV(xlog.DEBUG, "skip", path, "err", err.Error())
+			return nil
+		}
+		list = append(list, ki)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return list, nil
+}
+
+// KeyInfo specifies key info
+type KeyInfo struct {
+	KeySize    int
+	Type       string
+	Algo       string
+	Thumbprint string
+	Key        *jose.JSONWebKey
+}
+
+// NewKeyInfo returns *keyInfo
+func NewKeyInfo(k *jose.JSONWebKey) (*KeyInfo, error) {
+	tp, err := k.Thumbprint(crypto.SHA256)
+	if err != nil {
+		return nil, err
+	}
+	si := &KeyInfo{
+		Key:        k,
+		Thumbprint: base64.RawURLEncoding.EncodeToString(tp),
+	}
+
+	switch typ := k.Key.(type) {
+	case *rsa.PrivateKey:
+		si.KeySize = typ.N.BitLen()
+		si.Type = "RSA"
+		switch {
+		case si.KeySize >= 4096:
+			si.Algo = "RS512"
+		case si.KeySize >= 3072:
+			si.Algo = "RS384"
+		default:
+			si.Algo = "RS256"
+		}
+	case *ecdsa.PrivateKey:
+		si.Type = "ECDSA"
+		switch typ.Curve {
+		case elliptic.P521():
+			si.Algo = "ES512"
+		case elliptic.P384():
+			si.Algo = "ES384"
+		default:
+			si.Algo = "ES256"
+		}
+		si.KeySize = typ.Curve.Params().BitSize
+	default:
+		return nil, errors.Errorf("key not supported: %T", typ)
+	}
+	return si, nil
 }
