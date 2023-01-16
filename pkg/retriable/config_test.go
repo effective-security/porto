@@ -58,33 +58,33 @@ func Test_Load(t *testing.T) {
 	assert.Equal(t, 3, pol.TotalRetryLimit)
 }
 
-func TestKeys(t *testing.T) {
+func TestStorageKeys(t *testing.T) {
 	client, err := Create(ClientConfig{
 		Hosts:         []string{"https://notused"},
 		StorageFolder: path.Join(os.TempDir(), "test", "httpclient-keeys"),
 	})
 	require.NoError(t, err)
-	defer os.RemoveAll(client.StorageFolder)
+	defer client.Storage.Clean()
 
 	assert.Panics(t, func() {
-		_, _ = client.SaveKey(nil)
+		_, _ = client.Storage.SaveKey(nil)
 	})
 
-	_, _, err = client.LoadKey("TestKeys")
+	_, _, err = client.Storage.LoadKey("TestKeys")
 	assert.EqualError(t, err, "open /tmp/test/httpclient-keeys/TestKeys.jwk: no such file or directory")
 
 	k := &jose.JSONWebKey{
 		KeyID: "TestKeys",
 	}
-	_, err = client.SaveKey(k)
+	_, err = client.Storage.SaveKey(k)
 	require.Error(t, err)
 
 	k.Key = []byte(`sym`)
 
-	_, err = client.SaveKey(k)
+	_, err = client.Storage.SaveKey(k)
 	require.Error(t, err)
 
-	_, _, err = client.LoadKey("TestKeys")
+	_, _, err = client.Storage.LoadKey("TestKeys")
 	assert.EqualError(t, err, "open /tmp/test/httpclient-keeys/TestKeys.jwk: no such file or directory")
 }
 
@@ -109,13 +109,13 @@ func TestWithAuthorization(t *testing.T) {
 		StorageFolder: path.Join(os.TempDir(), "test", "httpclient-keeys"),
 	})
 	require.NoError(t, err)
-	defer os.RemoveAll(client.StorageFolder)
-	fn, err := client.SaveKey(dk)
+	defer client.Storage.Clean()
+	fn, err := client.Storage.SaveKey(dk)
 	require.NoError(t, err)
 	t.Log(fn)
 
 	t.Run("plain", func(t *testing.T) {
-		err = client.StoreAuthToken(tk)
+		err = client.Storage.SaveAuthToken(tk)
 		require.NoError(t, err)
 
 		err = client.WithAuthorization()
@@ -129,7 +129,7 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)},
 		}
-		err = client.StoreAuthToken(vals.Encode())
+		err = client.Storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
 
 		err = client.WithAuthorization()
@@ -143,7 +143,7 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Unix(), 10)},
 		}
-		err = client.StoreAuthToken(vals.Encode())
+		err = client.Storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
 
 		err = client.WithAuthorization()

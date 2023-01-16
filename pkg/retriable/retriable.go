@@ -22,7 +22,6 @@ import (
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
-	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 )
 
@@ -269,17 +268,10 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 	})
 }
 
-// WithStorageFolder allows to specify storage folder
-func WithStorageFolder(path string) ClientOption {
+// WithStorage allows to specify storage folder
+func WithStorage(storage *Storage) ClientOption {
 	return optionFunc(func(c *Client) {
-		c.StorageFolder, _ = homedir.Expand(path)
-	})
-}
-
-// WithEnvAuthTokenName allows to specify Env name for AuthToken
-func WithEnvAuthTokenName(env string) ClientOption {
-	return optionFunc(func(c *Client) {
-		c.EnvAuthTokenName = env
+		c.Storage = storage
 	})
 }
 
@@ -287,9 +279,9 @@ func WithEnvAuthTokenName(env string) ClientOption {
 type Client struct {
 	Name             string
 	Policy           Policy // Rery policy for http requests
-	StorageFolder    string
 	EnvAuthTokenName string
 	NonceProvider    NonceProvider
+	Storage          *Storage
 
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
@@ -306,7 +298,8 @@ func New(opts ...ClientOption) *Client {
 		httpClient: &http.Client{
 			//Timeout: time.Second * 30,
 		},
-		Policy: DefaultPolicy(),
+		Policy:  DefaultPolicy(),
+		Storage: OpenStorage("", ""),
 	}
 
 	for _, opt := range opts {

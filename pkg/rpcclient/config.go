@@ -3,7 +3,6 @@ package rpcclient
 import (
 	"context"
 	"crypto/tls"
-	"os"
 	"time"
 
 	"github.com/effective-security/porto/pkg/retriable"
@@ -44,9 +43,6 @@ type Config struct {
 
 // LoadAuthToken returns AuthToken
 func (c *Config) LoadAuthToken() (*retriable.AuthToken, error) {
-	val := os.Getenv(c.EnvAuthTokenName)
-	if val != "" {
-		return retriable.ParseAuthToken(val)
-	}
-	return retriable.LoadAuthToken(retriable.ExpandStorageFolder(c.StorageFolder))
+	storage := retriable.OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
+	return storage.LoadAuthToken()
 }
