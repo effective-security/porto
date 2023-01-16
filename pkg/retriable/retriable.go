@@ -328,6 +328,11 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	return c, nil
 }
 
+// Storage returns the current storage
+func (c *Client) Storage() *Storage {
+	return c.Config.Storage()
+}
+
 // CurrentHost returns the current host
 func (c *Client) CurrentHost() string {
 	c.lock.RLock()
