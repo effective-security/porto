@@ -125,7 +125,7 @@ func Test_All(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		id, err := p.IdentityFromContext(ctx)
+		id, err := p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
@@ -153,7 +153,7 @@ func Test_All(t *testing.T) {
 		// gRPC
 		//
 		ctx := createPeerContext(context.Background(), state)
-		id, err = p.IdentityFromContext(ctx)
+		id, err = p.IdentityFromContext(ctx, "/")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
 	})
@@ -234,7 +234,7 @@ func TestInvalidIssuer(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		_, err := p.IdentityFromContext(ctx)
+		_, err := p.IdentityFromContext(ctx, "/test")
 		assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
 	})
 }
@@ -317,7 +317,7 @@ func TestInvalidAudience(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		_, err := p.IdentityFromContext(ctx)
+		_, err := p.IdentityFromContext(ctx, "/test")
 		assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
 	})
 }
@@ -427,7 +427,7 @@ func TestTLSOnly(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		id, err := p.IdentityFromContext(ctx)
+		id, err := p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "guest", id.Role())
 		assert.Empty(t, id.Subject())
@@ -457,7 +457,7 @@ func TestTLSOnly(t *testing.T) {
 		//
 		ctx := createPeerContext(context.Background(), state)
 		assert.True(t, p.ApplicableForContext(ctx))
-		id, err = p.IdentityFromContext(ctx)
+		id, err = p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
 	})
@@ -486,7 +486,7 @@ func TestTLSOnly(t *testing.T) {
 		//
 		ctx := createPeerContext(context.Background(), state)
 		assert.True(t, p.ApplicableForContext(ctx))
-		id, err = p.IdentityFromContext(ctx)
+		id, err = p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "guest", id.Role())
 	})

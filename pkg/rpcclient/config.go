@@ -43,6 +43,10 @@ type Config struct {
 
 // LoadAuthToken returns AuthToken
 func (c *Config) LoadAuthToken() (*retriable.AuthToken, error) {
-	storage := retriable.OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
-	return storage.LoadAuthToken()
+	return c.Storage().LoadAuthToken()
+}
+
+// Storage returns the current storage
+func (c *Config) Storage() *retriable.Storage {
+	return retriable.OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
 }

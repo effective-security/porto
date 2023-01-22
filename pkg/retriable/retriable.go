@@ -676,8 +676,8 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 	}
 
 	authHeader := req.Header.Get(header.Authorization)
-	if strings.ToLower(slices.StringUpto(authHeader, 5)) == "dpop " {
-		_, err = c.signer.ForRequest(req, nil)
+	if strings.EqualFold(slices.StringUpto(authHeader, 5), "DPoP ") {
+		_, err = dpop.ForRequest(c.signer, req, nil)
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to sign DPoP")
 		}
