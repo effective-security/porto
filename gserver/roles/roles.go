@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"net/url"
 	"strings"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
@@ -54,7 +55,7 @@ type IdentityProvider interface {
 	// ApplicableForContext returns true if the provider is applicable for the request
 	ApplicableForContext(ctx context.Context) bool
 	// IdentityFromContext returns identity from the request
-	IdentityFromContext(ctx context.Context) (identity.Identity, error)
+	IdentityFromContext(ctx context.Context, method string) (identity.Identity, error)
 }
 
 // AccessToken provides interface for Access Token
@@ -133,13 +134,13 @@ func (p *provider) ApplicableForRequest(r *http.Request) bool {
 
 // ApplicableForContext returns true if the provider is applicable for context
 func (p *provider) ApplicableForContext(ctx context.Context) bool {
-	// TODO: DPoP over gRPC
-	if p.config.JWT.Enabled {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if ok && len(md["authorization"]) > 0 {
-			return true
-		}
+	md, ok := metadata.FromIncomingContext(ctx)
+	authorization := ok && len(md["authorization"]) > 0
+
+	if authorization && (p.config.DPoP.Enabled || p.config.JWT.Enabled) {
+		return true
 	}
+
 	if p.config.TLS.Enabled {
 		c, ok := peer.FromContext(ctx)
 		if ok {
@@ -182,7 +183,9 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 
 	if p.config.DPoP.Enabled {
 		if strings.EqualFold(typ, "DPoP") {
-			id, err := p.dpopIdentity(r, token, "DPoP")
+			phdr := r.Header.Get(dpop.HTTPHeader)
+
+			id, err := p.dpopIdentity(r.Context(), phdr, r.Method, r.URL, token, "DPoP")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
 				return nil, err
@@ -233,16 +236,30 @@ func dumpDM(md metadata.MD) []any {
 }
 
 // IdentityFromContext returns identity from context
-func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, error) {
+func (p *provider) IdentityFromContext(ctx context.Context, method string) (identity.Identity, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
+	if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
+		token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0])
+
 		if p.config.DebugLogs {
+			logger.ContextKV(ctx, xlog.DEBUG,
+				"method", method,
+				"token_type", typ,
+			)
 			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
 		}
-		if p.config.JWT.Enabled && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
-			if token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0]); typ != "" {
-				return p.jwtIdentity(token, typ)
+
+		dhdr := md["dpop"]
+		if p.config.DPoP.Enabled &&
+			strings.EqualFold(typ, "DPoP") && len(dhdr) > 0 {
+			u := &url.URL{
+				Path: method,
 			}
+			return p.dpopIdentity(ctx, dhdr[0], "POST", u, token, "DPoP")
+		}
+
+		if p.config.JWT.Enabled && typ != "" {
+			return p.jwtIdentity(token, typ)
 		}
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
 	} else {
@@ -265,11 +282,11 @@ func (p *provider) IdentityFromContext(ctx context.Context) (identity.Identity, 
 	if p.config.DebugLogs {
 		logger.ContextKV(ctx, xlog.DEBUG, "role", "guest")
 	}
-	return identity.GuestIdentityForContext(ctx)
+	return identity.GuestIdentityForContext(ctx, method)
 }
 
-func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identity.Identity, error) {
-	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r)
+func (p *provider) dpopIdentity(ctx context.Context, phdr, method string, u *url.URL, auth, tokenType string) (identity.Identity, error) {
+	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, phdr, method, u)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +299,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		cfg.ExpectedAudience = []string{p.config.DPoP.Audience}
 	}
 	if p.at != nil {
-		claims, err = p.at.Claims(r.Context(), auth)
+		claims, err = p.at.Claims(ctx, auth)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +319,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 		return nil, err
 	}
 	if tb != res.Thumbprint {
-		logger.ContextKV(r.Context(), xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
+		logger.ContextKV(ctx, xlog.DEBUG, "header", tb, "claims", res.Thumbprint)
 		return nil, errors.Errorf("dpop: thumbprint mismatch")
 	}
 
@@ -314,7 +331,7 @@ func (p *provider) dpopIdentity(r *http.Request, auth, tokenType string) (identi
 	if role == "" {
 		role = p.config.DPoP.DefaultAuthenticatedRole
 	}
-	logger.ContextKV(r.Context(), xlog.DEBUG,
+	logger.ContextKV(ctx, xlog.DEBUG,
 		"role", role,
 		"tenant", tenant,
 		"subject", subj,

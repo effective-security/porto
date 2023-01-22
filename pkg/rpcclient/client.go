@@ -2,12 +2,15 @@ package rpcclient
 
 import (
 	"context"
+	"crypto"
 	"math"
 	"strings"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -125,10 +128,20 @@ func newClient(cfg *Config) (*Client, error) {
 			}
 			// grpc: the credentials require transport level security
 			token := at.AccessToken
-			if at.TokenType != "" {
-				token = at.TokenType + " " + at.AccessToken
+			typ := slices.StringsCoalesce(at.TokenType, "Bearer")
+			if at.DpopJkt != "" {
+				k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
+				if err != nil {
+					return nil, errors.WithMessage(err, "unable to load key for DPoP")
+				}
+				typ = "DPoP"
+				signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
+				if err != nil {
+					return nil, errors.WithMessage(err, "unable to create DPoP signer")
+				}
+				bundle.WithDPoP(signer)
 			}
-			bundle.UpdateAuthToken(token)
+			bundle.UpdateAuthToken(typ, token)
 		}
 
 		dopts = append(dopts, grpc.WithPerRPCCredentials(bundle.PerRPCCredentials()))

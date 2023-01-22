@@ -29,7 +29,7 @@ type Identity interface {
 type ProviderFromRequest func(*http.Request) (Identity, error)
 
 // ProviderFromContext returns Identity from supplied context
-type ProviderFromContext func(ctx context.Context) (Identity, error)
+type ProviderFromContext func(ctx context.Context, method string) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
 func NewIdentity(role, subject, tenant string, claims map[string]interface{}, accessToken, tokenType string) Identity {
@@ -123,7 +123,7 @@ func GuestIdentityMapper(r *http.Request) (Identity, error) {
 }
 
 // GuestIdentityForContext always returns "guest" for the role
-func GuestIdentityForContext(ctx context.Context) (Identity, error) {
+func GuestIdentityForContext(ctx context.Context, method string) (Identity, error) {
 	return NewIdentity(GuestRoleName, "", "", nil, "", ""), nil
 }
 

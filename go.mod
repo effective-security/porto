@@ -6,7 +6,7 @@ require (
 	github.com/deckarep/golang-set v1.7.1
 	github.com/effective-security/metrics v0.2.1-0.20221221085612-58ef13855049
 	github.com/effective-security/xlog v0.0.0-20221221083126-54a4be3a12a9
-	github.com/effective-security/xpki v0.5.0
+	github.com/effective-security/xpki v0.6.0
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba
 	github.com/golang-migrate/migrate/v4 v4.15.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0

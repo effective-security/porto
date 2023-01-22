@@ -118,7 +118,7 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var id Identity
 		var err error
-		id, err = identityMapper(ctx)
+		id, err = identityMapper(ctx, info.FullMethod)
 		if err != nil {
 			logger.ContextKV(ctx, xlog.DEBUG,
 				"reason", "access_denied",

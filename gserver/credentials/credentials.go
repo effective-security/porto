@@ -6,8 +6,12 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"net/url"
+	"strings"
 	"sync"
 
+	"github.com/effective-security/xpki/jwt/dpop"
+	"google.golang.org/grpc/credentials"
 	grpccredentials "google.golang.org/grpc/credentials"
 )
 
@@ -25,7 +29,8 @@ type Config struct {
 // see https://pkg.go.dev/google.golang.org/grpc/credentials
 type Bundle interface {
 	grpccredentials.Bundle
-	UpdateAuthToken(token string)
+	UpdateAuthToken(typ, token string)
+	WithDPoP(signer dpop.Signer)
 }
 
 // NewBundle constructs a new gRPC credential bundle.
@@ -90,35 +95,73 @@ func (tc *transportCredential) OverrideServerName(serverNameOverride string) err
 
 // perRPCCredential implements "grpccredentials.PerRPCCredentials" interface.
 type perRPCCredential struct {
-	authToken   string
+	tokenType   string
+	accessToken string
+	signer      dpop.Signer
 	authTokenMu sync.RWMutex
 }
 
 func newPerRPCCredential() *perRPCCredential { return &perRPCCredential{} }
 
-func (rc *perRPCCredential) RequireTransportSecurity() bool { return false }
+func (rc *perRPCCredential) RequireTransportSecurity() bool {
+	return true
+}
 
-func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, s ...string) (map[string]string, error) {
+func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	rc.authTokenMu.RLock()
-	authToken := rc.authToken
+	typ := rc.tokenType
+	authToken := rc.accessToken
 	rc.authTokenMu.RUnlock()
+
 	if authToken == "" {
 		return nil, nil
 	}
-	return map[string]string{
-		TokenFieldNameGRPC: authToken,
-	}, nil
-}
 
-func (b *bundle) UpdateAuthToken(token string) {
-	if b.rc == nil {
-		return
+	ri, _ := credentials.RequestInfoFromContext(ctx)
+	// if err := credentials.CheckSecurityLevel(ri.AuthInfo, credentials.PrivacyAndIntegrity); err != nil {
+	// 	return nil, fmt.Errorf("unable to transfer Access Token: %v", err)
+	// }
+
+	res := map[string]string{
+		TokenFieldNameGRPC: typ + " " + authToken,
 	}
-	b.rc.UpdateAuthToken(token)
+
+	if rc.signer != nil && strings.EqualFold(typ, "DPoP") {
+		u := &url.URL{
+			Path: ri.Method,
+		}
+
+		dhdr, err := rc.signer.Sign("POST", u, nil)
+		if err != nil {
+			return nil, err
+		}
+		res["dpop"] = dhdr
+	}
+
+	return res, nil
 }
 
-func (rc *perRPCCredential) UpdateAuthToken(token string) {
+func (b *bundle) UpdateAuthToken(typ, token string) {
+	if b.rc != nil {
+		b.rc.UpdateAuthToken(typ, token)
+	}
+}
+
+func (b *bundle) WithDPoP(signer dpop.Signer) {
+	if b.rc != nil {
+		b.rc.WithDPoP(signer)
+	}
+}
+
+func (rc *perRPCCredential) UpdateAuthToken(typ, token string) {
 	rc.authTokenMu.Lock()
-	rc.authToken = token
+	rc.tokenType = typ
+	rc.accessToken = token
+	rc.authTokenMu.Unlock()
+}
+
+func (rc *perRPCCredential) WithDPoP(signer dpop.Signer) {
+	rc.authTokenMu.Lock()
+	rc.signer = signer
 	rc.authTokenMu.Unlock()
 }

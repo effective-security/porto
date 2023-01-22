@@ -121,7 +121,7 @@ func Test_FromContext(t *testing.T) {
 
 func Test_grpcFromContext(t *testing.T) {
 	info := &grpc.UnaryServerInfo{
-		FullMethod: "test",
+		FullMethod: "/test",
 	}
 
 	t.Run("default_guest", func(t *testing.T) {
@@ -136,7 +136,7 @@ func Test_grpcFromContext(t *testing.T) {
 	})
 
 	t.Run("with_custom_id", func(t *testing.T) {
-		def := func(ctx context.Context) (Identity, error) {
+		def := func(ctx context.Context, method string) (Identity, error) {
 			return NewIdentity("test", "", "", nil, "", ""), nil
 		}
 		unary := NewAuthUnaryInterceptor(def)
@@ -147,11 +147,11 @@ func Test_grpcFromContext(t *testing.T) {
 			assert.Equal(t, "test", rt.Identity().Role())
 			return nil, nil
 		}
-		unary(context.Background(), nil, nil, handler)
+		unary(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test"}, handler)
 	})
 
 	t.Run("with_error", func(t *testing.T) {
-		def := func(ctx context.Context) (Identity, error) {
+		def := func(ctx context.Context, method string) (Identity, error) {
 			return nil, errors.New("invalid request")
 		}
 		unary := NewAuthUnaryInterceptor(def)

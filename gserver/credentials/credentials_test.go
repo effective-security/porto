@@ -22,15 +22,16 @@ func TestOauthAccess(t *testing.T) {
 func TestBundle(t *testing.T) {
 	b := credentials.NewBundle(credentials.Config{})
 	_, _ = b.NewWithMode("noop")
-	b.UpdateAuthToken("1234")
+	b.UpdateAuthToken("Bearer", "1234")
 
 	prpc := b.PerRPCCredentials()
 	md, err := prpc.GetRequestMetadata(context.Background(), "notused")
 	require.NoError(t, err)
-	assert.Equal(t, "1234", md[credentials.TokenFieldNameGRPC])
+	assert.Equal(t, "Bearer 1234", md[credentials.TokenFieldNameGRPC])
 
 	tc := b.TransportCredentials()
-	tc.Info()
-	_ = tc.Clone()
-	_ = tc.OverrideServerName("localhost")
+	assert.NotNil(t, tc.Info())
+	assert.NotNil(t, tc.Clone())
+	err = tc.OverrideServerName("localhost")
+	assert.NoError(t, err)
 }
