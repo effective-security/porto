@@ -55,7 +55,7 @@ type IdentityProvider interface {
 	// ApplicableForContext returns true if the provider is applicable for the request
 	ApplicableForContext(ctx context.Context) bool
 	// IdentityFromContext returns identity from the request
-	IdentityFromContext(ctx context.Context, method string) (identity.Identity, error)
+	IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error)
 }
 
 // AccessToken provides interface for Access Token
@@ -184,8 +184,14 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	if p.config.DPoP.Enabled {
 		if strings.EqualFold(typ, "DPoP") {
 			phdr := r.Header.Get(dpop.HTTPHeader)
+			u := r.URL
+			coreURL := url.URL{
+				Scheme: slices.StringsCoalesce(u.Scheme, "https"),
+				Host:   slices.StringsCoalesce(u.Host, r.Host),
+				Path:   u.Path,
+			}
 
-			id, err := p.dpopIdentity(r.Context(), phdr, r.Method, r.URL, token, "DPoP")
+			id, err := p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
 				return nil, err
@@ -236,14 +242,14 @@ func dumpDM(md metadata.MD) []any {
 }
 
 // IdentityFromContext returns identity from context
-func (p *provider) IdentityFromContext(ctx context.Context, method string) (identity.Identity, error) {
+func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
 		token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0])
 
 		if p.config.DebugLogs {
 			logger.ContextKV(ctx, xlog.DEBUG,
-				"method", method,
+				"uri", uri,
 				"token_type", typ,
 			)
 			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
@@ -252,10 +258,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, method string) (iden
 		dhdr := md["dpop"]
 		if p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, "DPoP") && len(dhdr) > 0 {
-			u := &url.URL{
-				Path: method,
-			}
-			return p.dpopIdentity(ctx, dhdr[0], "POST", u, token, "DPoP")
+			return p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, "DPoP")
 		}
 
 		if p.config.JWT.Enabled && typ != "" {
@@ -282,11 +285,11 @@ func (p *provider) IdentityFromContext(ctx context.Context, method string) (iden
 	if p.config.DebugLogs {
 		logger.ContextKV(ctx, xlog.DEBUG, "role", "guest")
 	}
-	return identity.GuestIdentityForContext(ctx, method)
+	return identity.GuestIdentityForContext(ctx, uri)
 }
 
-func (p *provider) dpopIdentity(ctx context.Context, phdr, method string, u *url.URL, auth, tokenType string) (identity.Identity, error) {
-	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, phdr, method, u)
+func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, auth, tokenType string) (identity.Identity, error) {
+	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, phdr, method, uri)
 	if err != nil {
 		return nil, err
 	}
