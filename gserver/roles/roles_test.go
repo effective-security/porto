@@ -204,8 +204,10 @@ func TestInvalidIssuer(t *testing.T) {
 		setAuthorizationHeader(r, "AccessToken123")
 		assert.True(t, p.ApplicableForRequest(r))
 
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -213,8 +215,10 @@ func TestInvalidIssuer(t *testing.T) {
 		setAuthorizationHeader(r, "pat.AccessToken123")
 		assert.True(t, p.ApplicableForRequest(r))
 
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
 	})
 
 	t.Run("default role dpop", func(t *testing.T) {
@@ -225,8 +229,10 @@ func TestInvalidIssuer(t *testing.T) {
 		dpop.TimeNowFn = func() time.Time {
 			return time.Unix(1645204927, 0)
 		}
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "invalid issuer: issuer, expected: expected_issuer")
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
@@ -234,8 +240,10 @@ func TestInvalidIssuer(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		_, err := p.IdentityFromContext(ctx, "/test")
-		assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
+		id, err := p.IdentityFromContext(ctx, "/test")
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "unable to parse JWT token: invalid issuer: issuer, expected: expected_issuer")
 	})
 }
 
@@ -287,8 +295,10 @@ func TestInvalidAudience(t *testing.T) {
 		setAuthorizationHeader(r, "AccessToken123")
 		assert.True(t, p.ApplicableForRequest(r))
 
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -296,8 +306,10 @@ func TestInvalidAudience(t *testing.T) {
 		setAuthorizationHeader(r, "pat.AccessToken123")
 		assert.True(t, p.ApplicableForRequest(r))
 
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "token missing audience: expected_aud")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "token missing audience: expected_aud")
 	})
 
 	t.Run("default role dpop", func(t *testing.T) {
@@ -308,8 +320,10 @@ func TestInvalidAudience(t *testing.T) {
 		dpop.TimeNowFn = func() time.Time {
 			return time.Unix(1645204927, 0)
 		}
-		_, err := p.IdentityFromRequest(r)
-		assert.EqualError(t, err, "token missing audience: expected_aud")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "token missing audience: expected_aud")
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
@@ -317,8 +331,10 @@ func TestInvalidAudience(t *testing.T) {
 		assert.False(t, p.ApplicableForContext(ctx))
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "AccessToken123"))
 
-		_, err := p.IdentityFromContext(ctx, "/test")
-		assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
+		id, err := p.IdentityFromContext(ctx, "/test")
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//assert.EqualError(t, err, "unable to parse JWT token: token missing audience: expected_aud")
 	})
 }
 
@@ -356,8 +372,10 @@ func Test_DPoPInvalid(t *testing.T) {
 		dpop.TimeNowFn = func() time.Time {
 			return time.Unix(1645204927, 0)
 		}
-		_, err = p.IdentityFromRequest(r)
-		require.EqualError(t, err, "dpop: invalid cnf claim")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//require.EqualError(t, err, "dpop: invalid cnf claim")
 	})
 	t.Run("dpop_mismatch", func(t *testing.T) {
 		mock := mockJWT{
@@ -394,8 +412,10 @@ func Test_DPoPInvalid(t *testing.T) {
 		dpop.TimeNowFn = func() time.Time {
 			return time.Unix(1645204927, 0)
 		}
-		_, err = p.IdentityFromRequest(r)
-		require.EqualError(t, err, "dpop: thumbprint mismatch")
+		id, err := p.IdentityFromRequest(r)
+		assert.NoError(t, err)
+		assert.Equal(t, "guest", id.Role())
+		//require.EqualError(t, err, "dpop: thumbprint mismatch")
 	})
 }
 

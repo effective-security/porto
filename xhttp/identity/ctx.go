@@ -6,12 +6,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/xhttp", "context")
@@ -80,8 +76,12 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 					"reason", "identityMapper",
 					"ip", clientIP,
 					"err", err.Error())
-				marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
-				return
+				// Ignore the token
+				// marshal.WriteJSON(w, r, httperror.Unauthorized("request denied for this identity"))
+				// return
+			}
+			if idn == nil {
+				idn = guestIdentity
 			}
 
 			rctx = &RequestContext{
@@ -124,7 +124,8 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 				"reason", "access_denied",
 				"method", info.FullMethod,
 				"err", err.Error())
-			return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err.Error())
+			// Ignore the token
+			//return nil, status.Errorf(codes.PermissionDenied, "unable to get identity: %v", err.Error())
 		}
 		if id == nil {
 			id = guestIdentity
