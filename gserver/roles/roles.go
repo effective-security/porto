@@ -181,6 +181,9 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	authHeader := r.Header.Get(header.Authorization)
 	token, typ := tokenType(authHeader)
 
+	var err error
+	var id identity.Identity
+
 	if p.config.DPoP.Enabled {
 		if strings.EqualFold(typ, "DPoP") {
 			phdr := r.Header.Get(dpop.HTTPHeader)
@@ -191,30 +194,33 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 				Path:   u.Path,
 			}
 
-			id, err := p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
+			id, err = p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-				return nil, err
+				//return nil, err
+			} else {
+				return id, nil
 			}
-			return id, nil
 		}
 	}
 
 	if p.config.JWT.Enabled {
 		if strings.EqualFold(typ, "Bearer") {
-			id, err := p.jwtIdentity(token, "Bearer")
+			id, err = p.jwtIdentity(token, "Bearer")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-				return nil, err
+				//return nil, err
+			} else {
+				return id, nil
 			}
-			return id, nil
 		}
 	}
 
 	if p.config.TLS.Enabled && peers > 0 {
-		id, err := p.tlsIdentity(r.TLS)
-		if err == nil {
-			logger.ContextKV(r.Context(), xlog.DEBUG, "type", "TLS", "role", id)
+		id, err = p.tlsIdentity(r.TLS)
+		if err != nil {
+			logger.ContextKV(r.Context(), xlog.TRACE, "reason", "tls", "err", err.Error())
+		} else {
 			return id, nil
 		}
 	}
@@ -258,11 +264,17 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		dhdr := md["dpop"]
 		if p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, "DPoP") && len(dhdr) > 0 {
-			return p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, "DPoP")
+			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, "DPoP")
+			if err == nil {
+				return id, nil
+			}
 		}
 
 		if p.config.JWT.Enabled && typ != "" {
-			return p.jwtIdentity(token, typ)
+			id, err := p.jwtIdentity(token, typ)
+			if err == nil {
+				return id, nil
+			}
 		}
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
 	} else {
