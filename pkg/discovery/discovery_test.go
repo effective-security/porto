@@ -24,7 +24,7 @@ func TestDiscovery(t *testing.T) {
 	require.EqualError(t, err, "already registered: TestDiscovery/*discovery_test.barImpl")
 
 	var f2 foo
-	err = d.Find(&f2)
+	err = d.Find(srv, &f2)
 	require.NoError(t, err)
 	require.NotNil(t, f2)
 	assert.Equal(t, f.GetName(), f2.GetName())
@@ -39,13 +39,13 @@ func TestDiscovery(t *testing.T) {
 	assert.Equal(t, 1, count)
 
 	var nonPointer bar
-	err = d.Find(nonPointer)
+	err = d.Find(srv, nonPointer)
 	require.EqualError(t, err, "a pointer to interface is required, invalid type: <invalid reflect.Value>")
 
-	err = d.Find(err)
+	err = d.Find(srv, err)
 	require.EqualError(t, err, "non interface type: *errors.fundamental")
 
-	err = d.Find(&err)
+	err = d.Find(srv, &err)
 	require.EqualError(t, err, "not implemented: <error Value>")
 
 	err = d.ForEach(nonPointer, func(key string) error {

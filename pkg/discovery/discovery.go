@@ -19,7 +19,7 @@ type serviceInfo struct {
 // Discovery provides service discovery interface
 type Discovery interface {
 	Register(server string, service interface{}) error
-	Find(v interface{}) error
+	Find(server string, v interface{}) error
 	ForEach(v interface{}, f func(typ string) error) error
 }
 
@@ -55,7 +55,7 @@ func (d *disco) Register(server string, service interface{}) error {
 }
 
 // Find interface
-func (d *disco) Find(v interface{}) error {
+func (d *disco) Find(server string, v interface{}) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return errors.Errorf("a pointer to interface is required, invalid type: %v", rv)
@@ -69,7 +69,7 @@ func (d *disco) Find(v interface{}) error {
 	}
 
 	for _, reg := range d.reg {
-		if reg.Type.Implements(rv.Type()) {
+		if reg.Type.Implements(rv.Type()) && reg.ServerName == server {
 			rv.Set(reflect.ValueOf(reg.Service))
 			return nil
 		}
