@@ -70,12 +70,12 @@ func Unmarshal(file string, v interface{}) error {
 	if strings.HasSuffix(file, ".json") {
 		err = json.Unmarshal(b, v)
 		if err != nil {
-			return errors.WithMessagef(err, "unable parse JSON")
+			return errors.WithMessagef(err, "unable parse JSON: %s", file)
 		}
 	} else {
 		err = yaml.Unmarshal(b, v)
 		if err != nil {
-			return errors.WithMessagef(err, "unable parse YAML")
+			return errors.WithMessagef(err, "unable parse YAML: %s", file)
 		}
 	}
 	return nil

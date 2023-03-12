@@ -95,7 +95,7 @@ func LoadFactory(file string) (*Factory, error) {
 	var cfg Config
 	err = yaml.Unmarshal(f, &cfg)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to parse config")
+		return nil, errors.WithMessagef(err, "failed to parse config: %s", file)
 	}
 
 	return NewFactory(cfg)
@@ -157,7 +157,7 @@ func LoadClient(file string) (*Client, error) {
 	var cfg ClientConfig
 	err = yaml.Unmarshal(f, &cfg)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to parse config")
+		return nil, errors.WithMessagef(err, "failed to parse config: %s", file)
 	}
 
 	return New(cfg)
