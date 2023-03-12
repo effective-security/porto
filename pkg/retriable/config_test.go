@@ -21,7 +21,7 @@ func Test_Factory(t *testing.T) {
 	_, err := LoadFactory("testdata/client_notfound.yaml")
 	assert.EqualError(t, err, "failed to load config: open testdata/client_notfound.yaml: no such file or directory")
 	_, err = LoadFactory("testdata/clients_invalid.yaml")
-	assert.EqualError(t, err, "failed to parse config: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into map[string]*retriable.ClientConfig")
+	assert.EqualError(t, err, "failed to parse config: testdata/clients_invalid.yaml: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!seq into map[string]*retriable.ClientConfig")
 	_, err = LoadFactory("testdata/clients_duplicate.yaml")
 	assert.EqualError(t, err, "multiple entries for host: https://localhost:4000")
 
