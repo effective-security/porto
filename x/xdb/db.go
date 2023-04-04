@@ -79,7 +79,7 @@ func IDString(id uint64) string {
 // IsNotFoundError returns true, if error is NotFound
 func IsNotFoundError(err error) bool {
 	return err != nil &&
-		(err == sql.ErrNoRows || strings.Contains(err.Error(), "sql: no rows in result set"))
+		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows in result set"))
 }
 
 // IsInvalidModel returns true, if error is InvalidModel

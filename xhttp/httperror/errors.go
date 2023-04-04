@@ -5,13 +5,13 @@ import (
 	goerrors "errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/effective-security/porto/x/slices"
+	"github.com/effective-security/porto/x/xdb"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
-	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/ugorji/go/codec"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -19,6 +19,8 @@ import (
 type Error struct {
 	// HTTPStatus contains the HTTP status code that should be used for this error
 	HTTPStatus int `json:"-"`
+
+	RPCStatus codes.Code `json:"-"`
 
 	// Code identifies the particular error condition [for programatic consumers]
 	Code string `json:"code"`
@@ -31,39 +33,43 @@ type Error struct {
 
 	// Cause is the original error
 	cause error `json:"-"`
+
+	ctx context.Context `json:"-"`
 }
 
 // New returns Error instance, building the message string along the way
 func New(status int, code string, msgFormat string, vals ...interface{}) *Error {
 	return &Error{
 		HTTPStatus: status,
+		RPCStatus:  statusCode[code],
 		Code:       code,
 		Message:    fmt.Sprintf(msgFormat, vals...),
 	}
 }
 
-// NewFromPb returns Error instance, from gRPC error
-func NewFromPb(err error) *Error {
-	if e, ok := err.(*Error); ok {
-		return e
+// NewFromCtx returns Error instance, building the message string along the way
+func NewFromCtx(ctx context.Context, status int, code string, msgFormat string, vals ...interface{}) *Error {
+	e := &Error{
+		HTTPStatus: status,
+		RPCStatus:  statusCode[code],
+		Code:       code,
+		Message:    fmt.Sprintf(msgFormat, vals...),
+		ctx:        ctx,
 	}
-	if st, ok := status.FromError(err); ok {
-		hs := HTTPStatusFromRPC(st.Code())
-		return &Error{
-			HTTPStatus: hs,
-			Code:       httpCode[hs],
-			Message:    st.Message(),
-			RequestID:  pberror.CorrelationID(err),
-			//cause:      errors.WithStack(err),
-		}
+	if v := correlation.Value(ctx); v != nil {
+		e.RequestID = v.ID
 	}
 
-	return New(http.StatusInternalServerError, CodeUnexpected, err.Error()).WithCause(err)
+	return e
 }
 
-// GRPCStatus returns gRPC status
-func (e *Error) GRPCStatus() *status.Status {
-	return status.New(statusCode[e.Code], e.Message)
+// WithContext adds the context
+func (e *Error) WithContext(ctx context.Context) *Error {
+	if v := correlation.Value(ctx); v != nil {
+		e.RequestID = v.ID
+	}
+	e.ctx = ctx
+	return e
 }
 
 // WithCause adds the cause error
@@ -92,6 +98,28 @@ func (e *Error) Error() string {
 // Cause returns original error
 func (e *Error) Cause() error {
 	return e.cause
+}
+
+// Unwrap returns unwrapped error
+func (e *Error) Unwrap() error {
+	if e.cause != nil {
+		unwrapped := goerrors.Unwrap(e.cause)
+		if unwrapped != nil {
+			return unwrapped
+		}
+		return e.cause
+	}
+	return e
+}
+
+// Is implements future error.Is functionality.
+// A Error is equivalent if the code and message are identical.
+func (e *Error) Is(target error) bool {
+	tse, ok := target.(*Error)
+	if !ok {
+		return false
+	}
+	return tse.Code == e.Code && tse.Message == e.Message
 }
 
 // InvalidParam returns Error instance with InvalidParam code
@@ -184,115 +212,37 @@ func Conflict(msgFormat string, vals ...interface{}) *Error {
 	return New(http.StatusConflict, CodeConflict, msgFormat, vals...)
 }
 
-// ManyError identifies many errors from API.
-type ManyError struct {
-	// HTTPStatus contains the HTTP status code that should be used for this error
-	HTTPStatus int `json:"-"`
-
-	// Code identifies the particular error condition [for programatic consumers]
-	Code string `json:"code,omitempty"`
-
-	// RequestID identifies the request ID
-	RequestID string `json:"request_id,omitempty"`
-
-	// Message is an textual description of the error
-	Message string `json:"message,omitempty"`
-
-	Errors map[string]*Error `json:"errors,omitempty"`
-
-	// Cause is the first original error
-	cause error `json:"-"`
+// Timeout returns Error instance with RequestTimeout code
+func Timeout(msgFormat string, vals ...interface{}) *Error {
+	return New(http.StatusRequestTimeout, CodeTimeout, msgFormat, vals...)
 }
 
-// GRPCStatus returns gRPC status
-func (m *ManyError) GRPCStatus() *status.Status {
-	return status.New(statusCode[m.Code], m.Message)
+// Wrap returns Error instance with NotFound, Timeout or Internal code,
+// depending on the error from DB
+func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
+	if unwrapped := goerrors.Unwrap(err); unwrapped != nil {
+		err = unwrapped
+	}
+
+	switch e := err.(type) {
+	case *Error:
+		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
+	case *ManyError:
+		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
+	}
+
+	if xdb.IsNotFoundError(err) {
+		return NotFound(msgFormat, vals...).WithCause(err)
+	}
+	if IsTimeout(err) {
+		return Timeout(msgFormat, vals...).WithCause(err)
+	}
+	return Unexpected(msgFormat, vals...).WithCause(err)
 }
 
-func (m *ManyError) Error() string {
-	if m == nil {
-		return "nil"
-	}
-	if m.Code != "" {
-		if m.RequestID != "" {
-			return fmt.Sprintf("request %s: %s: %s", m.RequestID, m.Code, m.Message)
-		}
-		return fmt.Sprintf("%s: %s", m.Code, m.Message)
-	}
-
-	var errs []string
-	for _, e := range m.Errors {
-		errs = append(errs, e.Error())
-	}
-
-	return strings.Join(errs, ";")
-}
-
-// CorrelationID implements the Correlation interface,
-// and returns request ID
-func (m *ManyError) CorrelationID() string {
-	return m.RequestID
-}
-
-// Cause returns original error
-func (m *ManyError) Cause() error {
-	return m.cause
-}
-
-// NewMany builds new ManyError instance, build message string along the way
-func NewMany(status int, code string, msgFormat string, vals ...interface{}) *ManyError {
-	return &ManyError{
-		HTTPStatus: status,
-		Code:       code,
-		Message:    fmt.Sprintf(msgFormat, vals...),
-		Errors:     make(map[string]*Error),
-	}
-}
-
-// Add a single error to ManyError
-func (m *ManyError) Add(key string, err error) *ManyError {
-	if m == nil {
-		m = new(ManyError)
-	}
-	if m.Errors == nil {
-		m.Errors = make(map[string]*Error)
-	}
-	if m.cause == nil {
-		m.cause = err
-	}
-	if gErr, ok := err.(*Error); ok {
-		m.Errors[key] = gErr
-	} else {
-		m.Errors[key] = &Error{Code: CodeUnexpected, Message: err.Error(), cause: err}
-	}
-	return m
-}
-
-// HasErrors check if ManyError has any nested error associated with it.
-func (m *ManyError) HasErrors() bool {
-	return len(m.Errors) > 0
-}
-
-// WriteHTTPResponse implements how to serialize this error into a HTTP Response
-func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
-	// TODO: check r.Accept
-	w.Header().Set(header.ContentType, header.ApplicationJSON)
-	w.WriteHeader(e.HTTPStatus)
-	if e.RequestID == "" {
-		e.RequestID = correlation.ID(r.Context())
-	}
-	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
-}
-
-// WriteHTTPResponse implements how to serialize this error into a HTTP Response
-func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
-	// TODO: check r.Accept
-	w.Header().Set(header.ContentType, header.ApplicationJSON)
-	w.WriteHeader(m.HTTPStatus)
-	if m.RequestID == "" {
-		m.RequestID = correlation.ID(r.Context())
-	}
-	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
+// WrapWithCtx returns wrapped Error with Context
+func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...interface{}) *Error {
+	return Wrap(err, msgFormat, vals...).WithContext(ctx)
 }
 
 // IsTimeout returns true for timeout error
@@ -317,5 +267,17 @@ func Status(err error) int {
 	case *ManyError:
 		return e.HTTPStatus
 	}
-	return codeStatus[status.Code(err)]
+	code := status.Code(err)
+	return codeStatus[code]
+}
+
+// WriteHTTPResponse implements how to serialize this error into a HTTP Response
+func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
+	// TODO: check r.Accept
+	w.Header().Set(header.ContentType, header.ApplicationJSON)
+	w.WriteHeader(e.HTTPStatus)
+	if e.RequestID == "" {
+		e.RequestID = correlation.ID(r.Context())
+	}
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
 }
