@@ -273,6 +273,10 @@ func TestError_Wrap(t *testing.T) {
 	werr4 := httperror.WrapWithCtx(ctx, werr3, "wrapped3")
 	assert.EqualError(t, werr4, fmt.Sprintf("request %s: not_found: wrapped3", cid))
 	assert.EqualError(t, werr4.Unwrap(), "no rows in result set")
+
+	werr5 := httperror.WrapWithCtx(ctx, nil, "wrapped nil")
+	assert.EqualError(t, werr5, fmt.Sprintf("request %s: unexpected: wrapped nil", cid))
+	assert.EqualError(t, werr5.Unwrap(), fmt.Sprintf("request %s: unexpected: wrapped nil", cid))
 }
 
 func TestGRPCError(t *testing.T) {
