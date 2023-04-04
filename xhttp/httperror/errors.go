@@ -247,6 +247,9 @@ func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...inter
 
 // IsTimeout returns true for timeout error
 func IsTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
 	str := err.Error()
 	return goerrors.Is(err, context.DeadlineExceeded) ||
 		goerrors.Is(err, context.Canceled) ||
