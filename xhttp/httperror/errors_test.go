@@ -1,18 +1,32 @@
 package httperror_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func TestErrorCorrelation(t *testing.T) {
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	assert.NotEmpty(t, cid)
+	ne2 := httperror.NewFromCtx(ctx, http.StatusBadRequest, httperror.CodeInvalidJSON, "some error")
+	assert.Equal(t, fmt.Sprintf("request %s: invalid_json: some error", cid), ne2.Error())
+	assert.Equal(t, cid, httperror.CorrelationID(ne2))
+	rs := ne2.GRPCStatus()
+	assert.Equal(t, "rpc error: code = InvalidArgument desc = some error", rs.String())
+}
 
 func TestErrorCode_JSON(t *testing.T) {
 	v := map[string]string{"foo": httperror.CodeInvalidJSON}
@@ -28,11 +42,28 @@ func TestError_Error(t *testing.T) {
 
 	e := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "Bob")
 	assert.Equal(t, "invalid_json: Bob", e.Error())
-	e.RequestID = "123"
-	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
 
-	_ = e.WithCause(errors.New("some other error"))
-	assert.Equal(t, "request 123: invalid_json: Bob", e.Error())
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	assert.NotEmpty(t, cid)
+	e.WithContext(ctx)
+
+	assert.Equal(t, fmt.Sprintf("request %s: invalid_json: Bob", cid), e.Error())
+
+	e = e.WithCause(errors.New("some other error"))
+	assert.EqualError(t, e, fmt.Sprintf("request %s: invalid_json: Bob", cid))
+}
+
+func TestError_Unwrap(t *testing.T) {
+	e := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "Bob")
+	assert.Equal(t, "invalid_json: Bob", e.Error())
+	assert.Error(t, e.Unwrap())
+
+	e = e.WithCause(errors.New("some other error"))
+	assert.EqualError(t, e.Unwrap(), "some other error")
+
+	e = e.WithCause(errors.WithMessage(errors.New("some other error"), "wrapped"))
+	assert.EqualError(t, e.Unwrap(), "some other error")
 }
 
 func TestError_Nil(t *testing.T) {
@@ -42,11 +73,15 @@ func TestError_Nil(t *testing.T) {
 }
 
 func TestError_ManyErrorIsError(t *testing.T) {
-	err := httperror.NewMany(http.StatusBadRequest, httperror.CodeRateLimitExceeded, "There were 42 errors!")
+	oerr := errors.New("original")
+	err := httperror.NewMany(http.StatusTooManyRequests, httperror.CodeRateLimitExceeded, "There were 42 errors!").
+		WithCause(oerr)
 	var _ error = err // won't compile if ManyError doesn't impl error
 	assert.Equal(t, "rate_limit_exceeded: There were 42 errors!", err.Error())
 	err.RequestID = "123"
 	assert.Equal(t, "request 123: rate_limit_exceeded: There were 42 errors!", err.Error())
+	assert.Equal(t, err.RequestID, err.CorrelationID())
+	assert.Equal(t, codes.ResourceExhausted, err.GRPCStatus().Code())
 }
 
 func TestError_ManyError(t *testing.T) {
@@ -190,15 +225,95 @@ func TestError_IsTimeout(t *testing.T) {
 func TestError_NewFromPb(t *testing.T) {
 	err := httperror.InvalidParam("test")
 	assert.Equal(t, err.Error(), httperror.NewFromPb(err).Error())
+	assert.Equal(t, codes.InvalidArgument, httperror.GRPCCode(err))
+	assert.Equal(t, "test", httperror.GRPCMessage(err))
+
 	err2 := errors.Errorf("test")
 	assert.Equal(t, "unexpected: test", httperror.NewFromPb(err2).Error())
+	assert.Equal(t, codes.Internal, httperror.GRPCCode(err2))
+	assert.Equal(t, "test", httperror.GRPCMessage(err2))
 
-	assert.Equal(t, "unavailable: request timed out", httperror.NewFromPb(pberror.ErrGRPCTimeout).Error())
+	assert.Equal(t, "unavailable: request timed out", httperror.NewFromPb(ErrGRPCTimeout).Error())
 }
 
 func TestError_Status(t *testing.T) {
 	assert.Equal(t, http.StatusOK, httperror.Status(nil))
-	assert.Equal(t, http.StatusNotFound, httperror.Status(httperror.NotFound("test")))
-	assert.Equal(t, http.StatusNotFound, httperror.Status(pberror.New(codes.NotFound, "test")))
+	err1 := httperror.Status(httperror.NotFound("test"))
+	assert.Equal(t, http.StatusNotFound, err1)
+	err2 := httperror.Status(status.New(codes.NotFound, "test").Err())
+	assert.Equal(t, http.StatusNotFound, err2)
 	assert.Equal(t, http.StatusInternalServerError, httperror.Status(errors.New("test")))
 }
+
+func TestError_Is(t *testing.T) {
+	err1 := httperror.NotFound("test")
+	err2 := status.New(codes.NotFound, "test").Err()
+	err3 := httperror.NotFound("test").WithCause(err2)
+	assert.False(t, err1.Is(err2))
+	assert.True(t, err1.Is(err3))
+
+	assert.EqualError(t, err3.Cause(), "rpc error: code = NotFound desc = test")
+}
+
+func TestError_Wrap(t *testing.T) {
+	werr1 := httperror.Wrap(errors.New("no rows"), "wrapped")
+	assert.EqualError(t, werr1, "unexpected: wrapped")
+
+	werr2 := httperror.Wrap(errors.New("no rows in result set"), "wrapped")
+	assert.EqualError(t, werr2, "not_found: wrapped")
+
+	werr3 := httperror.Wrap(werr2, "wrapped2")
+	assert.EqualError(t, werr3, "not_found: wrapped2")
+	assert.EqualError(t, werr3.Unwrap(), "no rows in result set")
+
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	assert.NotEmpty(t, cid)
+
+	werr4 := httperror.WrapWithCtx(ctx, werr3, "wrapped3")
+	assert.EqualError(t, werr4, fmt.Sprintf("request %s: not_found: wrapped3", cid))
+	assert.EqualError(t, werr4.Unwrap(), "no rows in result set")
+}
+
+func TestGRPCError(t *testing.T) {
+	e1 := status.New(codes.PermissionDenied, "permission denied").Err()
+	e2 := ErrGRPCPermissionDenied
+	e3 := ErrGRPCTimeout
+
+	require.Equal(t, e1.Error(), e2.Error())
+	assert.NotEqual(t, e1.Error(), e3.Error())
+
+	_, ok := status.FromError(e1)
+	assert.True(t, ok)
+
+	ne := httperror.NewGrpcFromCtx(context.Background(), codes.Unavailable, "some error")
+	ev4, ok := status.FromError(ne)
+	assert.True(t, ok)
+	assert.Equal(t, codes.Unavailable, ev4.Code())
+	rs := ne.GRPCStatus()
+	assert.Equal(t, "rpc error: code = Unavailable desc = some error", rs.String())
+	rse := rs.Err()
+	assert.Equal(t, codes.Unavailable, httperror.GRPCCode(rse))
+	assert.Equal(t, "some error", httperror.GRPCMessage(rse))
+
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	assert.NotEmpty(t, cid)
+	ne2 := httperror.NewGrpcFromCtx(ctx, codes.Unavailable, "some error")
+	assert.Equal(t, fmt.Sprintf("request %s: unavailable: some error", cid), ne2.Error())
+	assert.Equal(t, cid, httperror.CorrelationID(ne2))
+	rs = ne2.GRPCStatus()
+	assert.Equal(t, "rpc error: code = Unavailable desc = some error", rs.String())
+
+	ne = httperror.NewGrpc(codes.Unavailable, "some error")
+	ev4, ok = status.FromError(ne)
+	assert.True(t, ok)
+	assert.Equal(t, codes.Unavailable, ev4.Code())
+}
+
+// grpc error
+var (
+	ErrGRPCTimeout          = status.New(codes.Unavailable, "request timed out").Err()
+	ErrGRPCPermissionDenied = status.New(codes.PermissionDenied, "permission denied").Err()
+	ErrGRPCInvalidArgument  = status.New(codes.InvalidArgument, "invalid argument").Err()
+)

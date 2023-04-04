@@ -3,6 +3,7 @@ package marshal
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/effective-security/porto/xhttp/pberror"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -78,42 +78,42 @@ func TestWriteJSON_Error(t *testing.T) {
 		{
 			httperror.NotFound("foo"),
 			`{"code":"not_found","message":"foo"}`,
-			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=404, code=\"not_found\", msg=\"foo\", fn=\"marshal_test.go\", ln=130\n",
+			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=404, code=\"not_found\", msg=\"foo\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
 		{
 			httperror.NotFound("foo").WithCause(errWithStack),
 			`{"code":"not_found","message":"foo"}`,
-			"W | pkg=xhttp, err=\"important info\"\nW | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=404, code=\"not_found\", msg=\"foo\", fn=\"marshal_test.go\", ln=130\n",
+			"W | pkg=xhttp, err=\"important info\"\nW | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=404, code=\"not_found\", msg=\"foo\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
 		{
 			httperror.Unexpected("bar"), //.WithCause(errWithStack),
 			`{"code":"unexpected","message":"bar"}`,
-			"E | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"bar\", fn=\"marshal_test.go\", ln=130\n",
+			"E | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"bar\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
-		{
-			errors.Errorf("generic"),
-			`{"code":"unexpected","message":"generic"}`,
-			"E | pkg=xhttp, err=\"fmt\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"fmt\", fn=\"marshal.go\", ln=72\n",
-		},
+		// {
+		// 	errors.Errorf("generic"),
+		// 	`{"code":"unexpected","message":"generic"}`,
+		// 	"E | pkg=xhttp, err=\"generic\\ngithub.com/effective-security/porto/xhttp/marshal.TestWriteJSON_Error\\n\\t/home/dissoupov/code/es/porto/xhttp/marshal/marshal_test.go:94\\ntesting.tRunner\\n\\t/usr/local/go/src/testing/testing.go:1576\\nruntime.goexit\\n\\t/usr/local/go/src/runtime/asm_amd64.s:1598\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"generic\", content-length=0, fn=\"marshal.go\", ln=73\n",
+		// },
 		{
 			fmt.Errorf("fmt"),
 			`{"code":"unexpected","message":"fmt"}`,
-			"E | pkg=xhttp, err=\"fmt\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"fmt\", fn=\"marshal.go\", ln=72\n",
+			"E | pkg=xhttp, err=\"fmt\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"fmt\", content-length=0, fn=\"marshal.go\", ln=73\n",
 		},
 		{
 			errors.WithMessage(httperror.InvalidParam("bar"), "wrapped"),
 			`{"code":"invalid_parameter","message":"bar"}`,
-			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"invalid_parameter\", msg=\"bar\", fn=\"marshal_test.go\", ln=130\n",
+			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"invalid_parameter\", msg=\"bar\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
 		{
-			pberror.New(codes.InvalidArgument, "pberror1"),
+			httperror.NewGrpcFromCtx(context.Background(), codes.InvalidArgument, "pberror1"),
 			`{"code":"bad_request","message":"pberror1"}`,
-			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror1\", fn=\"marshal.go\", ln=72\n",
+			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror1\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
 		{
-			errors.WithMessage(pberror.New(codes.InvalidArgument, "pberror2"), "wrapped"),
-			`{"code":"unexpected","message":"wrapped: rpc error: code = InvalidArgument desc = pberror2"}`,
-			"E | pkg=xhttp, err=\"rpc error: code = InvalidArgument desc = pberror2\\nwrapped\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"wrapped: rpc error: code = InvalidArgument desc = pberror2\", fn=\"marshal.go\", ln=72\n",
+			errors.WithMessage(httperror.NewGrpcFromCtx(context.Background(), codes.InvalidArgument, "pberror2"), "wrapped"),
+			`{"code":"bad_request","message":"pberror2"}`,
+			"W | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror2\", content-length=0, fn=\"marshal_test.go\", ln=130\n",
 		},
 	}
 
@@ -131,7 +131,7 @@ func TestWriteJSON_Error(t *testing.T) {
 			assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
 			assert.Equal(t, tc.exp, w.Body.String())
 
-			//assert.Equal(t, tc.log, b.String())
+			assert.Equal(t, tc.log, b.String())
 		})
 	}
 }

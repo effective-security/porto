@@ -53,6 +53,7 @@ func Test_StatusCodes(t *testing.T) {
 		{httperror.AccountNotFound("1"), http.StatusForbidden, "account_not_found: 1"},
 		{httperror.NotReady("1"), http.StatusServiceUnavailable, "not_ready: 1"},
 		{httperror.Conflict("1"), http.StatusConflict, "conflict: 1"},
+		{httperror.Timeout("1"), http.StatusRequestTimeout, "timeout: 1"},
 	}
 	for _, tc := range tcases {
 		t.Run(tc.httpErr.Code, func(t *testing.T) {
