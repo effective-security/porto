@@ -69,7 +69,8 @@ func (d *disco) Find(server string, v interface{}) error {
 	}
 
 	for _, reg := range d.reg {
-		if reg.Type.Implements(rv.Type()) && reg.ServerName == server {
+		if reg.Type.Implements(rv.Type()) &&
+			(server == "" || server == reg.ServerName) {
 			rv.Set(reflect.ValueOf(reg.Service))
 			return nil
 		}
