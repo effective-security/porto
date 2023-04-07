@@ -220,15 +220,22 @@ func Timeout(msgFormat string, vals ...interface{}) *Error {
 // Wrap returns Error instance with NotFound, Timeout or Internal code,
 // depending on the error from DB
 func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
-	if unwrapped := goerrors.Unwrap(err); unwrapped != nil {
-		err = unwrapped
+	e := &Error{}
+	if goerrors.As(err, &e) {
+		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
+	}
+	me := &ManyError{}
+	if goerrors.As(err, &me) {
+		return New(me.HTTPStatus, me.Code, msgFormat, vals...).WithCause(me.cause)
 	}
 
-	switch e := err.(type) {
-	case *Error:
-		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
-	case *ManyError:
-		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
+	if se, ok := err.(interface {
+		GRPCStatus() *status.Status
+	}); ok {
+		st := se.GRPCStatus()
+		code := st.Code()
+		status := codeStatus[code]
+		return New(status, httpCode[status], msgFormat, vals...).WithCause(err)
 	}
 
 	if xdb.IsNotFoundError(err) {

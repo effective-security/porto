@@ -286,5 +286,5 @@ var statusCode = map[string]codes.Code{
 	CodeRequestTooLarge:         codes.InvalidArgument,
 	CodeTooEarly:                codes.ResourceExhausted,
 	CodeUnauthorized:            codes.Unauthenticated,
-	CodeUnexpected:              codes.Unknown,
+	CodeUnexpected:              codes.Internal,
 }

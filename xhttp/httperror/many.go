@@ -8,6 +8,7 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/ugorji/go/codec"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -15,6 +16,8 @@ import (
 type ManyError struct {
 	// HTTPStatus contains the HTTP status code that should be used for this error
 	HTTPStatus int `json:"-"`
+
+	RPCStatus codes.Code `json:"-"`
 
 	// Code identifies the particular error condition [for programatic consumers]
 	Code string `json:"code,omitempty"`
@@ -76,6 +79,7 @@ func (m *ManyError) WithCause(err error) *ManyError {
 func NewMany(status int, code string, msgFormat string, vals ...interface{}) *ManyError {
 	return &ManyError{
 		HTTPStatus: status,
+		RPCStatus:  statusCode[code],
 		Code:       code,
 		Message:    fmt.Sprintf(msgFormat, vals...),
 		Errors:     make(map[string]*Error),
@@ -96,7 +100,11 @@ func (m *ManyError) Add(key string, err error) *ManyError {
 	if gErr, ok := err.(*Error); ok {
 		m.Errors[key] = gErr
 	} else {
-		m.Errors[key] = &Error{Code: CodeUnexpected, Message: err.Error(), cause: err}
+		m.Errors[key] = &Error{
+			Code:    CodeUnexpected,
+			Message: err.Error(),
+			cause:   err,
+		}
 	}
 	return m
 }
