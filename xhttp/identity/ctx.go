@@ -120,7 +120,7 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 		var err error
 		id, err = identityMapper(ctx, info.FullMethod)
 		if err != nil {
-			logger.ContextKV(ctx, xlog.DEBUG,
+			logger.ContextKV(ctx, xlog.WARNING,
 				"reason", "access_denied",
 				"method", info.FullMethod,
 				"err", err.Error())
@@ -133,7 +133,15 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 		ctx = AddToContext(ctx, NewRequestContext(id))
 		role := id.Role()
 		if role != "guest" {
-			ctx = xlog.ContextWithKV(ctx, "user", id.Subject(), "role", role)
+			var email string
+			if claims := id.Claims(); len(claims) > 0 {
+				email = claims.String("email")
+			}
+			ctx = xlog.ContextWithKV(ctx,
+				"tenant", id.Tenant(),
+				"user", id.Subject(),
+				"email", email,
+				"role", role)
 		}
 
 		return handler(ctx, req)

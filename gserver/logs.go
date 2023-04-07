@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/metricskey"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
@@ -42,25 +43,23 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	role := idx.Identity().Role()
 
 	var code codes.Code
+	var cause error
 	if err != nil {
-		switch err.(type) { //_resp := err.(type) {
-		/* TODO:
-		case GRPCError:
-			code = _resp.Code()
-		case *GRPCError:
-			code = _resp.Code()
-		*/
-		case error:
+		switch _resp := err.(type) {
+		case *httperror.Error:
+			code = _resp.RPCStatus
+			cause = _resp.Cause()
+		case *httperror.ManyError:
+			code = _resp.RPCStatus
+			cause = _resp.Cause()
+		default:
 			if s, ok := status.FromError(err); ok {
 				code = s.Code()
 			} else {
-				logger.ContextKV(ctx, xlog.ERROR, "err", err.Error())
+				code = codes.Internal
 			}
-		default:
-			logger.ContextKV(ctx, xlog.ERROR,
-				"type", reflect.TypeOf(err),
-				"err", err.Error())
 		}
+		logError(ctx, code, info.FullMethod, err, cause)
 	}
 
 	l := xlog.TRACE
@@ -74,9 +73,6 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"remote", remote,
 		"duration", duration.Milliseconds(),
 		"code", code,
-		// use and role added to ctx
-		//"role", role,
-		//"user", idx.Identity().Subject(),
 	)
 
 	codeName := code.String()
@@ -89,4 +85,37 @@ func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {
 		logger.KV(xlog.DEBUG, "method", info.FullMethod)
 		return handler(srv, ss)
 	}
+}
+
+func logError(ctx context.Context, code codes.Code, method string, err, cause error) {
+	sv := xlog.WARNING
+	typ := "API_ERROR"
+	if code == codes.Unknown || code == codes.Internal || code == codes.Unavailable {
+		sv = xlog.ERROR
+		typ = "INTERNAL_ERROR"
+	}
+
+	if cause != nil {
+		if sv == xlog.ERROR {
+			// for ERROR log with stack
+			logger.ContextKV(ctx, sv,
+				"type", typ,
+				"method", method,
+				"code", code.String(),
+				"err", cause)
+		} else {
+			logger.ContextKV(ctx, sv,
+				"type", typ,
+				"method", method,
+				"code", code.String(),
+				"err", cause.Error())
+		}
+	}
+
+	logger.ContextKV(ctx, sv,
+		"type", typ,
+		"method", method,
+		"code", code.String(),
+		"err", err.Error(),
+	)
 }

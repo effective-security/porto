@@ -259,20 +259,27 @@ func TestError_Wrap(t *testing.T) {
 	werr1 := httperror.Wrap(errors.New("no rows"), "wrapped")
 	assert.EqualError(t, werr1, "unexpected: wrapped")
 
-	werr2 := httperror.Wrap(errors.New("no rows in result set"), "wrapped")
+	werr2 := httperror.Wrap(status.New(codes.NotFound, "no rows in result set").Err(), "wrapped")
 	assert.EqualError(t, werr2, "not_found: wrapped")
 
 	werr3 := httperror.Wrap(werr2, "wrapped2")
 	assert.EqualError(t, werr3, "not_found: wrapped2")
-	assert.EqualError(t, werr3.Unwrap(), "no rows in result set")
+	assert.EqualError(t, werr3.Unwrap(), "rpc error: code = NotFound desc = no rows in result set")
+
+	many := httperror.NewMany(werr1.HTTPStatus, werr1.Code, werr1.Message).WithCause(errors.New("many cause"))
+	many.Add("werr1", werr1)
+	assert.EqualError(t, many, "unexpected: wrapped")
+	werr4 := httperror.Wrap(many, "wrappedMany")
+	assert.EqualError(t, werr4, "unexpected: wrappedMany")
+	assert.EqualError(t, werr4.Unwrap(), "many cause")
 
 	ctx := correlation.WithID(context.Background())
 	cid := correlation.ID(ctx)
 	assert.NotEmpty(t, cid)
 
-	werr4 := httperror.WrapWithCtx(ctx, werr3, "wrapped3")
+	werr4 = httperror.WrapWithCtx(ctx, werr3, "wrapped3")
 	assert.EqualError(t, werr4, fmt.Sprintf("request %s: not_found: wrapped3", cid))
-	assert.EqualError(t, werr4.Unwrap(), "no rows in result set")
+	assert.EqualError(t, werr4.Unwrap(), "rpc error: code = NotFound desc = no rows in result set")
 
 	werr5 := httperror.WrapWithCtx(ctx, nil, "wrapped nil")
 	assert.EqualError(t, werr5, fmt.Sprintf("request %s: unexpected: wrapped nil", cid))
