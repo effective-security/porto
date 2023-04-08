@@ -136,6 +136,17 @@ type HTTPClient interface {
 	DeleteRequester
 }
 
+// NonceRequester defines HTTP Nonce interface
+type NonceRequester interface {
+	WithNonceProvider(provider NonceProvider)
+}
+
+// HTTPClientWithNonce defines a HTTPClient with NonceRequester
+type HTTPClientWithNonce interface {
+	HTTPClient
+	NonceRequester
+}
+
 // ShouldRetry specifies a policy for handling retries. It is called
 // following each request with the response, error values returned by
 // the http.Client and the number of already made retries.
@@ -470,6 +481,13 @@ func (c *Client) WithDNSServer(dns string) *Client {
 		return d.DialContext(ctx, network, addr)
 	}
 	return c
+}
+
+// WithNonceProvider modifies nonce provider.
+func (c *Client) WithNonceProvider(provider NonceProvider) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c.NonceProvider = provider
 }
 
 // DefaultPolicy returns default policy
