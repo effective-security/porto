@@ -139,6 +139,8 @@ type HTTPClient interface {
 // NonceRequester defines HTTP Nonce interface
 type NonceRequester interface {
 	WithNonceProvider(provider NonceProvider)
+	// WithNonce creates nonce provider out of the given header name and path
+	WithNonce(path, headerName string)
 }
 
 // HTTPClientWithNonce defines a HTTPClient with NonceRequester
@@ -488,6 +490,16 @@ func (c *Client) WithNonceProvider(provider NonceProvider) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.NonceProvider = provider
+}
+
+// WithNonce creates default nonce provider.
+func (c *Client) WithNonce(path, headerName string) {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+
+	path = path[len(c.CurrentHost()):]
+
+	c.NonceProvider = NewNonceProvider(c, path, headerName)
 }
 
 // DefaultPolicy returns default policy
