@@ -23,9 +23,15 @@ func Test_Nonce(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
-	client.NonceProvider = NewNonceProvider(client, "/nonce", DefaultReplayNonceHeader)
+	assert.Nil(t, client.GetNonceProvider())
 
-	np := client.NonceProvider.(*nonceProvider)
+	client.WithNonce(client.CurrentHost()+"/nonce", DefaultReplayNonceHeader)
+	assert.NotNil(t, client.GetNonceProvider())
+
+	client.SetNonceProvider(client.GetNonceProvider())
+	assert.NotNil(t, client.GetNonceProvider())
+
+	np := client.nonceProvider.(*nonceProvider)
 	assert.Empty(t, np.nonces)
 
 	ctx := context.Background()

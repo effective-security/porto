@@ -138,7 +138,8 @@ type HTTPClient interface {
 
 // NonceRequester defines HTTP Nonce interface
 type NonceRequester interface {
-	WithNonceProvider(provider NonceProvider)
+	SetNonceProvider(provider NonceProvider)
+	GetNonceProvider() NonceProvider
 	// WithNonce creates nonce provider out of the given header name and path
 	WithNonce(path, headerName string)
 }
@@ -287,7 +288,7 @@ type Client struct {
 	Name             string
 	Policy           Policy // Rery policy for http requests
 	EnvAuthTokenName string
-	NonceProvider    NonceProvider
+	nonceProvider    NonceProvider
 
 	Config ClientConfig
 
@@ -485,11 +486,18 @@ func (c *Client) WithDNSServer(dns string) *Client {
 	return c
 }
 
-// WithNonceProvider modifies nonce provider.
-func (c *Client) WithNonceProvider(provider NonceProvider) {
+// SetNonceProvider modifies nonce provider.
+func (c *Client) SetNonceProvider(provider NonceProvider) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	c.NonceProvider = provider
+	c.nonceProvider = provider
+}
+
+// GetNonceProvider returns nonce provider.
+func (c *Client) GetNonceProvider() NonceProvider {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	return c.nonceProvider
 }
 
 // WithNonce creates default nonce provider.
@@ -497,9 +505,9 @@ func (c *Client) WithNonce(path, headerName string) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	path = path[len(c.CurrentHost()):]
+	path = strings.TrimPrefix(path, c.CurrentHost())
 
-	c.NonceProvider = NewNonceProvider(c, path, headerName)
+	c.nonceProvider = NewNonceProvider(c, path, headerName)
 }
 
 // DefaultPolicy returns default policy
@@ -575,8 +583,8 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 	}
 	defer resp.Body.Close()
 
-	if c.NonceProvider != nil {
-		c.NonceProvider.SetFromHeader(resp.Header)
+	if c.nonceProvider != nil {
+		c.nonceProvider.SetFromHeader(resp.Header)
 	}
 
 	return c.DecodeResponse(resp, responseBody)

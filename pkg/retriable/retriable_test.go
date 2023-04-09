@@ -774,6 +774,11 @@ func Test_DecodeResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, c)
 
+	c.WithBeforeSendRequest(func(r *http.Request) *http.Request {
+		r.Header.Set("Content-Type", "application/json")
+		return r
+	})
+
 	var body map[string]string
 	_, sc, err := c.DecodeResponse(&res, &body)
 	require.Equal(t, res.StatusCode, sc)
