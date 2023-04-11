@@ -146,6 +146,7 @@ type NonceRequester interface {
 
 // HTTPClientWithNonce defines a HTTPClient with NonceRequester
 type HTTPClientWithNonce interface {
+	GenericHTTP
 	HTTPClient
 	NonceRequester
 }
