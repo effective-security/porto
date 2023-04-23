@@ -17,11 +17,11 @@ type GenericHTTP interface {
 	// into a Go error.
 	// If configured, this call will apply retry logic.
 	//
-	// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
+	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// requestBody can be io.Reader, []byte, or an object to be JSON encoded
 	// responseBody can be io.Writer, or a struct to decode JSON into.
-	Request(ctx context.Context, method string, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	Request(ctx context.Context, method string, host string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
 
 	// RequestURL is similar to Request but uses raw URL to one host
 	RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
@@ -29,8 +29,8 @@ type GenericHTTP interface {
 	// HeadTo makes HEAD request against the specified hosts.
 	// The supplied hosts are tried in order until one succeeds.
 	//
-	// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
+	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	HeadTo(ctx context.Context, hosts []string, path string) (http.Header, int, error)
+	HeadTo(ctx context.Context, host string, path string) (http.Header, int, error)
 }
 ```

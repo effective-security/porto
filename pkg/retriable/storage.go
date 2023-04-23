@@ -34,8 +34,12 @@ type Storage struct {
 }
 
 // OpenStorage returns Storage
-func OpenStorage(folder, envAuthTokenName string) *Storage {
-	return &Storage{folder: ExpandStorageFolder(folder), envAuthTokenName: envAuthTokenName}
+func OpenStorage(baseFolder, host, envAuthTokenName string) *Storage {
+	folder := ExpandFolder(baseFolder)
+	if host != "" {
+		folder = path.Join(folder, HostFolderName(host))
+	}
+	return &Storage{folder: folder, envAuthTokenName: envAuthTokenName}
 }
 
 // Clean removes all stored files
@@ -135,8 +139,8 @@ func ParseAuthToken(rawToken string) (*AuthToken, error) {
 	return t, nil
 }
 
-// ExpandStorageFolder returns expanded StorageFolder
-func ExpandStorageFolder(dir string) string {
+// ExpandFolder returns expanded StorageFolder
+func ExpandFolder(dir string) string {
 	if dir == "" {
 		dirname, _ := os.UserHomeDir()
 		// returns default
