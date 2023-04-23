@@ -279,7 +279,7 @@ func (s *testSuite) Test_ServerWithServicesOverHTTPS() {
 
 		client, err := retriable.New(
 			retriable.ClientConfig{
-				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+				Host: fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port()),
 			},
 			retriable.WithTLS(clientTls))
 		require.NoError(t, err)
@@ -304,20 +304,20 @@ func (s *testSuite) Test_ServerWithServicesOverHTTPS() {
 
 		client, err := retriable.New(
 			retriable.ClientConfig{
-				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+				Host: fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port()),
 			},
 			retriable.WithTLS(clientTls))
 		require.NoError(t, err)
 		require.NotNil(t, client)
 
-		hosts := []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())}
+		host := fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())
 
 		w := bytes.NewBuffer([]byte{})
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
-		_, _, err = client.Request(ctx, http.MethodGet, hosts, "/v1/test", nil, w)
+		_, _, err = client.Request(ctx, http.MethodGet, host, "/v1/test", nil, w)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
 	})
@@ -373,7 +373,7 @@ func (s *testSuite) Test_UntrustedServerWithServicesOverHTTPS() {
 
 		client, err := retriable.New(
 			retriable.ClientConfig{
-				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+				Host: fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port()),
 			},
 			retriable.WithTLS(clientTls))
 		require.NoError(t, err)
@@ -398,7 +398,7 @@ func (s *testSuite) Test_UntrustedServerWithServicesOverHTTPS() {
 
 		client, err := retriable.New(
 			retriable.ClientConfig{
-				Hosts: []string{fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port())},
+				Host: fmt.Sprintf("%s://localhost:%s", server.Protocol(), server.Port()),
 			},
 			retriable.WithTLS(clientTls))
 		require.NoError(t, err)

@@ -65,7 +65,7 @@ func Test_Load(t *testing.T) {
 }
 
 func TestStorageKeys(t *testing.T) {
-	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
 	defer storage.Clean()
 
 	assert.Panics(t, func() {
@@ -107,11 +107,11 @@ func TestWithAuthorization(t *testing.T) {
 	require.NoError(t, err)
 
 	client, err := New(ClientConfig{
-		Hosts: []string{"https://notused"},
+		Host: "https://notused",
 	})
 	require.NoError(t, err)
 
-	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
 	defer storage.Clean()
 
 	fn, err := storage.SaveKey(dk)
@@ -153,4 +153,11 @@ func TestWithAuthorization(t *testing.T) {
 		err = client.WithAuthorization(storage)
 		assert.EqualError(t, err, "authorization: token expired")
 	})
+}
+
+func TestHostFolderName(t *testing.T) {
+	assert.Equal(t, "localhost_4000", HostFolderName("https://localhost:4000"))
+	assert.Equal(t, "localhost_4000", HostFolderName("s://localhost:4000"))
+	assert.Equal(t, "localhost_4000", HostFolderName("://localhost:4000"))
+	assert.Equal(t, "localhost_4000", HostFolderName("//localhost:4000"))
 }

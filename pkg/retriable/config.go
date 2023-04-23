@@ -22,7 +22,10 @@ type Config struct {
 
 // ClientConfig of the client, per specific host
 type ClientConfig struct {
-	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
+
+	// LegacyHosts are for compat with previous config
+	LegacyHosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 
 	// TLS provides TLS config for the client
 	TLS *TLSInfo `json:"tls,omitempty" yaml:"tls,omitempty"`
@@ -30,7 +33,7 @@ type ClientConfig struct {
 	// Request provides Request Policy
 	Request *RequestPolicy `json:"request,omitempty" yaml:"request,omitempty"`
 
-	// StorageFolder for keys and token.
+	// StorageFolder specifies the root folder for keys and token.
 	StorageFolder string `json:"storage_folder,omitempty" yaml:"storage_folder,omitempty"`
 
 	// EnvNameAuthToken specifies os.Env name for the Authorization token.
@@ -39,7 +42,7 @@ type ClientConfig struct {
 }
 
 func (c *ClientConfig) Storage() *Storage {
-	return OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
+	return OpenStorage(c.StorageFolder, c.Host, c.EnvAuthTokenName)
 }
 
 // RequestPolicy contains configuration info for Request policy
@@ -70,11 +73,14 @@ type Factory struct {
 func NewFactory(cfg Config) (*Factory, error) {
 	perHost := map[string]*ClientConfig{}
 	for _, c := range cfg.Clients {
-		for _, host := range c.Hosts {
+		for _, host := range c.LegacyHosts {
 			if perHost[host] != nil {
 				return nil, errors.Errorf("multiple entries for host: %s", host)
 			}
 			perHost[host] = c
+		}
+		if c.Host != "" {
+			perHost[c.Host] = c
 		}
 	}
 
@@ -125,9 +131,10 @@ func (f *Factory) ForHost(hostname string) (*Client, error) {
 		return New(*cfg)
 	}
 	logger.KV(xlog.DEBUG, "reason", "config_not_found", "host", hostname)
-	return New(ClientConfig{Hosts: []string{hostname}})
+	return Default(hostname)
 }
 
+// New returns new Client
 func NewForHost(cfg, host string) (*Client, error) {
 	var rc *Client
 	f, err := LoadFactory(cfg)
@@ -138,9 +145,7 @@ func NewForHost(cfg, host string) (*Client, error) {
 		}
 	}
 	if rc == nil {
-		rc, err = New(ClientConfig{
-			Hosts: []string{host}},
-		)
+		rc, err = Default(host)
 		if err != nil {
 			return nil, errors.WithMessage(err, "unable to create client")
 		}
@@ -211,4 +216,15 @@ func getValue(vals url.Values, name string) string {
 		return ""
 	}
 	return v[0]
+}
+
+// HostFolderName returns a folder name for a host
+func HostFolderName(host string) string {
+	u, err := url.Parse(host)
+	if err == nil {
+		host = u.Host
+	}
+
+	s := strings.NewReplacer(":", "_", "/", string(os.PathSeparator)).Replace(host)
+	return strings.Trim(s, "_:/")
 }

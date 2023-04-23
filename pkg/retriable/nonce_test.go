@@ -17,9 +17,7 @@ func Test_Nonce(t *testing.T) {
 	server := httptest.NewServer(h)
 	defer server.Close()
 
-	client, err := New(ClientConfig{
-		Hosts: []string{server.URL},
-	})
+	client, err := Default(server.URL)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 

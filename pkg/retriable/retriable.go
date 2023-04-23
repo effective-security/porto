@@ -61,11 +61,11 @@ type GenericHTTP interface {
 	// into a Go error.
 	// If configured, this call will apply retry logic.
 	//
-	// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
+	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// requestBody can be io.Reader, []byte, or an object to be JSON encoded
 	// responseBody can be io.Writer, or a struct to decode JSON into.
-	Request(ctx context.Context, method string, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	Request(ctx context.Context, method string, host string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
 
 	// RequestURL is similar to Request but uses raw URL to one host
 	RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
@@ -73,9 +73,9 @@ type GenericHTTP interface {
 	// HeadTo makes HEAD request against the specified hosts.
 	// The supplied hosts are tried in order until one succeeds.
 	//
-	// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
+	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	HeadTo(ctx context.Context, hosts []string, path string) (http.Header, int, error)
+	HeadTo(ctx context.Context, host string, path string) (http.Header, int, error)
 }
 
 // HeadRequester defines HTTP Head interface
@@ -266,13 +266,12 @@ func WithDNSServer(dns string) ClientOption {
 	})
 }
 
-// WithHosts is a ClientOption that allows to set
-// the hosts list.
+// WithHost is a ClientOption that allows to set the host list.
 //
-//	retriable.New(retriable.WithHosts(hosts))
-func WithHosts(hosts []string) ClientOption {
+//	retriable.New(retriable.WithHost(host))
+func WithHost(host string) ClientOption {
 	return optionFunc(func(c *Client) {
-		c.WithHosts(hosts)
+		c.WithHost(host)
 	})
 }
 
@@ -295,16 +294,26 @@ type Client struct {
 
 	lock       sync.RWMutex
 	httpClient *http.Client // Internal HTTP client.
-	hosts      []string
+	host       string
 	headers    map[string]string
 	beforeSend BeforeSendRequest
 	signer     dpop.Signer
 }
 
+// Default creates a default Client for the given host
+func Default(host string) (*Client, error) {
+	return New(ClientConfig{Host: host})
+}
+
 // New creates a new Client
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
-	dopts := []ClientOption{
-		WithHosts(cfg.Hosts),
+	dopts := []ClientOption{}
+
+	if cfg.Host != "" {
+		dopts = append(dopts, WithHost(cfg.Host))
+	} else if len(cfg.LegacyHosts) > 0 {
+		// use legacy hosts if host is not specified
+		dopts = append(dopts, WithHost(cfg.LegacyHosts[0]))
 	}
 
 	if cfg.TLS != nil {
@@ -352,10 +361,7 @@ func (c *Client) Storage() *Storage {
 func (c *Client) CurrentHost() string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	if len(c.hosts) == 0 {
-		return ""
-	}
-	return c.hosts[0]
+	return c.host
 }
 
 // WithHeaders adds additional headers to the request
@@ -402,11 +408,11 @@ func (c *Client) WithPolicy(policy Policy) *Client {
 	return c
 }
 
-// WithHosts sets the hosts list.
-func (c *Client) WithHosts(hosts []string) *Client {
+// WithHost sets the host
+func (c *Client) WithHost(host string) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	c.hosts = hosts
+	c.host = host
 	return c
 }
 
@@ -538,7 +544,7 @@ func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestB
 	}
 	host := u.Scheme + "://" + u.Host
 	path := rawURL[len(host):]
-	return c.Request(ctx, method, []string{host}, path, requestBody, responseBody)
+	return c.Request(ctx, method, host, path, requestBody, responseBody)
 }
 
 // Request sends request to the specified hosts.
@@ -553,7 +559,7 @@ func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestB
 // path should be an absolute URI path, i.e. /foo/bar/baz
 // requestBody can be io.Reader, []byte, or an object to be JSON encoded
 // responseBody can be io.Writer, or a struct to decode JSON into.
-func (c *Client) Request(ctx context.Context, method string, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+func (c *Client) Request(ctx context.Context, method string, host string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
 	var body io.ReadSeeker
 
 	if requestBody != nil {
@@ -578,7 +584,7 @@ func (c *Client) Request(ctx context.Context, method string, hosts []string, pat
 			body = bytes.NewReader(js)
 		}
 	}
-	resp, err := c.executeRequest(ctx, method, hosts, path, body)
+	resp, err := c.executeRequest(ctx, method, host, path, body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -607,74 +613,42 @@ func (c *Client) ensureContext(ctx context.Context, httpMethod, path string) (co
 	return ctx, noop
 }
 
-func (c *Client) executeRequest(ctx context.Context, httpMethod string, hosts []string, path string, body io.ReadSeeker) (*http.Response, error) {
-	if len(hosts) == 0 {
-		return nil, errors.Errorf("invalid parameter: hosts")
+func (c *Client) executeRequest(ctx context.Context, httpMethod string, host string, path string, body io.ReadSeeker) (*http.Response, error) {
+	if len(host) == 0 {
+		return nil, errors.Errorf("invalid parameter: host")
 	}
 
-	var many *httperror.ManyError
 	var err error
 	var resp *http.Response
 
 	// NOTE: do not `defer cancel()` context as it will cause error
 	// when reading the body
 	ctx, _ = c.ensureContext(ctx, httpMethod, path)
-
 	ctx = correlation.WithID(ctx)
 
-	for i, host := range hosts {
-		resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
-		if err != nil {
-			logger.ContextKV(ctx, xlog.DEBUG,
-				"client", c.Name,
-				"method", httpMethod,
-				"host", host,
-				"path", path,
-				"err", err)
-		} else {
-			logger.ContextKV(ctx, xlog.DEBUG,
-				"client", c.Name,
-				"method", httpMethod,
-				"host", host,
-				"path", path,
-				"status", resp.StatusCode)
-		}
-
-		if !c.shouldTryDifferentHost(resp, err) {
-			break
-		}
-
-		// either success or error
-		if err != nil {
-			many = many.Add(host, err)
-		} else if resp != nil {
-			if resp.StatusCode >= 400 {
-				many = many.Add(host, httperror.New(resp.StatusCode, "reques_failed", "%s %s %s %s",
-					httpMethod, host, path, resp.Status))
-			}
-			// if not the last host, then close it
-			if i < len(hosts)-1 {
-				resp.Body.Close()
-				resp = nil
-			}
-		}
-
-		// logger.KV(xlog.WARNING,
-		// 	"client", c.Name,
-		// 	"host", host,
-		// 	"err", many.Error())
-
-		// rewind the reader
-		if body != nil {
-			_, _ = body.Seek(0, 0)
-		}
+	resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
+	if err != nil {
+		logger.ContextKV(ctx, xlog.DEBUG,
+			"client", c.Name,
+			"method", httpMethod,
+			"host", host,
+			"path", path,
+			"err", err)
+	} else {
+		logger.ContextKV(ctx, xlog.DEBUG,
+			"client", c.Name,
+			"method", httpMethod,
+			"host", host,
+			"path", path,
+			"status", resp.StatusCode)
 	}
 
-	if resp != nil {
-		return resp, nil
+	// either success or error
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, many
+	return resp, nil
 }
 
 // doHTTP wraps calling an HTTP method with retries.
@@ -787,29 +761,6 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	debugRequest(req.Request, err != nil)
 
 	return resp, err
-}
-
-// shouldTryDifferentHost returns true if a connection error occurred
-// or response has a specific HTTP status:
-// - StatusInternalServerError
-// - StatusServiceUnavailable
-// - StatusGatewayTimeout
-// - StatusTooManyRequests
-// In that case, the caller should try to send the same request to a different host.
-func (c *Client) shouldTryDifferentHost(resp *http.Response, err error) bool {
-	if err != nil {
-		return true
-	}
-	if resp == nil {
-		return true
-	}
-	if resp.StatusCode == http.StatusInternalServerError ||
-		resp.StatusCode == http.StatusServiceUnavailable ||
-		resp.StatusCode == http.StatusGatewayTimeout ||
-		resp.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	return false
 }
 
 // consumeResponseBody is a helper to safely consume the remaining response body

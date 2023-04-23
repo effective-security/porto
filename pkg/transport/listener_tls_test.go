@@ -105,7 +105,7 @@ func TestNewTLSListener_Trusted(t *testing.T) {
 
 	client, err := retriable.New(
 		retriable.ClientConfig{
-			Hosts: []string{"https://" + tlsln.Addr().String()},
+			Host: "https://" + tlsln.Addr().String(),
 		},
 		retriable.WithTLS(clientTLS),
 	)
@@ -172,7 +172,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 
 	client, err := retriable.New(
 		retriable.ClientConfig{
-			Hosts: []string{"https://" + tlsln.Addr().String()},
+			Host: "https://" + tlsln.Addr().String(),
 		},
 		retriable.WithTLS(clientTLS),
 		retriable.WithTimeout(1*time.Second),

@@ -62,7 +62,7 @@ type Client struct {
 // NewFromURL creates a new client from a URL.
 func NewFromURL(url string) (*Client, error) {
 	return New(&Config{
-		Endpoints: []string{url},
+		Endpoint: url,
 	})
 }
 
@@ -92,7 +92,7 @@ func (c *Client) Opts() []grpc.CallOption {
 
 func newClient(cfg *Config) (*Client, error) {
 
-	if cfg == nil || len(cfg.Endpoints) < 1 {
+	if cfg == nil || len(cfg.Endpoint) == 0 {
 		return nil, errors.Errorf("at least one Endpoint must is required in client config")
 	}
 
@@ -111,7 +111,7 @@ func newClient(cfg *Config) (*Client, error) {
 		callOpts: defaultCallOpts,
 	}
 
-	dialEndpoint := cfg.Endpoints[0]
+	dialEndpoint := cfg.Endpoint
 
 	var dopts []grpc.DialOption
 	var creds credentials.TransportCredentials

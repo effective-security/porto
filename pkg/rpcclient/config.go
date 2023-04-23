@@ -11,8 +11,8 @@ import (
 
 // Config for the client
 type Config struct {
-	// Endpoints is a list of URLs.
-	Endpoints []string
+	// Endpoint of the server
+	Endpoint string
 
 	// DialTimeout is the timeout for failing to establish a connection.
 	DialTimeout time.Duration
@@ -48,5 +48,5 @@ func (c *Config) LoadAuthToken() (*retriable.AuthToken, error) {
 
 // Storage returns the current storage
 func (c *Config) Storage() *retriable.Storage {
-	return retriable.OpenStorage(c.StorageFolder, c.EnvAuthTokenName)
+	return retriable.OpenStorage(c.StorageFolder, c.Endpoint, c.EnvAuthTokenName)
 }
