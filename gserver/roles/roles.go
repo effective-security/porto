@@ -411,9 +411,10 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		}
 		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
 		claims := map[string]interface{}{
+			"role":   role,
 			"sub":    peer.Subject.String(),
 			"iss":    peer.Issuer.String(),
-			"spiffe": spiffe,
+			"spiffe": strings.TrimPrefix(spiffe, "spiffe://"),
 		}
 		if len(peer.EmailAddresses) > 0 {
 			claims["email"] = peer.EmailAddresses[0]

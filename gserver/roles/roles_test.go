@@ -460,7 +460,8 @@ func TestTLSOnly(t *testing.T) {
 		state := &tls.ConnectionState{
 			PeerCertificates: []*x509.Certificate{
 				{
-					URIs: []*url.URL{u},
+					URIs:           []*url.URL{u},
+					EmailAddresses: []string{"client@trusty.com"},
 				},
 			},
 		}
@@ -471,6 +472,10 @@ func TestTLSOnly(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		claims := id.Claims()
+		assert.Equal(t, "trusty-client", claims["role"])
+		assert.Equal(t, "trusty/client", claims["spiffe"])
+		assert.Equal(t, "client@trusty.com", claims["email"])
 
 		//
 		// gRPC
@@ -480,6 +485,10 @@ func TestTLSOnly(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		claims = id.Claims()
+		assert.Equal(t, "trusty-client", claims["role"])
+		assert.Equal(t, "trusty/client", claims["spiffe"])
+		assert.Equal(t, "client@trusty.com", claims["email"])
 	})
 
 	t.Run("tls:invalid", func(t *testing.T) {
@@ -510,7 +519,6 @@ func TestTLSOnly(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "guest", id.Role())
 	})
-
 }
 
 func createPeerContext(ctx context.Context, TLS *tls.ConnectionState) context.Context {
