@@ -336,10 +336,10 @@ func TestConfig_checkAccess_defaultMapper(t *testing.T) {
 
 	c.Allow("/foo", "bob")
 	r, _ := http.NewRequest(http.MethodGet, "/foo", nil)
-	assert.EqualError(t, c.checkAccess(r), "unknown:guest not allowed")
+	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
 
 	r, _ = http.NewRequest(http.MethodGet, "*", nil)
-	assert.EqualError(t, c.checkAccess(r), "unknown:guest not allowed")
+	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
 }
 
 func TestConfig_checkAccess_noTLS(t *testing.T) {
@@ -399,11 +399,11 @@ func TestConfig_Handler(t *testing.T) {
 		} else {
 			assert.Equal(t, http.StatusUnauthorized, w.Code, "Request to %v shouldn't be authorized", path)
 
-			ct := w.HeaderMap.Get("Content-Type")
+			ct := w.Header().Get("Content-Type")
 			assert.Equal(t, header.ApplicationJSON, ct, "Unauthorized response should have an application/json contentType")
 
 			body := w.Body.String()
-			assert.JSONEq(t, `{"code":"unauthorized", "message":"test:bob not allowed"}`, body)
+			assert.JSONEq(t, `{"code":"unauthorized", "message":"bob role not allowed"}`, body)
 		}
 	}
 	testHandler("/who", true)
@@ -443,7 +443,7 @@ func TestNewUnaryInterceptor(t *testing.T) {
 	}
 	_, err = unary(context.Background(), nil, si, handler)
 	require.Error(t, err)
-	assert.Equal(t, `rpc error: code = PermissionDenied desc = unknown:guest not allowed`, err.Error())
+	assert.Equal(t, `unauthorized: guest role not allowed`, err.Error())
 }
 
 func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
