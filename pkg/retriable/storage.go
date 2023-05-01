@@ -186,7 +186,8 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		logger.KV(xlog.DEBUG, "folder", c.folder, "err", err.Error())
+		//return nil, err
 	}
 
 	return list, nil

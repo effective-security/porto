@@ -336,10 +336,10 @@ func TestConfig_checkAccess_defaultMapper(t *testing.T) {
 
 	c.Allow("/foo", "bob")
 	r, _ := http.NewRequest(http.MethodGet, "/foo", nil)
-	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
+	assert.EqualError(t, c.checkAccess(r), "unauthorized: guest role not allowed")
 
 	r, _ = http.NewRequest(http.MethodGet, "*", nil)
-	assert.EqualError(t, c.checkAccess(r), "guest role not allowed")
+	assert.EqualError(t, c.checkAccess(r), "unauthorized: guest role not allowed")
 }
 
 func TestConfig_checkAccess_noTLS(t *testing.T) {
@@ -403,7 +403,7 @@ func TestConfig_Handler(t *testing.T) {
 			assert.Equal(t, header.ApplicationJSON, ct, "Unauthorized response should have an application/json contentType")
 
 			body := w.Body.String()
-			assert.JSONEq(t, `{"code":"unauthorized", "message":"bob role not allowed"}`, body)
+			assert.JSONEq(t, `{"code":"unauthorized", "message":"unauthorized: bob role not allowed"}`, body)
 		}
 	}
 	testHandler("/who", true)
