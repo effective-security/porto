@@ -60,15 +60,15 @@ type Client struct {
 }
 
 // NewFromURL creates a new client from a URL.
-func NewFromURL(url string) (*Client, error) {
+func NewFromURL(url string, ignoreAccessTokenError bool) (*Client, error) {
 	return New(&Config{
 		Endpoint: url,
-	})
+	}, ignoreAccessTokenError)
 }
 
 // New creates a new client from a given configuration.
-func New(cfg *Config) (*Client, error) {
-	return newClient(cfg)
+func New(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
+	return newClient(cfg, ignoreAccessTokenError)
 }
 
 // Close shuts down the client's connections.
@@ -90,10 +90,9 @@ func (c *Client) Opts() []grpc.CallOption {
 	return c.callOpts
 }
 
-func newClient(cfg *Config) (*Client, error) {
-
+func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 	if cfg == nil || len(cfg.Endpoint) == 0 {
-		return nil, errors.Errorf("at least one Endpoint must is required in client config")
+		return nil, errors.Errorf("endpoint is required in client config")
 	}
 
 	// use a temporary skeleton client to bootstrap first connection
@@ -122,26 +121,32 @@ func newClient(cfg *Config) (*Client, error) {
 		creds = bundle.TransportCredentials()
 
 		at, err := cfg.LoadAuthToken()
+		if err != nil && !ignoreAccessTokenError {
+			return nil, errors.WithMessage(err, "failed to load access token")
+		}
 		if err == nil {
 			if at.Expired() {
-				return nil, errors.Errorf("authorization: token expired")
-			}
-			// grpc: the credentials require transport level security
-			token := at.AccessToken
-			typ := slices.StringsCoalesce(at.TokenType, "Bearer")
-			if at.DpopJkt != "" {
-				k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
-				if err != nil {
-					return nil, errors.WithMessage(err, "unable to load key for DPoP")
+				if !ignoreAccessTokenError {
+					return nil, errors.Errorf("authorization: token expired")
 				}
-				typ = "DPoP"
-				signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
-				if err != nil {
-					return nil, errors.WithMessage(err, "unable to create DPoP signer")
+			} else {
+				// grpc: the credentials require transport level security
+				token := at.AccessToken
+				typ := slices.StringsCoalesce(at.TokenType, "Bearer")
+				if at.DpopJkt != "" {
+					k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
+					if err != nil {
+						return nil, errors.WithMessage(err, "unable to load key for DPoP")
+					}
+					typ = "DPoP"
+					signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
+					if err != nil {
+						return nil, errors.WithMessage(err, "unable to create DPoP signer")
+					}
+					bundle.WithDPoP(signer)
 				}
-				bundle.WithDPoP(signer)
+				bundle.UpdateAuthToken(typ, token)
 			}
-			bundle.UpdateAuthToken(typ, token)
 		}
 
 		dopts = append(dopts, grpc.WithPerRPCCredentials(bundle.PerRPCCredentials()))
