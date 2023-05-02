@@ -10,16 +10,16 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	_, err := rpcclient.New(&rpcclient.Config{})
-	require.Error(t, err)
-	assert.Equal(t, "at least one Endpoint must is required in client config", err.Error())
+	_, err := rpcclient.New(&rpcclient.Config{}, true)
+	assert.EqualError(t, err, "endpoint is required in client config")
 
 	//serv := grpc.NewServer()
 
 	lis, err := net.Listen("tcp", "localhost:0")
 	require.NoError(t, err)
+	defer lis.Close()
 
-	client, err := rpcclient.NewFromURL(lis.Addr().String())
+	client, err := rpcclient.NewFromURL(lis.Addr().String(), true)
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, client.Opts())
