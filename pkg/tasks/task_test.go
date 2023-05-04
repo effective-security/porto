@@ -1,7 +1,9 @@
 package tasks
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -290,4 +292,43 @@ func Test_NewTask_panic(t *testing.T) {
 	require.Panics(t, func() {
 		NewTaskDaily(0, -1)
 	})
+}
+
+func Test_TaskPanicCatch(t *testing.T) {
+	job1 := NewTaskAtIntervals(1, Minutes).Do("panicTask", panicTask).(*task)
+	executed := job1.Run()
+	assert.True(t, executed, "should be able to run")
+	assert.False(t, job1.running)
+}
+
+func panicTask() {
+	logger.Panic("TEST: something went wrong", errors.New("test panic"))
+}
+
+func Test_TaskLongTime(t *testing.T) {
+	job1 := NewTaskAtIntervals(1, Seconds).Do("longTask", longTask).(*task)
+
+	var wg sync.WaitGroup
+
+	executed := 0
+	skipped := 0
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if job1.Run() {
+				executed++
+			} else {
+				skipped++
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, 1, executed)
+	assert.Equal(t, 9, skipped)
+}
+
+func longTask() {
+	logger.Info("TEST: slow task started")
+	time.Sleep(3 * time.Second)
 }
