@@ -100,8 +100,6 @@ func (s *scheduler) getRunnableTasks() []Task {
 	for _, j := range s.tasks {
 		if j.ShouldRun() {
 			runnable = append(runnable, j)
-		} else {
-			break
 		}
 	}
 	return runnable
