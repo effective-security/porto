@@ -306,13 +306,14 @@ func panicTask() {
 }
 
 func Test_TaskLongTime(t *testing.T) {
-	job1 := NewTaskAtIntervals(1, Seconds).Do("longTask", longTask).(*task)
+	job1 := NewTaskAtIntervals(1, Seconds).Do("longTask1", longTask).(*task)
+	job2 := NewTaskAtIntervals(1, Seconds).Do("longTask2", longTask).(*task)
 
 	var wg sync.WaitGroup
 
 	executed := 0
 	skipped := 0
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -322,10 +323,19 @@ func Test_TaskLongTime(t *testing.T) {
 				skipped++
 			}
 		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if job2.Run() {
+				executed++
+			} else {
+				skipped++
+			}
+		}()
 	}
 	wg.Wait()
-	assert.Equal(t, 1, executed)
-	assert.Equal(t, 9, skipped)
+	assert.Equal(t, 2, executed)
+	assert.Equal(t, 4, skipped)
 }
 
 func longTask() {
