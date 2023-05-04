@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -301,7 +302,19 @@ func (j *task) Run() bool {
 			"started_at", j.lastRunAt,
 			"task", j.Name())
 
-		j.callback.Call(j.params)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.KV(xlog.ERROR,
+						"reason", "panic",
+						"task", j.Name(),
+						"err", r,
+						"stack", string(debug.Stack()))
+				}
+			}()
+			j.callback.Call(j.params)
+		}()
+
 		j.running = false
 		j.scheduleNextRun()
 		<-j.runLock
