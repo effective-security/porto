@@ -44,6 +44,11 @@ func Now() Time {
 	return Time(time.Now().Truncate(time.Second).UTC())
 }
 
+// UTC returns Time in UTC,
+func UTC(t time.Time) Time {
+	return Time(t.UTC())
+}
+
 // FromNow returns Time in UTC after now,
 // with Second presicions
 func FromNow(after time.Duration) Time {
@@ -60,7 +65,7 @@ func FromUnixMilli(tm int64) Time {
 // ParseTime returns Time from RFC3339 format
 func ParseTime(val string) Time {
 	t, _ := time.Parse(time.RFC3339, val)
-	return Time(t)
+	return Time(t.UTC())
 }
 
 // UnixMilli returns t as a Unix time, the number of milliseconds elapsed since January 1, 1970 UTC.

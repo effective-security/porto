@@ -113,6 +113,12 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 		return nil, errors.WithStack(err)
 	}
 
+	// Allow to load expired for testing
+	// now := time.Now()
+	// if x509Cert.NotAfter.Before(now) {
+	// 	return nil, errors.New("tls: certificate has expired")
+	// }
+
 	cert.PrivateKey, err = parsePrivateKey(keyDERBlock.Bytes)
 	if err != nil {
 		return nil, errors.WithStack(err)
