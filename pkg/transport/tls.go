@@ -7,6 +7,7 @@ import (
 
 	"github.com/effective-security/porto/pkg/crlcache"
 	"github.com/effective-security/porto/pkg/tlsconfig"
+	"github.com/pkg/errors"
 )
 
 // TLSInfo provides TLS configuration
@@ -87,6 +88,12 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		info.ClientAuthType)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(info.tlsCfg.Certificates) > 0 &&
+		info.tlsCfg.Certificates[0].Leaf != nil &&
+		info.tlsCfg.Certificates[0].Leaf.NotAfter.Before(time.Now()) {
+		return nil, errors.Errorf("tls: certificate has expired")
 	}
 
 	if err = tlsconfig.UpdateCipherSuites(info.tlsCfg, info.CipherSuites); err != nil {
