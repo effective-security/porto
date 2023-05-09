@@ -59,7 +59,7 @@ func TestFlakeOnce(t *testing.T) {
 	actualSequence := parts["sequence"]
 	assert.Equal(t, uint64(0), actualSequence)
 
-	actualMachineID := parts["machine-id"]
+	actualMachineID := parts["machine_id"]
 	assert.Equal(t, uint64(machineID), uint64(actualMachineID))
 }
 
@@ -97,7 +97,7 @@ func TestFlakeFor10Sec(t *testing.T) {
 			maxSequence = actualSequence
 		}
 
-		actualMachineID := parts["machine-id"]
+		actualMachineID := parts["machine_id"]
 		require.Equal(t, uint64(machineID), uint64(actualMachineID))
 	}
 
@@ -261,4 +261,40 @@ func TestDefault(t *testing.T) {
 	assert.Greater(t, idt, DefaultStartTime)
 	assert.Less(t, idt, now.Add(time.Second))
 	assert.Equal(t, start, DefaultStartTime)
+}
+
+func TestMultiple(t *testing.T) {
+	var gens []IDGenerator
+	for i := 0; i < 16; i++ {
+		g := NewIDGenerator(Settings{
+			MachineID: func() (uint16, error) {
+				return uint16(i), nil
+			},
+		})
+
+		gens = append(gens, g)
+
+		id := g.NextID()
+		parts := Decompose(id)
+		require.Equal(t, uint64(i), parts["machine_id"])
+	}
+
+	var ids []uint64
+	for i := 0; i < len(gens); i++ {
+		time.Sleep(10 * time.Millisecond)
+
+		g := gens[i]
+		id := g.NextID()
+		idTime := IDTime(g, id)
+		parts := Decompose(id)
+		require.Equal(t, uint64(i), parts["machine_id"])
+
+		for j := 0; j < len(ids); j++ {
+			prev := ids[j]
+			assert.Greater(t, id, prev)
+			pidTime := IDTime(gens[j], prev)
+			assert.Greater(t, idTime, pidTime)
+		}
+		ids = append(ids, id)
+	}
 }

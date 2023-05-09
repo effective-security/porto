@@ -121,6 +121,7 @@ func NewIDGenerator(st Settings) IDGenerator {
 		"start_flaketime", sf.startTime,
 		"machine_id", sf.machineID,
 		"first_id", id,
+		"frist_id_meta", Decompose(id),
 		"first_id_time", idTime.Format(time.RFC3339),
 	)
 
@@ -217,7 +218,7 @@ func Decompose(id uint64) map[string]uint64 {
 		"msb":        msb,
 		"time":       time,
 		"sequence":   sequence,
-		"machine-id": machineID,
+		"machine_id": machineID,
 	}
 }
 
