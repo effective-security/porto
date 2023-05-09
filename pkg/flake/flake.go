@@ -26,6 +26,9 @@ type IDGenerator interface {
 // DefaultIDGenerator for the app
 var DefaultIDGenerator IDGenerator
 
+// NowFunc returns the current time; it's overridden in tests.
+var NowFunc = time.Now
+
 func init() {
 	DefaultIDGenerator = NewIDGenerator(Settings{
 		StartTime: DefaultStartTime,
@@ -69,7 +72,7 @@ type Settings struct {
 
 // Flake is a distributed unique ID generator.
 type Flake struct {
-	mutex       *sync.Mutex
+	mutex       sync.Mutex
 	startTime   int64
 	elapsedTime int64
 	sequence    uint16
@@ -84,19 +87,18 @@ type Flake struct {
 // - Settings.CheckMachineID returns false.
 func NewIDGenerator(st Settings) IDGenerator {
 	sf := new(Flake)
-	sf.mutex = new(sync.Mutex)
 	sf.sequence = MaskSequence16
 
-	now := time.Now().UTC()
+	now := NowFunc()
 	if st.StartTime.IsZero() {
-		sf.startTime = toFlakeTime(DefaultStartTime)
-	} else {
-		if st.StartTime.After(now) {
-			logger.Panicf("start time %s is ahead of current time: %s",
-				st.StartTime.Format(time.RFC3339), now.Format(time.RFC3339))
-		}
-		sf.startTime = toFlakeTime(st.StartTime)
+		st.StartTime = DefaultStartTime
 	}
+
+	if st.StartTime.After(now) {
+		logger.Panicf("start time %s is ahead of current time: %s",
+			st.StartTime.Format(time.RFC3339), now.Format(time.RFC3339))
+	}
+	sf.startTime = toFlakeTime(st.StartTime)
 
 	var err error
 	if st.MachineID == nil {
@@ -111,7 +113,16 @@ func NewIDGenerator(st Settings) IDGenerator {
 		logger.Panicf("CheckMachineID ID failed: %d", sf.machineID)
 	}
 
-	//logger.Noticef("start=%s, machineID=%d", now.Format(time.RFC3339), sf.machineID)
+	id := sf.NextID()
+	idTime := IDTime(sf, id)
+
+	logger.KV(xlog.INFO,
+		"start_time", st.StartTime.Format(time.RFC3339),
+		"start_flaketime", sf.startTime,
+		"machine_id", sf.machineID,
+		"first_id", id,
+		"first_id_time", idTime.Format(time.RFC3339),
+	)
 
 	return sf
 }
@@ -145,16 +156,20 @@ func (sf *Flake) NextID() uint64 {
 }
 
 func toFlakeTime(t time.Time) int64 {
-	return t.UTC().UnixNano() / FlakeTimeUnit
+	return t.UnixNano() / FlakeTimeUnit
+}
+
+func fromFlakeTime(f int64) time.Time {
+	return time.Unix(0, f*FlakeTimeUnit).UTC()
 }
 
 func currentElapsedTime(startTime int64) int64 {
-	return toFlakeTime(time.Now()) - startTime
+	return toFlakeTime(NowFunc()) - startTime
 }
 
 func sleepTime(overtime int64) time.Duration {
 	return time.Nanosecond *
-		time.Duration(overtime*FlakeTimeUnit-time.Now().UTC().UnixNano()%FlakeTimeUnit)
+		time.Duration(overtime*FlakeTimeUnit-NowFunc().UnixNano()%FlakeTimeUnit)
 }
 
 func (sf *Flake) toID() uint64 {
@@ -204,4 +219,13 @@ func Decompose(id uint64) map[string]uint64 {
 		"sequence":   sequence,
 		"machine-id": machineID,
 	}
+}
+
+// IDTime returns the timestamp of the flake ID.
+func IDTime(g IDGenerator, id uint64) time.Time {
+	start := int64(0)
+	if fl, ok := g.(*Flake); ok {
+		start = fl.startTime
+	}
+	return fromFlakeTime(start + int64(id>>(BitLenSequence+BitLenMachineID)))
 }

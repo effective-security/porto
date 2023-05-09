@@ -21,7 +21,7 @@ var (
 
 func init() {
 	var st Settings
-	st.StartTime = time.Now()
+	st.StartTime = NowFunc()
 
 	sf = NewIDGenerator(st).(*Flake)
 
@@ -32,11 +32,20 @@ func init() {
 func TestFlakeOnce(t *testing.T) {
 	assert.Equal(t, int64(1e6), FlakeTimeUnit)
 
+	id0 := sf.NextID()
+	parts := Decompose(id0)
+	fTime := parts["time"]
+	start := fromFlakeTime(sf.startTime)
+	t.Logf("start: %s, parts: %+v", start.Format(time.RFC3339), parts)
+
+	tim := fromFlakeTime(int64(fTime))
+	assert.True(t, tim.Before(start))
+
 	sleepTime := uint64(5 * FlakeTimeUnit / int64(time.Millisecond))
 	time.Sleep(time.Duration(sleepTime) * time.Duration(FlakeTimeUnit))
 
 	id := sf.NextID()
-	parts := Decompose(id)
+	parts = Decompose(id)
 	t.Logf("parts: %+v", parts)
 
 	actualMSB := parts["msb"]
@@ -55,7 +64,7 @@ func TestFlakeOnce(t *testing.T) {
 }
 
 func currentTime() int64 {
-	return toFlakeTime(time.Now())
+	return toFlakeTime(NowFunc())
 }
 
 func TestFlakeFor10Sec(t *testing.T) {
@@ -227,4 +236,29 @@ func TestNextIDError(t *testing.T) {
 	assert.Panics(t, func() {
 		sf.NextID()
 	})
+}
+
+func TestUTC(t *testing.T) {
+	now := NowFunc()
+	nowUTC := now.UTC()
+	assert.Equal(t, nowUTC.UnixNano(), now.UnixNano())
+	assert.Equal(t, toFlakeTime(nowUTC), toFlakeTime(now))
+}
+
+func TestDefault(t *testing.T) {
+	fl := DefaultIDGenerator.(*Flake)
+	start := fromFlakeTime(fl.startTime)
+
+	now := NowFunc()
+	id := DefaultIDGenerator.NextID()
+	idt := IDTime(DefaultIDGenerator, id)
+
+	parts := Decompose(id)
+	t.Logf("start: %s, id: %d, parts: %+v, id_time: %s, now: %s",
+		start.Format(time.RFC3339), id, parts, idt.Format(time.RFC3339), now.UTC().Format(time.RFC3339))
+
+	assert.Greater(t, id, uint64(311061752341070108))
+	assert.Greater(t, idt, DefaultStartTime)
+	assert.Less(t, idt, now.Add(time.Second))
+	assert.Equal(t, start, DefaultStartTime)
 }
