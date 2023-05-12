@@ -5,9 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/pkg/errors"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -86,7 +85,7 @@ func Marshal(fn string, value interface{}) error {
 	var data []byte
 	var err error
 	if strings.HasSuffix(fn, ".json") {
-		data, err = marshal.EncodeBytes(marshal.PrettyPrint, value)
+		data, err = json.MarshalIndent(value, "", "  ")
 	} else {
 		data, err = yaml.Marshal(value)
 	}

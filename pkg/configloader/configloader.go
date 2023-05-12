@@ -14,7 +14,7 @@ import (
 	"github.com/oleiade/reflections"
 	"github.com/pkg/errors"
 	yamlcfg "go.uber.org/config"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "configloader")

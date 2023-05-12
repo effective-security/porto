@@ -20,10 +20,9 @@ clean:
 		${PROJ_BIN}
 
 tools:
-	go install golang.org/x/tools/cmd/stringer
-	go install github.com/go-phorce/cov-report/cmd/cov-report
+	go install github.com/go-phorce/cov-report/cmd/cov-report@v1.1.0
+	go install github.com/mattn/goveralls@v0.0.12
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.51.2
-	go install github.com/mattn/goveralls
 
 build:
 	echo "nothing to build yet"
