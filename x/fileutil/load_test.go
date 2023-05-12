@@ -91,6 +91,16 @@ func Test_Unmarshal(t *testing.T) {
 	fn = path.Join(tmp, "test_config.json")
 	err = fileutil.Marshal(fn, &v)
 	require.NoError(t, err)
+	encoded, err := os.ReadFile(fn)
+	require.NoError(t, err)
+	assert.Equal(t,
+		`{
+  "Service": "porto-pod",
+  "Region": "local",
+  "Cluster": "cl1",
+  "Environment": "test"
+}`,
+		string(encoded))
 
 	err = fileutil.Unmarshal(fn, &v2)
 	require.NoError(t, err)
