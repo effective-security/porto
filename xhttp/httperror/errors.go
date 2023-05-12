@@ -109,7 +109,7 @@ func (e *Error) Unwrap() error {
 		}
 		return e.cause
 	}
-	return e
+	return nil
 }
 
 // Is implements future error.Is functionality.
@@ -222,11 +222,11 @@ func Timeout(msgFormat string, vals ...interface{}) *Error {
 func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 	e := &Error{}
 	if goerrors.As(err, &e) {
-		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(e.cause)
+		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(err)
 	}
 	me := &ManyError{}
 	if goerrors.As(err, &me) {
-		return New(me.HTTPStatus, me.Code, msgFormat, vals...).WithCause(me.cause)
+		return New(me.HTTPStatus, me.Code, msgFormat, vals...).WithCause(err)
 	}
 
 	if se, ok := err.(interface {

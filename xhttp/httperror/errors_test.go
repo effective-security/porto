@@ -57,7 +57,7 @@ func TestError_Error(t *testing.T) {
 func TestError_Unwrap(t *testing.T) {
 	e := httperror.New(http.StatusBadRequest, httperror.CodeInvalidJSON, "Bob")
 	assert.Equal(t, "invalid_json: Bob", e.Error())
-	assert.Error(t, e.Unwrap())
+	assert.Nil(t, e.Unwrap())
 
 	e = e.WithCause(errors.New("some other error"))
 	assert.EqualError(t, e.Unwrap(), "some other error")
@@ -271,7 +271,7 @@ func TestError_Wrap(t *testing.T) {
 	assert.EqualError(t, many, "unexpected: wrapped")
 	werr4 := httperror.Wrap(many, "wrappedMany")
 	assert.EqualError(t, werr4, "unexpected: wrappedMany")
-	assert.EqualError(t, werr4.Unwrap(), "many cause")
+	assert.EqualError(t, werr4.Unwrap(), many.Error())
 
 	ctx := correlation.WithID(context.Background())
 	cid := correlation.ID(ctx)
@@ -283,7 +283,11 @@ func TestError_Wrap(t *testing.T) {
 
 	werr5 := httperror.WrapWithCtx(ctx, nil, "wrapped nil")
 	assert.EqualError(t, werr5, fmt.Sprintf("request %s: unexpected: wrapped nil", cid))
-	assert.EqualError(t, werr5.Unwrap(), fmt.Sprintf("request %s: unexpected: wrapped nil", cid))
+	assert.Nil(t, werr5.Unwrap())
+
+	werr6 := httperror.WrapWithCtx(ctx, werr5, "wrapped 5")
+	assert.EqualError(t, werr6, fmt.Sprintf("request %s: unexpected: wrapped 5", cid))
+	assert.EqualError(t, werr6.Unwrap(), werr5.Error())
 }
 
 func TestGRPCError(t *testing.T) {

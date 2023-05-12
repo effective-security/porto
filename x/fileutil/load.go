@@ -32,7 +32,7 @@ func LoadConfigWithSchema(config string) (string, error) {
 		// ENV content
 		config = os.Getenv(env)
 		if config == "" {
-			return "", errors.Errorf("Environment variable %q is not set", env)
+			return "", errors.Errorf("Environment variable %s is not set", env)
 		}
 	}
 
