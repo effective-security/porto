@@ -288,3 +288,24 @@ var statusCode = map[string]codes.Code{
 	CodeUnauthorized:            codes.PermissionDenied,
 	CodeUnexpected:              codes.Internal,
 }
+
+// FromOAuth returns an error with HTTP status code and description
+func FromOAuth(code, descr string) *Error {
+	status := http.StatusBadRequest
+	switch code {
+	case "invalid_request",
+		"invalid_grant",
+		"invalid_scope",
+		"unsupported_response_type",
+		"unsupported_grant_type":
+		status = http.StatusBadRequest
+	case "temporarily_unavailable":
+		status = http.StatusServiceUnavailable
+	case "server_error":
+		status = http.StatusInternalServerError
+	case "invalid_client", "unauthorized_client", "access_denied":
+		status = http.StatusUnauthorized
+	}
+
+	return New(status, code, descr)
+}
