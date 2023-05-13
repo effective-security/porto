@@ -63,3 +63,11 @@ func Test_StatusCodes(t *testing.T) {
 		})
 	}
 }
+
+func Test_OAuthError(t *testing.T) {
+	assert.EqualError(t, httperror.FromOAuth("1", "2"), "1: 2")
+	assert.EqualError(t, httperror.FromOAuth("invalid_request", "aaa"), "invalid_request: aaa")
+	assert.EqualError(t, httperror.FromOAuth("temporarily_unavailable", "aaa"), "temporarily_unavailable: aaa")
+	assert.EqualError(t, httperror.FromOAuth("server_error", "aaa"), "server_error: aaa")
+	assert.EqualError(t, httperror.FromOAuth("invalid_client", "aaa"), "invalid_client: aaa")
+}
