@@ -659,13 +659,17 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-
 	req = req.WithContext(ctx)
+	return c.Do(req)
+}
 
+// convertRequest wraps http.Request into retriable.Request
+func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 	for header, val := range c.headers {
 		req.Header.Add(header, val)
 	}
 
+	ctx := req.Context()
 	switch headers := ctx.Value(contextValueForHTTPHeader).(type) {
 	case map[string]string:
 		for header, val := range headers {
@@ -690,12 +694,34 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 
 	authHeader := req.Header.Get(header.Authorization)
 	if strings.EqualFold(slices.StringUpto(authHeader, 5), "DPoP ") {
-		_, err = dpop.ForRequest(c.signer, req, nil)
+		_, err := dpop.ForRequest(c.signer, req, nil)
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to sign DPoP")
 		}
 	}
-	return c.Do(req)
+
+	var body io.ReadSeeker
+	if req != nil && req.Body != nil {
+		defer req.Body.Close()
+		bodyBytes, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		body = bytes.NewReader(bodyBytes)
+	}
+
+	r, err := NewRequest(req.Method, req.URL.String(), body)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	r.Request = r.WithContext(ctx)
+	for header, vals := range req.Header {
+		for _, val := range vals {
+			r.Request.Header.Add(header, val)
+		}
+	}
+
+	return r, nil
 }
 
 // Do wraps calling an HTTP method with retries.
@@ -704,10 +730,11 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	var err error
 	var retries int
 
-	req, err := convertRequest(r)
+	req, err := c.convertRequest(r)
 	if err != nil {
 		return nil, err
 	}
+
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
 		if req.body != nil {
