@@ -1,7 +1,6 @@
 package retriable
 
 import (
-	"bytes"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -72,30 +71,4 @@ func (r *Request) WithHeaders(headers map[string]string) *Request {
 func (r *Request) AddHeader(header, value string) *Request {
 	r.Request.Header.Add(header, value)
 	return r
-}
-
-// convertRequest wraps http.Request into retriable.Request
-func convertRequest(req *http.Request) (*Request, error) {
-	var body io.ReadSeeker
-	if req != nil && req.Body != nil {
-		defer req.Body.Close()
-		bodyBytes, err := ioutil.ReadAll(req.Body)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		body = bytes.NewReader(bodyBytes)
-	}
-
-	r, err := NewRequest(req.Method, req.URL.String(), body)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	r.Request = r.WithContext(req.Context())
-	for header, vals := range req.Header {
-		for _, val := range vals {
-			r.Request.Header.Add(header, val)
-		}
-	}
-
-	return r, nil
 }

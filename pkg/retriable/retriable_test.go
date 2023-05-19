@@ -219,7 +219,28 @@ func Test_Retriable_OK(t *testing.T) {
 		assert.Equal(t, "token1", h.Get("X-Test-Token"))
 		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
 		// test handler modifies the request URL
-		//assert.Equal(t, server.URL+"/v1/test?qq#ff", h.Get("X-Request-URL"))
+		// NOTE: #ff is stripped and not visible to the server
+		assert.Equal(t, "/v1/test?qq", h.Get("X-Request-URL"))
+	})
+
+	t.Run("GET_RequestURL_DO", func(t *testing.T) {
+		r, err := http.NewRequest(http.MethodGet, server.URL+"/v1/test?qq#ff", nil)
+		require.NoError(t, err)
+		r.Header.Set("X-Custom-PerRequest", "Custom-PerRequest")
+
+		res, err := client.Do(r)
+		require.NoError(t, err)
+
+		status := res.StatusCode
+		h := res.Header
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "retriable", h.Get("X-Test-Header"))
+		assert.Equal(t, "token1", h.Get("X-Test-Token"))
+		assert.Equal(t, "WithBeforeSendRequest", h.Get("X-Global"))
+		assert.Equal(t, "Custom-PerRequest", h.Get("X-Request-Header-X-Custom-PerRequest"))
+		// test handler modifies the request URL
+		// NOTE: #ff is stripped and not visible to the server
+		assert.Equal(t, "/v1/test?qq", h.Get("X-Request-URL"))
 	})
 
 	t.Run("GET", func(t *testing.T) {
@@ -805,11 +826,17 @@ func makeTestHandler(t *testing.T, expURI string, status int, responseBody strin
 		if status == 0 {
 			status = http.StatusOK
 		}
-		w.Header().Add("X-Test-Header", "retriable")
-		w.Header().Add("X-Test-Token", r.Header.Get("X-Test-Token"))
-		w.Header().Add("X-Global", r.Header.Get("X-Global"))
-		w.Header().Add("X-Request-URL", r.URL.String())
-		w.Header().Add("X-Request-Method", r.Method)
+		h := w.Header()
+		h.Add("X-Test-Header", "retriable")
+		h.Add("X-Test-Token", r.Header.Get("X-Test-Token"))
+		h.Add("X-Global", r.Header.Get("X-Global"))
+		h.Add("X-Request-URL", r.URL.String())
+		h.Add("X-Request-Method", r.Method)
+
+		for k, v := range r.Header {
+			h.Add("X-Request-Header-"+k, v[0])
+		}
+
 		w.Header().Add(retriable.DefaultReplayNonceHeader, certutil.RandomString(8))
 		w.WriteHeader(status)
 		io.WriteString(w, responseBody)

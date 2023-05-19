@@ -46,14 +46,6 @@ func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, 
 	return c.Request(ctx, "PUT", c.host, path, requestBody, responseBody)
 }
 
-// PostTo is the same as Post, but to the specified host. [the supplied hosts are
-// tried in order until one succeeds, or we run out]
-// each host should include all the protocol/host/port preamble, e.g. http://foo.bar:3444
-// path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) PostTo(ctx context.Context, hosts []string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
-	return c.Request(ctx, "POST", c.host, path, requestBody, responseBody)
-}
-
 // Get fetches the supplied resource using the current selected cluster member
 // [typically the leader], it will decode the response payload into the supplied
 // body parameter. it returns the HTTP status code, and an optional error
