@@ -13,6 +13,7 @@ import (
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
@@ -386,11 +387,11 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 		})
 	}
 
-	allowedOrigins := ""
+	var allowedOrigins []string
 	exposedHeaders := ""
 	if sctx.cfg.CORS != nil {
-		if len(sctx.cfg.CORS.AllowedOrigins) > 0 {
-			allowedOrigins = strings.Join(sctx.cfg.CORS.AllowedOrigins, ",")
+		if len(sctx.cfg.CORS.AllowedOrigins) > 0 && sctx.cfg.CORS.AllowedOrigins[0] != "*" {
+			allowedOrigins = sctx.cfg.CORS.AllowedOrigins
 		}
 		if len(sctx.cfg.CORS.ExposedHeaders) > 0 {
 			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ",")
@@ -400,12 +401,29 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
+			origin := r.Header.Get("Origin")
 			grpcWeb := ct == header.ApplicationGRPCWebProto
 			wh := w.Header()
 			if grpcWeb {
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
-				if allowedOrigins != "" {
-					wh.Set("Access-Control-Allow-Origin", allowedOrigins)
+				if origin != "" {
+					if len(allowedOrigins) > 0 && !slices.ContainsString(allowedOrigins, origin) {
+						logger.ContextKV(r.Context(), xlog.INFO,
+							"reason", "cors_not_allowed",
+							"method", r.Method,
+							"ct", ct,
+							"remote", r.RemoteAddr,
+							"agent", r.UserAgent(),
+							"content-type", r.Header.Get(header.ContentType),
+							"accept", r.Header.Get(header.Accept),
+							"url", r.URL.String())
+						return
+					}
+					if len(allowedOrigins) > 0 {
+						wh.Set("Access-Control-Allow-Origin", origin)
+					} else {
+						wh.Set("Access-Control-Allow-Origin", "*")
+					}
 				}
 				if exposedHeaders != "" {
 					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
