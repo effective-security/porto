@@ -83,11 +83,11 @@ func Test_RequestMetrics(t *testing.T) {
 	req(http.MethodPost, "/notfound", http.StatusNotFound)
 	req(http.MethodPost, "/unauthorized", http.StatusUnauthorized)
 
-	assertSample("test_http_requests_perf;method=GET;status=200;uri=/", 1)
-	assertSample("test_http_requests_perf;method=GET;status=200;uri=/foo", 1)
-	assertSample("test_http_requests_perf;method=POST;status=200;uri=/", 2)
+	assertSample("test_http_requests_perf;verb=GET;status=200;uri=/", 1)
+	assertSample("test_http_requests_perf;verb=GET;status=200;uri=/foo", 1)
+	assertSample("test_http_requests_perf;verb=POST;status=200;uri=/", 2)
 
-	assertCounter("test_http_requests_role;method=GET;status=200;uri=/;role=admin", 1)
-	assertCounter("test_http_requests_role;method=GET;status=200;uri=/foo;role=admin", 1)
-	assertCounter("test_http_requests_role;method=POST;status=200;uri=/;role=admin", 2)
+	assertCounter("test_http_requests_role;verb=GET;status=200;uri=/;role=admin", 1)
+	assertCounter("test_http_requests_role;verb=GET;status=200;uri=/foo;role=admin", 1)
+	assertCounter("test_http_requests_role;verb=POST;status=200;uri=/;role=admin", 2)
 }
