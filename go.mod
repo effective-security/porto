@@ -16,7 +16,7 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/oleiade/reflections v1.0.1
 	github.com/pkg/errors v0.9.1
-	github.com/rs/cors v1.8.2
+	github.com/rs/cors v1.9.0
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.8.2
 	github.com/ugorji/go/codec v1.2.6

@@ -252,6 +252,8 @@ func TestDefault(t *testing.T) {
 	now := NowFunc()
 	id := DefaultIDGenerator.NextID()
 	idt := IDTime(DefaultIDGenerator, id)
+	assert.Equal(t, id, LastID(DefaultIDGenerator))
+	assert.Greater(t, id, FirstID(DefaultIDGenerator))
 
 	parts := Decompose(id)
 	t.Logf("start: %s, id: %d, parts: %+v, id_time: %s, now: %s",

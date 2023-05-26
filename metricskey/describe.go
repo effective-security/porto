@@ -7,26 +7,26 @@ var (
 	HTTPReqPerf = metrics.Describe{
 		Name:         "http_requests_perf",
 		Type:         metrics.TypeSample,
-		RequiredTags: []string{"method", "status", "uri"},
+		RequiredTags: []string{"verb", "status", "uri"},
 		Help:         "provides quantiles for HTTP request.",
 	}
 	HTTPReqByRole = metrics.Describe{
 		Name:         "http_requests_role",
 		Type:         metrics.TypeCounter,
-		RequiredTags: []string{"method", "status", "uri", "role"},
+		RequiredTags: []string{"verb", "status", "uri", "role"},
 		Help:         "provides counts for HTTP request by role.",
 	}
 
 	GRPCReqPerf = metrics.Describe{
 		Name:         "rpc_requests_perf",
 		Type:         metrics.TypeSample,
-		RequiredTags: []string{"method", "status"},
+		RequiredTags: []string{"api", "status"},
 		Help:         "provides quantiles for gRPC request.",
 	}
 	GRPCReqByRole = metrics.Describe{
 		Name:         "rpc_requests_role",
 		Type:         metrics.TypeCounter,
-		RequiredTags: []string{"method", "status", "role"},
+		RequiredTags: []string{"api", "status", "role"},
 		Help:         "provides counts for gRPC request by role.",
 	}
 )
