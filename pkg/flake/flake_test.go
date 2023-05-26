@@ -248,6 +248,7 @@ func TestUTC(t *testing.T) {
 func TestDefault(t *testing.T) {
 	fl := DefaultIDGenerator.(*Flake)
 	start := fromFlakeTime(fl.startTime)
+	assert.Equal(t, machineIDFromProgram(), fl.machineID)
 
 	now := NowFunc()
 	id := DefaultIDGenerator.NextID()

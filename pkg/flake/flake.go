@@ -8,7 +8,10 @@
 package flake
 
 import (
+	"hash/fnv"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,9 +189,26 @@ func (sf *Flake) toID() uint64 {
 		uint64(sf.machineID)
 }
 
+func machineIDFromProgram() uint16 {
+	h := fnv.New32a()
+	h.Write([]byte(os.Args[0]))
+	return uint16(h.Sum32())
+}
+
+// IsTestRun returns true if the program is running in the test.
+func IsTestRun() bool {
+	return strings.Contains(os.Args[0], "test") || strings.Contains(os.Args[0], "debug")
+}
+
 // NOTE: we don't return error here,
 // as Mac and test containers may not have InterfaceAddrs
 func defaultMachineID() (uint16, error) {
+	if IsTestRun() {
+		id := machineIDFromProgram()
+		logger.KV(xlog.DEBUG, "reason", "test_mode", "program", os.Args[0], "id", id)
+		return id, nil
+	}
+
 	as, err := net.InterfaceAddrs()
 	if err != nil {
 		logger.KV(xlog.ERROR, "reason", "InterfaceAddrs", "err", err)
@@ -206,6 +226,7 @@ func defaultMachineID() (uint16, error) {
 		//logger.Noticef("machine_id=%d, ip=%v, ip_len=%d", id, ip.String(), last)
 		return id, nil
 	}
+
 	logger.KV(xlog.ERROR, "reason", "no_private_ip")
 	return 0, nil
 }
