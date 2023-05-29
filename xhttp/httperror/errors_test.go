@@ -217,6 +217,10 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 	}
 }
 
+func TestError_IsInvalidRequestError(t *testing.T) {
+	assert.True(t, httperror.IsInvalidRequestError(errors.Errorf("invalid ID")))
+}
+
 func TestError_IsTimeout(t *testing.T) {
 	assert.True(t, httperror.IsTimeout(errors.Errorf("context deadline exceeded")))
 	assert.True(t, httperror.IsTimeout(errors.Errorf("request timeout")))

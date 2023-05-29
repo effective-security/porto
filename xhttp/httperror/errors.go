@@ -5,6 +5,7 @@ import (
 	goerrors "errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/x/xdb"
@@ -238,6 +239,9 @@ func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 		return New(status, httpCode[status], msgFormat, vals...).WithCause(err)
 	}
 
+	if IsInvalidRequestError(err) {
+		return InvalidRequest(msgFormat, vals...).WithCause(err)
+	}
 	if xdb.IsNotFoundError(err) {
 		return NotFound(msgFormat, vals...).WithCause(err)
 	}
@@ -250,6 +254,14 @@ func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 // WrapWithCtx returns wrapped Error with Context
 func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...interface{}) *Error {
 	return Wrap(err, msgFormat, vals...).WithContext(ctx)
+}
+
+// IsInvalidRequestError returns true for Invalid request error
+func IsInvalidRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "invalid")
 }
 
 // IsTimeout returns true for timeout error
