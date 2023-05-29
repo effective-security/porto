@@ -35,15 +35,24 @@ func TestString(t *testing.T) {
 }
 
 func TestID(t *testing.T) {
-	_, err := xdb.ID("")
+	_, err := xdb.ParseUint("")
 	require.Error(t, err)
 
-	_, err = xdb.ID("@123")
+	_, err = xdb.ParseUint("@123")
 	require.Error(t, err)
 
-	v, err := xdb.ID("1234567")
+	v, err := xdb.ParseUint("1234567")
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1234567), v)
+
+	id := xdb.ParseID("")
+	assert.Equal(t, uint64(0), id.UInt64())
+
+	id = xdb.ParseID("@123")
+	assert.Equal(t, uint64(0), id.UInt64())
+
+	id = xdb.ParseID("1234567")
+	assert.Equal(t, uint64(1234567), id.UInt64())
 }
 
 func TestIDString(t *testing.T) {

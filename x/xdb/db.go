@@ -62,8 +62,8 @@ func String(val *string) string {
 	return *val
 }
 
-// ID returns id from the string
-func ID(id string) (uint64, error) {
+// ParseUint returns id from the string
+func ParseUint(id string) (uint64, error) {
 	i64, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return 0, errors.WithStack(err)
