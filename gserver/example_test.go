@@ -28,6 +28,9 @@ func ExampleServer() {
 			KeyFile:       "testdata/test-server-key.pem",
 			TrustedCAFile: "testdata/test-server-rootca.pem",
 		},
+		RateLimit: &gserver.RateLimit{
+			RequestsPerSecond: 10,
+		},
 	}
 
 	c := mockappcontainer.NewBuilder().

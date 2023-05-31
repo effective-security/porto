@@ -33,7 +33,9 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/didip/tollbooth/v7 v7.0.1 // indirect
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba // indirect
+	github.com/go-pkgz/expirable-cache v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
