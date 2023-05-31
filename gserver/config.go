@@ -47,6 +47,9 @@ type Config struct {
 	// CORS contains configuration for CORS.
 	CORS *CORS `json:"cors,omitempty" yaml:"cors,omitempty"`
 
+	// RateLimit contains configuration for the rate limiter
+	RateLimit *RateLimit `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
+
 	// Timeout settings
 	Timeout struct {
 		// Request is the timeout for client requests to finish.
@@ -175,4 +178,23 @@ func (c *CORS) GetAllowCredentials() bool {
 // GetOptionsPassthrough flag
 func (c *CORS) GetOptionsPassthrough() bool {
 	return c != nil && c.OptionsPassthrough != nil && *c.OptionsPassthrough
+}
+
+// RateLimit contains configuration for Rate Limititing.
+type RateLimit struct {
+	// Enabled specifies if the Rate Limititing is enabled.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// RequestsPerSecond specifies the maximum number of requests per second.
+	RequestsPerSecond int `json:"requests_per_second,omitempty" yaml:"requests_per_second,omitempty"`
+	// ExpirationTTL specifies the TTL for token bucket, default 10 mins
+	ExpirationTTL time.Duration `json:"expiration_ttl,omitempty" yaml:"expiration_ttl,omitempty"`
+	// HeadersIPLookups, default is  "X-Forwarded-For", "X-Real-IP" or "RemoteAddr".
+	HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
+	// Metods, can be: "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS".
+	Metods []string `json:"metods,omitempty" yaml:"metods,omitempty"`
+}
+
+// GetEnabled specifies if the Rate Limititing is enabled.
+func (c *RateLimit) GetEnabled() bool {
+	return c != nil && c.Enabled != nil && *c.Enabled
 }

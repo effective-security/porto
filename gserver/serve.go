@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/didip/tollbooth/v7"
+	"github.com/didip/tollbooth/v7/limiter"
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/transport"
 	"github.com/effective-security/porto/restserver"
@@ -217,6 +219,8 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 		handler := router.Handler()
 		handler = configureHandlers(s, handler)
+		// rate limit will be first
+		handler = configureRateLimiter(s.cfg.RateLimit, handler)
 
 		srv := &http.Server{
 			Handler: handler,
@@ -238,6 +242,8 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 		// mux between http and grpc
 		handler = sctx.grpcHandlerFunc(gsSecure, handler)
+		// rate limit will be first
+		handler = configureRateLimiter(s.cfg.RateLimit, handler)
 
 		srv := &http.Server{
 			Handler:   handler,
@@ -260,6 +266,31 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	// Serve starts multiplexing the listener.
 	// Serve blocks and perhaps should be invoked concurrently within a go routine.
 	return m.Serve()
+}
+
+func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
+	if !cfg.GetEnabled() {
+		return handler
+	}
+	logger.KV(xlog.NOTICE, "RateLimit", "enabled")
+
+	ttl := cfg.ExpirationTTL
+	if ttl == 0 {
+		ttl = 10 * time.Minute
+	}
+	ops := limiter.ExpirableOptions{
+		DefaultExpirationTTL: ttl,
+	}
+
+	lmt := tollbooth.NewLimiter(float64(cfg.RequestsPerSecond), &ops)
+	if len(cfg.HeadersIPLookups) > 0 {
+		lmt.SetIPLookups(cfg.HeadersIPLookups)
+	}
+	if len(cfg.Metods) > 0 {
+		lmt.SetMethods(cfg.Metods)
+	}
+
+	return tollbooth.LimitHandler(lmt, handler)
 }
 
 func configureHandlers(s *Server, handler http.Handler) http.Handler {
@@ -310,6 +341,7 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 		})
 		handler = co.Handler(handler)
 	}
+
 	// Add correlationID
 	handler = correlation.NewHandler(handler)
 
@@ -398,7 +430,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 		}
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			origin := r.Header.Get("Origin")
@@ -471,6 +503,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 			otherHandler.ServeHTTP(w, r)
 		}
 	})
+
+	return handler
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
