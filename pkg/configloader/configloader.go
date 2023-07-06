@@ -101,6 +101,7 @@ func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config in
 
 	environment := f.environment
 	if environment != "" {
+		// ignore error as Environment may not exist in the config
 		_ = reflections.SetField(config, "Environment", environment)
 	} else if value, err := reflections.GetField(config, "Environment"); err == nil {
 		environment = value.(string)

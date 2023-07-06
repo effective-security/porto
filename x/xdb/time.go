@@ -37,21 +37,20 @@ func (ns Time) Value() (driver.Value, error) {
 	}.Value()
 }
 
-// Now returns Time in UTC,
-// with Second presicions
+// Now returns Time in UTC
 func Now() Time {
-	return Time(time.Now().Truncate(time.Second).UTC())
+	return Time(time.Now().UTC().Truncate(time.Millisecond))
 }
 
 // UTC returns Time in UTC,
 func UTC(t time.Time) Time {
-	return Time(t.UTC())
+	return Time(t.UTC().Truncate(time.Millisecond))
 }
 
 // FromNow returns Time in UTC after now,
 // with Second presicions
 func FromNow(after time.Duration) Time {
-	return Time(time.Now().Add(after).Truncate(time.Second).UTC())
+	return Time(time.Now().Add(after).UTC().Truncate(time.Millisecond))
 }
 
 // FromUnixMilli returns Time from Unix milliseconds elapsed since January 1, 1970 UTC.
@@ -75,12 +74,12 @@ func (ns Time) UnixMilli() int64 {
 // Add returns Time in UTC after this thime,
 // with Second presicions
 func (ns Time) Add(after time.Duration) Time {
-	return Time(time.Time(ns).Add(after).Truncate(time.Second).UTC())
+	return Time(time.Time(ns).Add(after).UTC().Truncate(time.Millisecond))
 }
 
 // UTC returns t with the location set to UTC.
 func (ns Time) UTC() time.Time {
-	return time.Time(ns).UTC()
+	return time.Time(ns).UTC().Truncate(time.Millisecond)
 }
 
 // IsZero reports whether t represents the zero time instant, January 1, year 1, 00:00:00 UTC.
@@ -115,11 +114,11 @@ func (ns Time) String() string {
 // MarshalJSON implements the json.Marshaler interface.
 // The time is a quoted string in RFC 3339 format, with sub-second precision added if present.
 func (ns Time) MarshalJSON() ([]byte, error) {
-	t := time.Time(ns)
+	t := ns.UTC()
 	if t.IsZero() {
 		return []byte(`""`), nil
 	}
-	return time.Time(ns).MarshalJSON()
+	return t.MarshalJSON()
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
