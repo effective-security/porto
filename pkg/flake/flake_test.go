@@ -52,9 +52,8 @@ func TestFlakeOnce(t *testing.T) {
 	assert.Equal(t, uint64(0), actualMSB)
 
 	actualTime := parts["time"]
-	if actualTime < sleepTime || actualTime > sleepTime+2 {
-		t.Errorf("unexpected time: %d", actualTime)
-	}
+	assert.LessOrEqual(t, sleepTime, actualTime+2, "unexpected time: %d", actualTime)
+	assert.LessOrEqual(t, actualTime, sleepTime+2, "unexpected time: %d", actualTime)
 
 	actualSequence := parts["sequence"]
 	assert.Equal(t, uint64(0), actualSequence)

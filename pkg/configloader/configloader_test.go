@@ -1,11 +1,13 @@
 package configloader
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestNewFactory(t *testing.T) {
@@ -49,23 +51,27 @@ func TestLoadYAMLOverrideByHostname(t *testing.T) {
 	assert.Equal(t, "porto-pod", c.ServiceName)
 	assert.NotEmpty(t, c.ClusterName)
 
-	assert.Equal(t, "/tmp/porto/logs", c.Logs.Directory)
+	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/logs", c.Environment), c.Logs.Directory)
 	assert.Equal(t, 3, c.Logs.MaxAgeDays)
 	assert.Equal(t, 10, c.Logs.MaxSizeMb)
 
-	assert.Equal(t, "/tmp/porto/audit", c.Audit.Directory)
+	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/audit", c.Environment), c.Audit.Directory)
 	assert.Equal(t, 99, c.Audit.MaxAgeDays)
 	assert.Equal(t, 99, c.Audit.MaxSizeMb)
 
 	assert.Equal(t, "UNIT_TEST", c.Templates["environment"])
 	assert.Equal(t, "UNIT_TEST", c.Templates["ENVIRONMENT"])
 
+	b, err := yaml.Marshal(c)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "${")
+
 	for k, v := range c.Templates {
-		assert.NotContains(t, "${", "%s is not extrapolated: %s", k, v)
+		assert.NotContains(t, v, "${", "%s is not extrapolated: %s", k, v)
 	}
 
 	for idx, v := range c.List {
-		assert.NotContains(t, "${", "list[%d] is not extrapolated: %s", idx, v)
+		assert.NotContains(t, v, "${", "list[%d] is not extrapolated: %s", idx, v)
 	}
 	assert.Len(t, c.List, 4)
 }
@@ -90,23 +96,27 @@ func TestLoadYAMLWithOverride(t *testing.T) {
 	assert.Equal(t, "porto-pod", c.ServiceName)
 	assert.NotEmpty(t, c.ClusterName)
 
-	assert.Equal(t, "/tmp/porto/logs", c.Logs.Directory)
+	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/logs", c.Environment), c.Logs.Directory)
 	assert.Equal(t, 3, c.Logs.MaxAgeDays)
 	assert.Equal(t, 10, c.Logs.MaxSizeMb)
 
-	assert.Equal(t, "/tmp/porto/audit", c.Audit.Directory)
+	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/audit", c.Environment), c.Audit.Directory)
 	assert.Equal(t, 99, c.Audit.MaxAgeDays)
 	assert.Equal(t, 99, c.Audit.MaxSizeMb)
 
 	assert.Equal(t, "test2", c.Templates["environment"])
 	assert.Equal(t, "TEST2", c.Templates["ENVIRONMENT"])
 
+	b, err := yaml.Marshal(c)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "${")
+
 	for k, v := range c.Templates {
-		assert.NotContains(t, "${", "%s is not extrapolated: %s", k, v)
+		assert.NotContains(t, v, "${", "%s is not extrapolated: %s", k, v)
 	}
 
 	for idx, v := range c.List {
-		assert.NotContains(t, "${", "list[%d] is not extrapolated: %s", idx, v)
+		assert.NotContains(t, v, "${", "list[%d] is not extrapolated: %s", idx, v)
 	}
 	assert.Len(t, c.List, 5)
 }
