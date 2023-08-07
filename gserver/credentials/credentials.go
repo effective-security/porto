@@ -55,7 +55,7 @@ func (b *bundle) PerRPCCredentials() grpccredentials.PerRPCCredentials {
 	return b.rc
 }
 
-func (b *bundle) NewWithMode(mode string) (grpccredentials.Bundle, error) {
+func (b *bundle) NewWithMode(_ string) (grpccredentials.Bundle, error) {
 	// no-op
 	return nil, nil
 }
@@ -107,7 +107,7 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 	return true
 }
 
-func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
 	rc.authTokenMu.RLock()
 	typ := rc.tokenType
 	authToken := rc.accessToken

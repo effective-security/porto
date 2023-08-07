@@ -93,9 +93,6 @@ func DbNameFromConnection(conn string) string {
 	return conn[idx+7:]
 }
 
-// any is an alias for interface{} and is equivalent to interface{} in all ways.
-type any = interface{}
-
 // SQL provides interface for Db operations
 type SQL interface {
 	// QueryContext executes a query that returns rows, typically a SELECT.

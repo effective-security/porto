@@ -28,7 +28,7 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.Time, req interface{}, resp interface{}, err error) {
+func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.Time, req interface{}, _ interface{}, err error) {
 	duration := time.Since(startTime)
 	expensiveRequest := duration > warnUnaryRequestLatency
 
@@ -80,7 +80,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	metricskey.GRPCReqByRole.IncrCounter(1, info.FullMethod, codeName, role)
 }
 
-func newStreamInterceptor(s *Server) grpc.StreamServerInterceptor {
+func newStreamInterceptor(_ *Server) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		logger.KV(xlog.DEBUG, "method", info.FullMethod)
 		return handler(srv, ss)

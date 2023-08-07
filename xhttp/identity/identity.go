@@ -123,7 +123,7 @@ func GuestIdentityMapper(r *http.Request) (Identity, error) {
 }
 
 // GuestIdentityForContext always returns "guest" for the role
-func GuestIdentityForContext(ctx context.Context, method string) (Identity, error) {
+func GuestIdentityForContext(_ context.Context, _ string) (Identity, error) {
 	return NewIdentity(GuestRoleName, "", "", nil, "", ""), nil
 }
 
