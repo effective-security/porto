@@ -1,6 +1,8 @@
 include .project/gomod-project.mk
 export GO111MODULE=on
 BUILD_FLAGS=
+# -test.v -race
+TEST_FLAGS=
 
 .PHONY: *
 
