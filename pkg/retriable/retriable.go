@@ -352,6 +352,11 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	return c, nil
 }
 
+// HTTPClient returns undelying http.Client
+func (c *Client) HTTPClient() *http.Client {
+	return c.httpClient
+}
+
 // Storage returns the current storage
 func (c *Client) Storage() *Storage {
 	return c.Config.Storage()
