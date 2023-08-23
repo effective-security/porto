@@ -77,16 +77,15 @@ func Test_AddAndGet(t *testing.T) {
 	scheduler.Add(t2)
 	assert.Equal(t, 2, scheduler.Count())
 
-	t11, err := scheduler.Get(t1.ID())
-	require.NoError(t, err)
+	t11 := scheduler.Get(t1.ID())
+	require.NotNil(t, t11)
 	require.Equal(t, t1, t11)
 
-	t12, err := scheduler.Get(t2.ID())
-	require.NoError(t, err)
+	t12 := scheduler.Get(t2.ID())
+	require.NotNil(t, t12)
 	require.Equal(t, t2, t12)
 
-	t13, err := scheduler.Get("test3")
-	require.Error(t, err)
+	t13 := scheduler.Get("test3")
 	require.Nil(t, t13)
 
 	scheduler.Clear()
