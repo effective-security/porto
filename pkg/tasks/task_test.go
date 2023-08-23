@@ -132,17 +132,17 @@ func Test_parseTaskFormat(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.format, func(t *testing.T) {
-			j, err := parseTaskFormat(tt.format)
+			j, err := NewTask(tt.format)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, j)
-				assert.Equal(t, tt.wantTask.interval, j.interval)
-				assert.Equal(t, tt.wantTask.unit, j.unit)
-				assert.Equal(t, tt.wantTask.period, j.period)
-				assert.Equal(t, tt.wantTask.startDay, j.startDay)
-				assert.Equal(t, tt.wantTask.NextScheduledTime(), j.NextScheduledTime())
+				assert.Equal(t, tt.wantTask.interval, j.(*task).interval)
+				assert.Equal(t, tt.wantTask.unit, j.(*task).unit)
+				assert.Equal(t, tt.wantTask.period, j.(*task).period)
+				assert.Equal(t, tt.wantTask.startDay, j.(*task).startDay)
+				assert.Equal(t, tt.wantTask.NextScheduledTime(), j.(*task).NextScheduledTime())
 
 				d := j.Duration()
 				assert.True(t, d > 0)
@@ -341,4 +341,24 @@ func Test_TaskLongTime(t *testing.T) {
 func longTask() {
 	logger.Info("TEST: slow task started")
 	time.Sleep(3 * time.Second)
+}
+
+func Test_TaskUpdate(t *testing.T) {
+	tsk, err := NewTask("every 2 hours")
+	assert.NoError(t, err)
+	assert.NotNil(t, tsk)
+	tskI := tsk.(*task)
+	assert.Equal(t, uint64(2), tskI.interval)
+	assert.Equal(t, Hours, tskI.unit)
+	assert.Equal(t, time.Weekday(0), tskI.startDay)
+	assert.Equal(t, time.Duration(0), tskI.period)
+
+	tsk.UpdateSchedule("every 7 days")
+	assert.NoError(t, err)
+	assert.NotNil(t, tsk)
+	tskI = tsk.(*task)
+	assert.Equal(t, uint64(7), tskI.interval)
+	assert.Equal(t, Days, tskI.unit)
+	assert.Equal(t, time.Weekday(0), tskI.startDay)
+	assert.Equal(t, time.Duration(0), tskI.period)
 }
