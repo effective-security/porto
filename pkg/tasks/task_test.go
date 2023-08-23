@@ -352,6 +352,8 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.Equal(t, Hours, tskI.unit)
 	assert.Equal(t, time.Weekday(0), tskI.startDay)
 	assert.Equal(t, time.Duration(0), tskI.period)
+	assert.Equal(t, 2*time.Hour, tsk.Duration())
+	assert.Equal(t, 2*time.Hour, tskI.period)
 
 	tsk.UpdateSchedule("every 7 days")
 	assert.NoError(t, err)
@@ -361,4 +363,6 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.Equal(t, Days, tskI.unit)
 	assert.Equal(t, time.Weekday(0), tskI.startDay)
 	assert.Equal(t, time.Duration(0), tskI.period)
+	assert.Equal(t, 7*24*time.Hour, tsk.Duration())
+	assert.Equal(t, 7*24*time.Hour, tskI.period)
 }

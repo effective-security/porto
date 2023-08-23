@@ -203,6 +203,7 @@ func (j *task) UpdateSchedule(format string) error {
 	j.unit = tsk.unit
 	j.interval = tsk.interval
 	j.startDay = tsk.startDay
+	j.period = tsk.period
 
 	return nil
 }
