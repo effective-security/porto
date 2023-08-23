@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/effective-security/porto/x/guid"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
@@ -35,6 +36,8 @@ const (
 
 // Task defines task interface
 type Task interface {
+	// ID returns the id of the task
+	ID() string
 	// Name returns a name of the task
 	Name() string
 	// RunCount species the number of times the task executed
@@ -45,6 +48,9 @@ type Task interface {
 	LastRunTime() time.Time
 	// Duration returns interval between runs
 	Duration() time.Duration
+
+	// UpdateSchedule updates the task with the new format
+	UpdateSchedule(format string) error
 
 	// ShouldRun returns true if the task should be run now
 	ShouldRun() bool
@@ -59,6 +65,8 @@ type Task interface {
 
 // task describes a task schedule
 type task struct {
+	// id is unique guide assigned to the task
+	id string
 	// pause interval * unit bettween runs
 	interval uint64
 	// time units, ,e.g. 'minutes', 'hours'...
@@ -93,6 +101,7 @@ const DefaultRunTimeoutInterval = time.Second
 // NewTaskAtIntervals creates a new task with the time interval.
 func NewTaskAtIntervals(interval uint64, unit TimeUnit) Task {
 	return &task{
+		id:         guid.MustCreate(),
 		interval:   interval,
 		unit:       unit,
 		lastRunAt:  nil,
@@ -111,6 +120,7 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int) Task {
 		logger.Panicf("invalid time value: time='%d:%d'", hour, minute)
 	}
 	j := &task{
+		id:         guid.MustCreate(),
 		interval:   1,
 		unit:       Weeks,
 		lastRunAt:  nil,
@@ -130,6 +140,7 @@ func NewTaskDaily(hour, minute int) Task {
 		logger.Panicf("invalid time value:, time='%d:%d'", hour, minute)
 	}
 	j := &task{
+		id:         guid.MustCreate(),
 		interval:   1,
 		unit:       Days,
 		lastRunAt:  nil,
@@ -149,7 +160,56 @@ func NewTaskDaily(hour, minute int) Task {
 // Monday | .. | Sunday
 // at %hh:mm
 func NewTask(format string) (Task, error) {
-	return parseTaskFormat(format)
+	j := &task{
+		id:        guid.MustCreate(),
+		interval:  0,
+		unit:      Never,
+		lastRunAt: nil,
+		nextRunAt: time.Unix(0, 0),
+		period:    0,
+		startDay:  time.Sunday,
+		runLock:   make(chan struct{}, 1),
+		count:     0,
+	}
+
+	err := j.parseTaskFormat(format)
+	if err != nil {
+		return nil, err
+	}
+	return j, nil
+}
+
+// NewTaskWithID creates a new task from the given id and format string.
+func NewTaskWithID(id, format string) (Task, error) {
+	j, err := NewTask(format)
+	if err != nil {
+		return nil, err
+	}
+
+	// overwrite default id
+	j.(*task).id = id
+
+	return j, nil
+}
+
+// UpdateSchedule updates the task with a new schedule
+func (j *task) UpdateSchedule(format string) error {
+	t, err := NewTask(format)
+	if err != nil {
+		return err
+	}
+
+	tsk := t.(*task)
+	j.unit = tsk.unit
+	j.interval = tsk.interval
+	j.startDay = tsk.startDay
+
+	return nil
+}
+
+// ID returns a id of the task
+func (j *task) ID() string {
+	return j.id
 }
 
 // Name returns a name of the task
@@ -357,26 +417,15 @@ func parseTimeFormat(t string) (hour, min int, err error) {
 	return
 }
 
-func parseTaskFormat(format string) (*task, error) {
+func (j *task) parseTaskFormat(format string) error {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
-
-	j := &task{
-		interval:  0,
-		unit:      Never,
-		lastRunAt: nil,
-		nextRunAt: time.Unix(0, 0),
-		period:    0,
-		startDay:  time.Sunday,
-		runLock:   make(chan struct{}, 1),
-		count:     0,
-	}
 
 	ts := strings.Split(strings.ToLower(format), " ")
 	for _, t := range ts {
 		switch t {
 		case "every":
 			if j.interval > 0 {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.interval = 1
 		case "second", "seconds":
@@ -391,43 +440,43 @@ func parseTaskFormat(format string) (*task, error) {
 			j.unit = Weeks
 		case "monday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Monday
 		case "tuesday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Tuesday
 		case "wednesday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Wednesday
 		case "thursday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Thursday
 		case "friday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Friday
 		case "saturday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Saturday
 		case "sunday":
 			if j.interval > 1 || j.unit != Never {
-				return nil, errors.WithStack(errTimeFormat)
+				return errors.WithStack(errTimeFormat)
 			}
 			j.unit = Weeks
 			j.startDay = time.Sunday
@@ -435,21 +484,21 @@ func parseTaskFormat(format string) (*task, error) {
 			if strings.Contains(t, ":") {
 				hour, min, err := parseTimeFormat(t)
 				if err != nil {
-					return nil, errors.WithStack(errTimeFormat)
+					return errors.WithStack(errTimeFormat)
 				}
 				if j.unit == Never {
 					j.unit = Days
 				} else if j.unit != Days && j.unit != Weeks {
-					return nil, errors.WithStack(errTimeFormat)
+					return errors.WithStack(errTimeFormat)
 				}
 				j.at(hour, min)
 			} else {
 				if j.interval > 1 {
-					return nil, errors.WithStack(errTimeFormat)
+					return errors.WithStack(errTimeFormat)
 				}
 				interval, err := strconv.ParseUint(t, 10, 0)
 				if err != nil || interval < 1 {
-					return nil, errors.WithStack(errTimeFormat)
+					return errors.WithStack(errTimeFormat)
 				}
 				j.interval = interval
 			}
@@ -459,8 +508,8 @@ func parseTaskFormat(format string) (*task, error) {
 		j.interval = 1
 	}
 	if j.unit == Never {
-		return nil, errors.WithStack(errTimeFormat)
+		return errors.WithStack(errTimeFormat)
 	}
 
-	return j, nil
+	return nil
 }

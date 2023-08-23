@@ -30,6 +30,8 @@ func SetGlobalLocation(newLocation *time.Location) {
 type Scheduler interface {
 	// Add adds a task to a pool of scheduled tasks
 	Add(Task) Scheduler
+	// Get returns the task by id
+	Get(id string) (Task, error)
 	// Clear will delete all scheduled tasks
 	Clear()
 	// Count returns the number of registered tasks
@@ -120,6 +122,19 @@ func (s *scheduler) Add(j Task) Scheduler {
 
 	s.tasks = append(s.tasks, j)
 	return s
+}
+
+// Get returns the task by the given name
+func (s *scheduler) Get(id string) (Task, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	for _, t := range s.tasks {
+		if t.ID() == id {
+			return t, nil
+		}
+	}
+	return nil, errors.Errorf("task not found: %s", id)
 }
 
 // runPending will run all the tasks that are scheduled to run.
