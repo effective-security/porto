@@ -85,7 +85,7 @@ func (f *Factory) Load(configFile string, config interface{}) error {
 // LoadForHostName will load the configuration from the named config file for specified host name,
 // apply any overrides, and resolve relative directory locations.
 func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config interface{}) error {
-	logger.KV(xlog.INFO, "cfg", configFile, "hostname", hostnameOverride)
+	logger.KV(xlog.TRACE, "cfg", configFile, "hostname", hostnameOverride)
 
 	configFile, baseDir, err := f.resolveConfigFile(configFile)
 	if err != nil {
@@ -163,7 +163,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 			if err != nil {
 				return errors.WithMessagef(err, "failed to resolve file")
 			}
-			logger.KV(xlog.INFO, "hostname", hn, "override", override)
+			logger.KV(xlog.TRACE, "hostname", hn, "override", override)
 			ops = append(ops, yamlcfg.File(override))
 		}
 	}
@@ -173,7 +173,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 		if err != nil {
 			return err
 		}
-		logger.KV(xlog.INFO, "override", overrideCfg)
+		logger.KV(xlog.TRACE, "override", overrideCfg)
 		ops = append(ops, yamlcfg.File(overrideCfg))
 	}
 
@@ -236,7 +236,7 @@ func (f *Factory) resolveConfigFile(configFile string) (absConfigFile, baseDir s
 		absConfigFile, err = resolve.File(configFile, absDir)
 		if err == nil && absConfigFile != "" {
 			baseDir = absDir
-			logger.KV(xlog.INFO, "resolved", absConfigFile)
+			logger.KV(xlog.DEBUG, "resolved", absConfigFile)
 			return
 		}
 	}
@@ -268,8 +268,20 @@ func userName() string {
 
 // resolveEnvVars replace variables in the input string
 func resolveEnvVars(s string, variables map[string]string) string {
-	for key, value := range variables {
-		s = strings.Replace(s, key, value, -1)
+	if strings.Contains(s, "${") {
+		for key, value := range variables {
+			s = strings.Replace(s, key, value, -1)
+		}
+	}
+
+	if strings.Contains(s, "${") {
+		//s = strings.Replace(s, key, value, -1)
+		s = os.Expand(s, func(env string) string {
+			if va, ok := variables[env]; ok {
+				return va
+			}
+			return os.Getenv(env)
+		})
 	}
 
 	return s
@@ -286,8 +298,6 @@ func doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
 	if !v.IsValid() {
 		return
 	}
-
-	// logger.Infof("kind=%v, type=%v", v.Kind(), v.Type())
 
 	switch v.Kind() {
 	case reflect.Struct:
@@ -306,7 +316,6 @@ func doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
 		doSubstituteEnvVars(v.Elem(), variables)
 	case reflect.Map:
 		if v.Type().String() == "map[string]string" {
-			// logger.Warningf("t=%v", v.Interface())
 			m := v.Interface().(map[string]string)
 			for k, v := range m {
 				m[k] = resolveEnvVars(v, variables)

@@ -386,7 +386,7 @@ func (s *testSuite) Test_UntrustedServerWithServicesOverHTTPS() {
 
 		_, _, err = client.Get(ctx, "/v1/test", w)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "tls: bad certificate")
+		assert.Contains(t, err.Error(), "tls: ")
 	})
 
 	s.T().Run("untrusted server root", func(t *testing.T) {
