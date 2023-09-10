@@ -2,6 +2,7 @@ package httperror_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -328,6 +329,13 @@ func TestGRPCError(t *testing.T) {
 	ev4, ok = status.FromError(ne)
 	assert.True(t, ok)
 	assert.Equal(t, codes.Unavailable, ev4.Code())
+}
+
+func TestIsNotFoundError(t *testing.T) {
+	assert.True(t, httperror.IsSqlNotFoundError(sql.ErrNoRows))
+	assert.True(t, httperror.IsSqlNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
+	assert.False(t, httperror.IsSqlNotFoundError(nil))
+	assert.False(t, httperror.IsInvalidModel(nil))
 }
 
 // grpc error

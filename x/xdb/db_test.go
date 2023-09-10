@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/x/xdb"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ func TestString(t *testing.T) {
 	assert.Equal(t, s, v)
 }
 
-func TestID(t *testing.T) {
+func TestParseID(t *testing.T) {
 	_, err := xdb.ParseUint("")
 	require.Error(t, err)
 
@@ -61,8 +62,8 @@ func TestIDString(t *testing.T) {
 }
 
 func TestIsNotFoundError(t *testing.T) {
-	assert.True(t, xdb.IsNotFoundError(sql.ErrNoRows))
-	assert.True(t, xdb.IsNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
+	assert.True(t, httperror.IsSqlNotFoundError(sql.ErrNoRows))
+	assert.True(t, httperror.IsSqlNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
 }
 
 type validator struct {
@@ -80,11 +81,6 @@ func TestValidate(t *testing.T) {
 	assert.Error(t, xdb.Validate(validator{false}))
 	assert.NoError(t, xdb.Validate(validator{true}))
 	assert.NoError(t, xdb.Validate(nil))
-}
-
-func TestIsError(t *testing.T) {
-	assert.False(t, xdb.IsNotFoundError(nil))
-	assert.False(t, xdb.IsInvalidModel(nil))
 }
 
 func TestTimePtr(t *testing.T) {

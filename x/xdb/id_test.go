@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestXdbID(t *testing.T) {
+func TestID(t *testing.T) {
 	assert.Panics(t, func() { xdb.MustID("abd") })
 	assert.Panics(t, func() { xdb.MustID("") })
 
@@ -23,7 +23,6 @@ func TestXdbID(t *testing.T) {
 		exp int64
 	}{
 		{val: xdb.MustID("123456789"), exp: int64(123456789)},
-		{val: xdb.ID{}, exp: int64(0)},
 	}
 
 	for _, tc := range tcases {
@@ -31,13 +30,80 @@ func TestXdbID(t *testing.T) {
 		require.NoError(t, err)
 
 		v, ok := dr.(int64)
-		assert.True(t, ok)
+		assert.True(t, ok, "type: %t", dr)
 		assert.Equal(t, tc.exp, v)
 
 		var val2 xdb.ID
 		err = val2.Scan(dr)
 		require.NoError(t, err)
 		assert.Equal(t, tc.val.String(), val2.String())
+	}
+
+	dr, err := xdb.ID{}.Value()
+	require.Nil(t, dr)
+	require.NoError(t, err)
+}
+
+func TestIDsValue(t *testing.T) {
+	tcases := []struct {
+		in  xdb.IDArray
+		exp string
+	}{
+		{in: xdb.IDArray{xdb.NewID(1), xdb.NewID(2)}, exp: "{1,2}"},
+		{in: xdb.IDArray{}, exp: ""},
+		{in: nil, exp: ""},
+	}
+
+	for _, tc := range tcases {
+		dr, err := tc.in.Value()
+		require.NoError(t, err)
+
+		v, ok := dr.(string)
+		if len(tc.in) > 0 {
+			assert.True(t, ok)
+			assert.Equal(t, tc.exp, v)
+		} else {
+			assert.False(t, ok)
+			assert.Nil(t, dr)
+		}
+	}
+}
+
+func TestIDsScan(t *testing.T) {
+	tcases := []struct {
+		exp xdb.IDArray
+		val string
+	}{
+		{val: "{1,2}", exp: xdb.IDArray{xdb.NewID(1), xdb.NewID(2)}},
+		{val: "{}", exp: nil},
+	}
+
+	for _, tc := range tcases {
+		var val2 xdb.IDArray
+		err := val2.Scan(tc.val)
+		require.NoError(t, err)
+		assert.EqualValues(t, tc.exp, val2)
+	}
+
+	var val xdb.IDArray
+	err := val.Scan("")
+	assert.EqualError(t, err, "failed to scan IDs: pq: unable to parse array; expected '{' at offset 0")
+	err = val.Scan("{abc}")
+	assert.EqualError(t, err, "failed to scan IDs: pq: parsing array element index 0: strconv.ParseInt: parsing \"abc\": invalid syntax")
+}
+
+func TestIDsString(t *testing.T) {
+	tcases := []struct {
+		val xdb.IDArray
+		exp []string
+	}{
+		{val: xdb.IDArray{xdb.NewID(1), xdb.NewID(2)}, exp: []string{"1", "2"}},
+		{val: xdb.IDArray{}, exp: []string(nil)},
+		{val: nil, exp: nil},
+	}
+
+	for _, tc := range tcases {
+		assert.Equal(t, tc.exp, tc.val.Strings())
 	}
 }
 

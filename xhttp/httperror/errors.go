@@ -2,13 +2,13 @@ package httperror
 
 import (
 	"context"
+	"database/sql"
 	goerrors "errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/effective-security/porto/x/slices"
-	"github.com/effective-security/porto/x/xdb"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/ugorji/go/codec"
@@ -242,7 +242,7 @@ func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 	if IsInvalidRequestError(err) {
 		return InvalidRequest(msgFormat, vals...).WithCause(err)
 	}
-	if xdb.IsNotFoundError(err) {
+	if IsSqlNotFoundError(err) {
 		return NotFound(msgFormat, vals...).WithCause(err)
 	}
 	if IsTimeout(err) {
@@ -256,12 +256,20 @@ func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...inter
 	return Wrap(err, msgFormat, vals...).WithContext(ctx)
 }
 
+// IsSqlNotFoundError returns true, if error is NotFound
+func IsSqlNotFoundError(err error) bool {
+	return err != nil &&
+		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows in result set"))
+}
+
+// IsInvalidModel returns true, if error is InvalidModel
+func IsInvalidModel(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "invalid model")
+}
+
 // IsInvalidRequestError returns true for Invalid request error
 func IsInvalidRequestError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "invalid")
+	return err != nil && strings.Contains(err.Error(), "invalid")
 }
 
 // IsTimeout returns true for timeout error
