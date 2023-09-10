@@ -76,17 +76,6 @@ func IDString(id uint64) string {
 	return strconv.FormatUint(id, 10)
 }
 
-// IsNotFoundError returns true, if error is NotFound
-func IsNotFoundError(err error) bool {
-	return err != nil &&
-		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows in result set"))
-}
-
-// IsInvalidModel returns true, if error is InvalidModel
-func IsInvalidModel(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "invalid model")
-}
-
 // DbNameFromConnection return DB name from connection
 func DbNameFromConnection(conn string) string {
 	idx := strings.LastIndex(conn, "dbname=")
