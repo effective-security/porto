@@ -1,12 +1,13 @@
 module github.com/effective-security/porto
 
-go 1.20
+go 1.21
 
 require (
 	github.com/deckarep/golang-set v1.7.1
+	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/effective-security/metrics v0.2.1-0.20221221085612-58ef13855049
-	github.com/effective-security/xlog v0.5.1-0.20230511203813-a9b98ec61d24
-	github.com/effective-security/xpki v0.7.1-0.20230512073220-31ec019cc8ae
+	github.com/effective-security/xlog v0.5.1-0.20230811204109-3251126b9465
+	github.com/effective-security/xpki v0.9.0
 	github.com/golang-migrate/migrate/v4 v4.15.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
@@ -33,7 +34,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/didip/tollbooth/v7 v7.0.1 // indirect
 	github.com/go-phorce/cov-report v1.1.1-0.20200622030546-3fb510c4b1ba // indirect
 	github.com/go-pkgz/expirable-cache v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect

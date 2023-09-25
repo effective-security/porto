@@ -17,7 +17,7 @@ func TestNewFactory(t *testing.T) {
 
 	var c struct{}
 
-	err = f.Load("notfound-config.yaml", &c)
+	_, err = f.Load("notfound-config.yaml", &c)
 	require.Error(t, err)
 	assert.Equal(t, `file "notfound-config.yaml" not found in []`, err.Error())
 }
@@ -30,7 +30,7 @@ func TestLoadYAML(t *testing.T) {
 	require.NoError(t, err)
 
 	var c configuration
-	err = f.Load(cfgFile, &c)
+	_, err = f.Load(cfgFile, &c)
 	require.NoError(t, err, "failed to load config: %v", cfgFile)
 }
 
@@ -44,7 +44,7 @@ func TestLoadYAMLOverrideByHostname(t *testing.T) {
 	os.Setenv("TEST_HOSTNAME", "UNIT_TEST")
 
 	var c configuration
-	err = f.Load(cfgFile, &c)
+	_, err = f.Load(cfgFile, &c)
 	require.NoError(t, err, "failed to load config: %v", cfgFile)
 	assert.Equal(t, "UNIT_TEST", c.Environment) // lower cased
 	assert.Equal(t, "local", c.Region)
@@ -89,7 +89,7 @@ func TestLoadYAMLWithOverride(t *testing.T) {
 	f.WithEnvironment("test2")
 
 	var c configuration
-	err = f.Load(cfgFile, &c)
+	_, err = f.Load(cfgFile, &c)
 	require.NoError(t, err, "failed to load config: %v", cfgFile)
 	assert.Equal(t, "test2", c.Environment)
 	assert.Equal(t, "test-override", c.Region)
