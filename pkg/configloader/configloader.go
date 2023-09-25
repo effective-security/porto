@@ -78,25 +78,25 @@ func GetAbsFilename(file, projFolder string) (string, error) {
 
 // Load will load the configuration from the named config file,
 // apply any overrides, and resolve relative directory locations.
-func (f *Factory) Load(configFile string, config interface{}) error {
+func (f *Factory) Load(configFile string, config interface{}) (absConfigFile string, err error) {
 	return f.LoadForHostName(configFile, "", config)
 }
 
 // LoadForHostName will load the configuration from the named config file for specified host name,
 // apply any overrides, and resolve relative directory locations.
-func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config interface{}) error {
-	logger.KV(xlog.TRACE, "cfg", configFile, "hostname", hostnameOverride)
+func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config interface{}) (absConfigFile string, err error) {
+	logger.KV(xlog.INFO, "cfg", configFile, "hostname", hostnameOverride)
 
-	configFile, baseDir, err := f.resolveConfigFile(configFile)
+	configFile, baseDir, err := f.ResolveConfigFile(configFile)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	logger.KV(xlog.DEBUG, "cfg", configFile, "baseDir", baseDir)
 
 	err = f.load(configFile, hostnameOverride, baseDir, config)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	environment := f.environment
@@ -117,7 +117,7 @@ func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config in
 	}
 	substituteEnvVars(config, variables)
 
-	return err
+	return configFile, nil
 }
 
 // Hostmap provides overrides info
@@ -169,7 +169,7 @@ func (f *Factory) load(configFilename, hostnameOverride, baseDir string, config 
 	}
 
 	if len(f.overrideCfg) > 0 {
-		overrideCfg, _, err := f.resolveConfigFile(f.overrideCfg)
+		overrideCfg, _, err := f.ResolveConfigFile(f.overrideCfg)
 		if err != nil {
 			return err
 		}
@@ -219,7 +219,8 @@ func (f *Factory) getVariableValues(environment string) map[string]string {
 	return ret
 }
 
-func (f *Factory) resolveConfigFile(configFile string) (absConfigFile, baseDir string, err error) {
+// ResolveConfigFile returns absolute path for the config file
+func (f *Factory) ResolveConfigFile(configFile string) (absConfigFile, baseDir string, err error) {
 	if configFile == "" {
 		panic("config file not provided!")
 		//configFile = ConfigFileName

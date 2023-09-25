@@ -157,7 +157,7 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 	// load from the folder
 	err := filepath.Walk(c.folder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			logger.KV(xlog.ERROR, "path", path, "err", err.Error())
+			logger.KV(xlog.DEBUG, "path", path, "err", err.Error())
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jwk") {
