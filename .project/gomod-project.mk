@@ -21,9 +21,6 @@ SHELL=/bin/bash
 #	PROJ_GOFILES
 #		List of all .go files in the project, exluding vendor and tools
 #
-#	REL_PATH_TO_GOPATH
-#		Relative path from repo to GOPATH
-#
 # Test flags:
 #
 #	TEST_RACEFLAG
@@ -51,7 +48,6 @@ ORG_NAME := $(shell .project/config_var.sh project_org)
 PROJ_NAME := $(shell .project/config_var.sh project_name)
 REPO_NAME := ${ORG_NAME}/${PROJ_NAME}
 PROJ_PACKAGE := ${REPO_NAME}
-REL_PATH_TO_GOPATH := $(shell .project/rel_gopath.sh)
 
 ## Common variables
 HOSTNAME := $(shell echo $$HOSTNAME)

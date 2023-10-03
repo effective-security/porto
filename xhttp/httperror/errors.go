@@ -242,7 +242,7 @@ func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 	if IsInvalidRequestError(err) {
 		return InvalidRequest(msgFormat, vals...).WithCause(err)
 	}
-	if IsSqlNotFoundError(err) {
+	if IsSQLNotFoundError(err) {
 		return NotFound(msgFormat, vals...).WithCause(err)
 	}
 	if IsTimeout(err) {
@@ -256,8 +256,8 @@ func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...inter
 	return Wrap(err, msgFormat, vals...).WithContext(ctx)
 }
 
-// IsSqlNotFoundError returns true, if error is NotFound
-func IsSqlNotFoundError(err error) bool {
+// IsSQLNotFoundError returns true, if error is NotFound
+func IsSQLNotFoundError(err error) bool {
 	return err != nil &&
 		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows in result set"))
 }

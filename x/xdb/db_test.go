@@ -62,8 +62,8 @@ func TestIDString(t *testing.T) {
 }
 
 func TestIsNotFoundError(t *testing.T) {
-	assert.True(t, httperror.IsSqlNotFoundError(sql.ErrNoRows))
-	assert.True(t, httperror.IsSqlNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
+	assert.True(t, httperror.IsSQLNotFoundError(sql.ErrNoRows))
+	assert.True(t, httperror.IsSQLNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
 }
 
 type validator struct {
