@@ -85,7 +85,7 @@ func (f *Factory) Load(configFile string, config interface{}) (absConfigFile str
 // LoadForHostName will load the configuration from the named config file for specified host name,
 // apply any overrides, and resolve relative directory locations.
 func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config interface{}) (absConfigFile string, err error) {
-	logger.KV(xlog.INFO, "cfg", configFile, "hostname", hostnameOverride)
+	logger.KV(xlog.TRACE, "cfg", configFile, "hostname", hostnameOverride)
 
 	configFile, baseDir, err := f.ResolveConfigFile(configFile)
 	if err != nil {
