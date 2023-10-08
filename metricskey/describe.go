@@ -29,6 +29,21 @@ var (
 		RequiredTags: []string{"api", "status", "role"},
 		Help:         "provides counts for gRPC request by role.",
 	}
+
+	// StatsVersion is gauge metric for app version
+	StatsVersion = metrics.Describe{
+		Type: metrics.TypeGauge,
+		Name: "version",
+		Help: "version provides the deployed version",
+		//RequiredTags: []string{},
+	}
+	// HealthLogErrors is counter metric for log errors
+	HealthLogErrors = metrics.Describe{
+		Type:         metrics.TypeCounter,
+		Name:         "log_errors",
+		Help:         "log_errors provides the counter of errors in logs",
+		RequiredTags: []string{"pkg", "build"},
+	}
 )
 
 // Metrics returns slice of metrics from this repo
@@ -38,4 +53,6 @@ var Metrics = []*metrics.Describe{
 	&GRPCReqPerf,
 	&GRPCReqPerf,
 	&GRPCReqByRole,
+	&StatsVersion,
+	&HealthLogErrors,
 }

@@ -380,7 +380,12 @@ func TestSlices_StringUpto(t *testing.T) {
 }
 
 func Test_removeDuplicates(t *testing.T) {
-	dups := []string{"12", "45", "45", "78", "12", "secdi"}
+	dups := []string{"12", "45", "45", "78", "12", "porto"}
 	noDups := UniqueStrings(dups)
 	assert.Equal(t, len(noDups), 4)
+}
+
+func TestNvlNumber(t *testing.T) {
+	assert.Equal(t, 1, NvlNumber(0, 1))
+	assert.Equal(t, uint64(1), NvlNumber(0, uint64(1)))
 }
