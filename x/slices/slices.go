@@ -149,7 +149,7 @@ func BoolSlicesEqual(a, b []bool) bool {
 // StringsCoalesce returns the first non-empty string value
 func StringsCoalesce(str ...string) string {
 	for _, s := range str {
-		if s != "" {
+		if len(s) > 0 {
 			return s
 		}
 	}
@@ -235,6 +235,9 @@ func Float64SlicesEqual(a, b []float64) bool {
 
 // UniqueStrings removes duplicates from the given list
 func UniqueStrings(dups []string) []string {
+	if len(dups) < 2 {
+		return dups
+	}
 	keys := make(map[string]bool)
 	list := []string{}
 
@@ -245,4 +248,14 @@ func UniqueStrings(dups []string) []string {
 		}
 	}
 	return list
+}
+
+// NvlNumber returns the first value from the supplied list that is not 0, or 0 if there are no values that are not zero
+func NvlNumber[T ~int | ~int32 | ~uint | ~uint32 | ~int64 | ~uint64](items ...T) T {
+	for _, x := range items {
+		if x != 0 {
+			return x
+		}
+	}
+	return 0
 }
