@@ -116,20 +116,28 @@ func Start(
 		return nil, errors.WithMessagef(err, "unable to inject dependencies")
 	}
 
-	err = container.Invoke(func(
-		jwtParser jwt.Parser,
-		at roles.AccessToken,
-	) error {
-		iden, err := roles.New(&cfg.IdentityMap, jwtParser, at)
+	if cfg.IdentityMap != nil {
+		err = container.Invoke(func(
+			jwtParser jwt.Parser,
+			at roles.AccessToken,
+		) error {
+			iden, err := roles.New(cfg.IdentityMap, jwtParser, at)
+			if err != nil {
+				logger.KV(xlog.ERROR, "err", err)
+				return err
+			}
+			e.identity = iden
+			return nil
+		})
+		if err != nil {
+			return nil, errors.WithMessagef(err, "unable to initialize identity provider")
+		}
+	} else {
+		iden, err := roles.New(&roles.IdentityMap{}, nil, nil)
 		if err != nil {
 			logger.KV(xlog.ERROR, "err", err)
-			return err
 		}
 		e.identity = iden
-		return nil
-	})
-	if err != nil {
-		return nil, errors.WithMessagef(err, "unable to initialize identity provider")
 	}
 
 	if cfg.Authz != nil &&
