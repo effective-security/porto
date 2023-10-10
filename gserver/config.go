@@ -39,7 +39,7 @@ type Config struct {
 	Services []string `json:"services" yaml:"services"`
 
 	// IdentityMap contains configuration for the roles
-	IdentityMap roles.IdentityMap `json:"identity_map" yaml:"identity_map"`
+	IdentityMap *roles.IdentityMap `json:"identity_map" yaml:"identity_map"`
 
 	// Authz contains configuration for the authorization module
 	Authz *authz.Config `json:"authz" yaml:"authz"`
