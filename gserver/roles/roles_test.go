@@ -24,7 +24,7 @@ import (
 )
 
 func Test_Empty(t *testing.T) {
-	p, err := roles.New(&roles.IdentityMap{}, nil, nil)
+	p, err := roles.New(&roles.IdentityMap{}, nil)
 	require.NoError(t, err)
 
 	r, _ := http.NewRequest(http.MethodGet, "/", nil)
@@ -46,12 +46,9 @@ func Test_All(t *testing.T) {
 		},
 	}
 	mock := mockJWT{
-		claims: claims,
-		err:    nil,
-	}
-	at := mockAccessToken{
-		claims: claims,
-		err:    nil,
+		claims:   claims,
+		atClaims: claims,
+		err:      nil,
 	}
 
 	p, err := roles.New(&roles.IdentityMap{
@@ -79,7 +76,7 @@ func Test_All(t *testing.T) {
 				"trusty-admin": {"12234"},
 			},
 		},
-	}, mock, at)
+	}, mock)
 	require.NoError(t, err)
 
 	t.Run("default role http", func(t *testing.T) {
@@ -174,11 +171,6 @@ func TestInvalidIssuer(t *testing.T) {
 		claims: claims,
 		err:    nil,
 	}
-	at := mockAccessToken{
-		claims: claims,
-		err:    nil,
-	}
-
 	p, err := roles.New(&roles.IdentityMap{
 		JWT: roles.JWTIdentityMap{
 			Enabled:                  true,
@@ -196,7 +188,7 @@ func TestInvalidIssuer(t *testing.T) {
 				"trusty-admin": {"denis@trusty.ca"},
 			},
 		},
-	}, mock, at)
+	}, mock)
 	require.NoError(t, err)
 
 	t.Run("default role http", func(t *testing.T) {
@@ -263,11 +255,6 @@ func TestInvalidAudience(t *testing.T) {
 		claims: claims,
 		err:    nil,
 	}
-	at := mockAccessToken{
-		claims: claims,
-		err:    nil,
-	}
-
 	p, err := roles.New(&roles.IdentityMap{
 		JWT: roles.JWTIdentityMap{
 			Enabled:                  true,
@@ -287,7 +274,7 @@ func TestInvalidAudience(t *testing.T) {
 				"trusty-admin": {"denis@trusty.ca"},
 			},
 		},
-	}, mock, at)
+	}, mock)
 	require.NoError(t, err)
 
 	t.Run("default role http", func(t *testing.T) {
@@ -362,7 +349,7 @@ func Test_DPoPInvalid(t *testing.T) {
 					"trusty-admin": {"denis@trusty.ca"},
 				},
 			},
-		}, mock, nil)
+		}, mock)
 		require.NoError(t, err)
 
 		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
@@ -402,7 +389,7 @@ func Test_DPoPInvalid(t *testing.T) {
 					"trusty-admin": {"denis@trusty.ca"},
 				},
 			},
-		}, mock, nil)
+		}, mock)
 		require.NoError(t, err)
 
 		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
@@ -428,7 +415,7 @@ func TestTLSOnly(t *testing.T) {
 				"trusty-client": {"spiffe://trusty/client"},
 			},
 		},
-	}, nil, nil)
+	}, nil)
 	require.NoError(t, err)
 
 	t.Run("default role http", func(t *testing.T) {
@@ -543,26 +530,19 @@ func setAuthorizationDPoPHeader(r *http.Request, dpop, token string) {
 }
 
 type mockJWT struct {
-	claims jwt.MapClaims
-	err    error
+	claims   jwt.MapClaims
+	atClaims jwt.MapClaims
+	err      error
 }
 
-func (m mockJWT) ParseToken(authorization string, cfg jwt.VerifyConfig) (jwt.MapClaims, error) {
-	err := m.claims.Valid(cfg)
+func (m mockJWT) ParseToken(ctx context.Context, authorization string, cfg *jwt.VerifyConfig) (jwt.MapClaims, error) {
+	claims := m.claims
+	if strings.HasPrefix(authorization, "pat.") {
+		claims = m.atClaims
+	}
+	err := claims.Valid(cfg)
 	if m.err != nil {
 		err = m.err
 	}
 	return m.claims, err
-}
-
-type mockAccessToken struct {
-	claims jwt.MapClaims
-	err    error
-}
-
-func (m mockAccessToken) Claims(ctx context.Context, auth string) (jwt.MapClaims, error) {
-	if !strings.HasPrefix(auth, "pat.") {
-		return nil, nil
-	}
-	return m.claims, m.err
 }
