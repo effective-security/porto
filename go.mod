@@ -7,7 +7,7 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/effective-security/metrics v0.2.1-0.20231002092129-e110232f94b4
 	github.com/effective-security/xlog v0.5.1
-	github.com/effective-security/xpki v0.9.0
+	github.com/effective-security/xpki v0.10.0
 	github.com/golang-migrate/migrate/v4 v4.15.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
@@ -37,6 +37,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.0 // indirect
 	github.com/go-pkgz/expirable-cache v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

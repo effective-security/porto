@@ -1,6 +1,7 @@
 package retriable
 
 import (
+	"context"
 	"crypto"
 	"net/url"
 	"os"
@@ -12,9 +13,9 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
+	jose "github.com/go-jose/go-jose/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/square/go-jose.v2"
 )
 
 func Test_Factory(t *testing.T) {
@@ -97,13 +98,13 @@ func TestWithAuthorization(t *testing.T) {
 	dk, err := dpop.GenerateKey("")
 	require.NoError(t, err)
 
-	js, err := jwt.NewFromCryptoSigner(signer.Key.(crypto.Signer))
+	js, err := jwt.NewProviderFromCryptoSigner(signer.Key.(crypto.Signer))
 	require.NoError(t, err)
 
 	extra := jwt.MapClaims{}
 	dpop.SetCnfClaim(extra, dk.KeyID)
 
-	tk, err := js.Sign(jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
+	tk, err := js.Sign(context.Background(), jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
 	require.NoError(t, err)
 
 	client, err := New(ClientConfig{

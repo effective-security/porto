@@ -31,7 +31,6 @@ func TestStartEmptyHTTP(t *testing.T) {
 
 	c := mockappcontainer.NewBuilder().
 		WithJwtParser(nil).
-		WithAccessToken(nil).
 		WithDiscovery(discovery.New()).
 		Container()
 
@@ -72,7 +71,6 @@ func TestRateLimit(t *testing.T) {
 
 	c := mockappcontainer.NewBuilder().
 		WithJwtParser(nil).
-		WithAccessToken(nil).
 		WithDiscovery(discovery.New()).
 		Container()
 
@@ -119,7 +117,6 @@ func TestStartEmptyHTTPS(t *testing.T) {
 
 	c := mockappcontainer.NewBuilder().
 		WithJwtParser(nil).
-		WithAccessToken(nil).
 		WithDiscovery(discovery.New()).
 		Container()
 

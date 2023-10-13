@@ -117,23 +117,21 @@ func Start(
 	}
 
 	if cfg.IdentityMap != nil {
-		err = container.Invoke(func(
-			jwtParser jwt.Parser,
-			at roles.AccessToken,
-		) error {
-			iden, err := roles.New(cfg.IdentityMap, jwtParser, at)
-			if err != nil {
-				logger.KV(xlog.ERROR, "err", err)
-				return err
-			}
-			e.identity = iden
+		var jwtparser jwt.Parser
+		err = container.Invoke(func(jwtParser jwt.Parser) error {
+			jwtparser = jwtParser
 			return nil
 		})
 		if err != nil {
-			return nil, errors.WithMessagef(err, "unable to initialize identity provider")
+			logger.KV(xlog.ERROR, "reason", "jwt.Parser not provided", "err", err)
 		}
+		iden, err := roles.New(cfg.IdentityMap, jwtparser)
+		if err != nil {
+			return nil, errors.WithMessagef(err, "unable to create roles AuthZ")
+		}
+		e.identity = iden
 	} else {
-		iden, err := roles.New(&roles.IdentityMap{}, nil, nil)
+		iden, err := roles.New(&roles.IdentityMap{}, nil)
 		if err != nil {
 			logger.KV(xlog.ERROR, "err", err)
 		}

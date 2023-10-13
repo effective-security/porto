@@ -58,13 +58,6 @@ type IdentityProvider interface {
 	IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error)
 }
 
-// AccessToken provides interface for Access Token
-type AccessToken interface {
-	// Claims returns claims from the Access Token,
-	// or nil if `auth` is not Access Token
-	Claims(ctx context.Context, auth string) (jwt.MapClaims, error)
-}
-
 // Provider for identity
 type provider struct {
 	config    IdentityMap
@@ -72,21 +65,22 @@ type provider struct {
 	jwtRoles  map[string]string
 	tlsRoles  map[string]string
 	jwt       jwt.Parser
-	at        AccessToken
 }
 
 // New returns Authz provider instance
-func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider, error) {
+func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	prov := &provider{
 		config:    *config,
 		dpopRoles: make(map[string]string),
 		jwtRoles:  make(map[string]string),
 		tlsRoles:  make(map[string]string),
 		jwt:       jwt,
-		at:        at,
 	}
 
 	if config.DPoP.Enabled {
+		if jwt == nil {
+			return nil, errors.Errorf("dpop: JWT parser is required")
+		}
 		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
 		prov.config.DPoP.RoleClaim = slices.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
 		prov.config.DPoP.TenantClaim = slices.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
@@ -98,6 +92,9 @@ func New(config *IdentityMap, jwt jwt.Parser, at AccessToken) (IdentityProvider,
 		}
 	}
 	if config.JWT.Enabled {
+		if jwt == nil {
+			return nil, errors.Errorf("jwt: JWT parser is required")
+		}
 		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
 		prov.config.JWT.RoleClaim = slices.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
 		prov.config.JWT.TenantClaim = slices.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
@@ -206,7 +203,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 
 	if p.config.JWT.Enabled {
 		if strings.EqualFold(typ, "Bearer") {
-			id, err = p.jwtIdentity(token, "Bearer")
+			id, err = p.jwtIdentity(r.Context(), token, "Bearer")
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
 				//return nil, err
@@ -271,7 +268,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		}
 
 		if p.config.JWT.Enabled && typ != "" {
-			id, err := p.jwtIdentity(token, typ)
+			id, err := p.jwtIdentity(ctx, token, typ)
 			if err == nil {
 				return id, nil
 			}
@@ -313,18 +310,7 @@ func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, a
 	if p.config.DPoP.Audience != "" {
 		cfg.ExpectedAudience = []string{p.config.DPoP.Audience}
 	}
-	if p.at != nil {
-		claims, err = p.at.Claims(ctx, auth)
-		if err != nil {
-			return nil, err
-		}
-		if claims != nil {
-			err = claims.Valid(cfg)
-		}
-	}
-	if claims == nil {
-		claims, err = p.jwt.ParseToken(auth, cfg)
-	}
+	claims, err = p.jwt.ParseToken(ctx, auth, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +341,7 @@ func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, a
 	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
-func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error) {
+func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
 
@@ -365,23 +351,10 @@ func (p *provider) jwtIdentity(auth, tokenType string) (identity.Identity, error
 	if p.config.JWT.Audience != "" {
 		cfg.ExpectedAudience = []string{p.config.JWT.Audience}
 	}
-	if p.at != nil {
-		claims, err = p.at.Claims(context.Background(), auth)
-		if err != nil {
-			return nil, errors.WithMessage(err, "unable to extract claims from access token")
-		}
-		if claims != nil {
-			err = claims.Valid(cfg)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	if claims == nil {
-		claims, err = p.jwt.ParseToken(auth, cfg)
-		if err != nil {
-			return nil, errors.WithMessage(err, "unable to parse JWT token")
-		}
+
+	claims, err = p.jwt.ParseToken(ctx, auth, &cfg)
+	if err != nil {
+		return nil, errors.WithMessage(err, "unable to parse JWT token")
 	}
 
 	email := claims.String("email")

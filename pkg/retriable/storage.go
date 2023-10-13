@@ -18,9 +18,9 @@ import (
 	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
+	jose "github.com/go-jose/go-jose/v3"
 	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
-	"gopkg.in/square/go-jose.v2"
 )
 
 const (

@@ -131,7 +131,7 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 			Path: ri.Method,
 		}
 
-		dhdr, err := rc.signer.Sign("POST", u, nil)
+		dhdr, err := rc.signer.Sign(ctx, "POST", u, nil)
 		if err != nil {
 			return nil, err
 		}

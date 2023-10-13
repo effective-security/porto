@@ -35,7 +35,6 @@ func ExampleServer() {
 
 	c := mockappcontainer.NewBuilder().
 		WithJwtParser(nil).
-		WithAccessToken(nil).
 		WithDiscovery(discovery.New()).
 		Container()
 
