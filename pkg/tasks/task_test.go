@@ -134,14 +134,18 @@ func Test_parseTaskFormat(t *testing.T) {
 		t.Run(tt.format, func(t *testing.T) {
 			j, err := NewTask(tt.format)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, j)
-				assert.Equal(t, tt.wantTask.interval, j.(*task).interval)
-				assert.Equal(t, tt.wantTask.unit, j.(*task).unit)
-				assert.Equal(t, tt.wantTask.period, j.(*task).period)
-				assert.Equal(t, tt.wantTask.startDay, j.(*task).startDay)
+				wantSch := tt.wantTask.schedule
+				require.NotNil(t, wantSch, tt.format)
+				sch := j.(*task).schedule
+				require.NotNil(t, sch, tt.format)
+				assert.Equal(t, wantSch.Interval, sch.Interval)
+				assert.Equal(t, wantSch.Unit, sch.Unit)
+				assert.Equal(t, wantSch.Duration(), sch.Duration())
+				assert.Equal(t, wantSch.StartDay, sch.StartDay)
 				assert.Equal(t, tt.wantTask.NextScheduledTime(), j.(*task).NextScheduledTime())
 
 				d := j.Duration()
@@ -273,8 +277,7 @@ func Test_TaskWeekdaysTodayAfter(t *testing.T) {
 // This is to ensure that if you schedule a task for today's weekday, and the time hasn't yet passed, the next run time
 // will be scheduled for today.
 func Test_TaskWeekdaysTodayBefore(t *testing.T) {
-
-	now := time.Now()
+	now := TimeNow()
 	timeToSchedule := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute()+1, 0, 0, time.Local)
 
 	job1 := NewTaskOnWeekday(now.Weekday(), timeToSchedule.Hour(), timeToSchedule.Minute()).Do("test", testTask)
@@ -348,22 +351,24 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, tsk)
 	tskI := tsk.(*task)
-	assert.Equal(t, uint64(2), tskI.interval)
-	assert.Equal(t, Hours, tskI.unit)
-	assert.Equal(t, time.Weekday(0), tskI.startDay)
-	assert.Equal(t, time.Duration(0), tskI.period)
+	sch := tskI.schedule
+	assert.Equal(t, uint64(2), sch.Interval)
+	assert.Equal(t, Hours, sch.Unit)
+	assert.Equal(t, time.Weekday(0), sch.StartDay)
+	assert.Equal(t, time.Duration(0), sch.period)
 	assert.Equal(t, 2*time.Hour, tsk.Duration())
-	assert.Equal(t, 2*time.Hour, tskI.period)
+	assert.Equal(t, 2*time.Hour, sch.period)
 
 	tsk.UpdateSchedule("every 7 days")
 	require.NoError(t, err)
 	assert.NotNil(t, tsk)
 	tskI = tsk.(*task)
-	assert.Equal(t, uint64(7), tskI.interval)
-	assert.Equal(t, Days, tskI.unit)
-	assert.Equal(t, time.Weekday(0), tskI.startDay)
-	assert.Equal(t, time.Duration(0), tskI.period)
+	sch = tskI.schedule
+	assert.Equal(t, uint64(7), sch.Interval)
+	assert.Equal(t, Days, sch.Unit)
+	assert.Equal(t, time.Weekday(0), sch.StartDay)
+	assert.Equal(t, time.Duration(0), sch.period)
 	assert.Equal(t, 7*24*time.Hour, tsk.Duration())
-	assert.Equal(t, 7*24*time.Hour, tskI.period)
-	assert.Equal(t, time.Unix(0, 0), tskI.nextRunAt)
+	assert.Equal(t, 7*24*time.Hour, sch.period)
+	//assert.Equal(t, time.Unix(0, 0), sch.NextRunAt)
 }

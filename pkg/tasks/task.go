@@ -19,6 +19,9 @@ import (
 // TimeUnit specifies the time unit: 'minutes', 'hours'...
 type TimeUnit uint
 
+// TimeNow is a function that returns the current time
+var TimeNow = time.Now
+
 const (
 	// Never specifies the time unit to never run a task
 	Never TimeUnit = iota
@@ -61,25 +64,30 @@ type Task interface {
 	Do(taskName string, task interface{}, params ...interface{}) Task
 }
 
+// Schedule defines task schedule
+type Schedule struct {
+	// Interval * unit bettween runs
+	Interval uint64
+	// Unit specifies time units, ,e.g. 'minutes', 'hours'...
+	Unit TimeUnit
+	// StartDay specifies day of the week to start on
+	StartDay time.Weekday
+	// LastRunAt specifies datetime of last run
+	LastRunAt *time.Time
+	// NextRunAt specifies datetime of next run
+	NextRunAt time.Time
+
+	// cache the period between last an next run
+	period time.Duration
+}
+
 // task describes a task schedule
 type task struct {
 	// id is unique guide assigned to the task
-	id string
-	// pause interval * unit bettween runs
-	interval uint64
-	// time units, ,e.g. 'minutes', 'hours'...
-	unit TimeUnit
+	id       string
+	schedule *Schedule
 	// number of runs
 	count uint32
-	// datetime of last run
-	lastRunAt *time.Time
-	// datetime of next run
-	nextRunAt time.Time
-	// cache the period between last an next run
-	period time.Duration
-	// Specific day of the week to start on
-	startDay time.Weekday
-
 	// the task name
 	name string
 	// callback is the function to execute
@@ -98,14 +106,16 @@ const DefaultRunTimeoutInterval = time.Second
 
 // NewTaskAtIntervals creates a new task with the time interval.
 func NewTaskAtIntervals(interval uint64, unit TimeUnit) Task {
+	s := &Schedule{
+		Interval:  interval,
+		Unit:      unit,
+		LastRunAt: nil,
+		NextRunAt: time.Unix(0, 0),
+		StartDay:  time.Sunday,
+	}
 	return &task{
 		id:         guid.MustCreate(),
-		interval:   interval,
-		unit:       unit,
-		lastRunAt:  nil,
-		nextRunAt:  time.Unix(0, 0),
-		period:     0,
-		startDay:   time.Sunday,
+		schedule:   s,
 		runLock:    make(chan struct{}, 1),
 		count:      0,
 		runTimeout: DefaultRunTimeoutInterval,
@@ -117,19 +127,22 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value: time='%d:%d'", hour, minute)
 	}
+	s := &Schedule{
+		Interval:  1,
+		Unit:      Weeks,
+		LastRunAt: nil,
+		NextRunAt: time.Unix(0, 0),
+		StartDay:  startDay,
+	}
+	s.at(hour, minute)
 	j := &task{
 		id:         guid.MustCreate(),
-		interval:   1,
-		unit:       Weeks,
-		lastRunAt:  nil,
-		nextRunAt:  time.Unix(0, 0),
-		period:     0,
-		startDay:   startDay,
+		schedule:   s,
 		runLock:    make(chan struct{}, 1),
 		count:      0,
 		runTimeout: DefaultRunTimeoutInterval,
 	}
-	return j.at(hour, minute)
+	return j
 }
 
 // NewTaskDaily creates a new task to execute daily at specific time
@@ -137,19 +150,22 @@ func NewTaskDaily(hour, minute int) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value:, time='%d:%d'", hour, minute)
 	}
+	s := &Schedule{
+		Interval:  1,
+		Unit:      Days,
+		LastRunAt: nil,
+		NextRunAt: time.Unix(0, 0),
+		StartDay:  time.Sunday,
+	}
+	s.at(hour, minute)
 	j := &task{
 		id:         guid.MustCreate(),
-		interval:   1,
-		unit:       Days,
-		lastRunAt:  nil,
-		nextRunAt:  time.Unix(0, 0),
-		period:     0,
-		startDay:   time.Sunday,
+		schedule:   s,
 		runLock:    make(chan struct{}, 1),
 		count:      0,
 		runTimeout: DefaultRunTimeoutInterval,
 	}
-	return j.at(hour, minute)
+	return j
 }
 
 // NewTask creates a new task from parsed format string.
@@ -158,22 +174,17 @@ func NewTaskDaily(hour, minute int) Task {
 // Monday | .. | Sunday
 // at %hh:mm
 func NewTask(format string) (Task, error) {
-	j := &task{
-		id:        guid.MustCreate(),
-		interval:  0,
-		unit:      Never,
-		lastRunAt: nil,
-		nextRunAt: time.Unix(0, 0),
-		period:    0,
-		startDay:  time.Sunday,
-		runLock:   make(chan struct{}, 1),
-		count:     0,
-	}
-
-	err := j.parseTaskFormat(format)
+	s, err := ParseSchedule(format)
 	if err != nil {
 		return nil, err
 	}
+	j := &task{
+		id:       guid.MustCreate(),
+		schedule: s,
+		runLock:  make(chan struct{}, 1),
+		count:    0,
+	}
+
 	return j, nil
 }
 
@@ -192,17 +203,17 @@ func NewTaskWithID(id, format string) (Task, error) {
 
 // UpdateSchedule updates the task with a new schedule
 func (j *task) UpdateSchedule(format string) error {
-	err := j.parseTaskFormat(format)
+	s, err := ParseSchedule(format)
 	if err != nil {
 		return err
 	}
-	j.nextRunAt = time.Unix(0, 0)
+	j.schedule = s
 	return nil
 }
 
 // SetNextRun updates next schedule time
 func (j *task) SetNextRun(after time.Duration) Task {
-	j.nextRunAt = time.Now().Add(after)
+	j.schedule.NextRunAt = TimeNow().Add(after)
 	return j
 }
 
@@ -223,39 +234,25 @@ func (j *task) RunCount() uint32 {
 
 // ShouldRun returns true if the task should be run now
 func (j *task) ShouldRun() bool {
-	return !j.running && time.Now().After(j.nextRunAt)
+	return !j.running && TimeNow().After(j.schedule.NextRunAt)
 }
 
 // NextScheduledTime returns the time of when this task is to run next
 func (j *task) NextScheduledTime() time.Time {
-	return j.nextRunAt
+	return j.schedule.NextRunAt
 }
 
 // LastRunTime returns the time of last run
 func (j *task) LastRunTime() time.Time {
-	if j.lastRunAt != nil {
-		return *j.lastRunAt
+	if j.schedule.LastRunAt != nil {
+		return *j.schedule.LastRunAt
 	}
 	return time.Unix(0, 0)
 }
 
 // // Duration returns interval between runs
 func (j *task) Duration() time.Duration {
-	if j.period == 0 {
-		switch j.unit {
-		case Seconds:
-			j.period = time.Duration(j.interval) * time.Second
-		case Minutes:
-			j.period = time.Duration(j.interval) * time.Minute
-		case Hours:
-			j.period = time.Duration(j.interval) * time.Hour
-		case Days:
-			j.period = time.Duration(j.interval) * time.Hour * 24
-		case Weeks:
-			j.period = time.Duration(j.interval) * time.Hour * 24 * 7
-		}
-	}
-	return j.period
+	return j.schedule.Duration()
 }
 
 // Do accepts a function that should be called every time the task runs
@@ -276,25 +273,26 @@ func (j *task) Do(taskName string, taskFunc interface{}, params ...interface{}) 
 	}
 
 	//schedule the next run
-	j.scheduleNextRun()
+	j.schedule.NextRun()
 
 	return j
 }
 
-func (j *task) at(hour, min int) *task {
-	y, m, d := time.Now().Date()
+func (j *Schedule) at(hour, min int) *Schedule {
+	now := TimeNow()
+	y, m, d := now.Date()
 
 	// time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
 	mock := time.Date(y, m, d, hour, min, 0, 0, loc)
 
-	if j.unit == Days {
-		if !time.Now().After(mock) {
+	if j.Unit == Days {
+		if !now.After(mock) {
 			// remove 1 day
 			mock = mock.UTC().AddDate(0, 0, -1).Local()
 		}
-	} else if j.unit == Weeks {
-		if j.startDay != time.Now().Weekday() || (time.Now().After(mock) && j.startDay == time.Now().Weekday()) {
-			i := int(mock.Weekday() - j.startDay)
+	} else if j.Unit == Weeks {
+		if j.StartDay != now.Weekday() || (now.After(mock) && j.StartDay == now.Weekday()) {
+			i := int(mock.Weekday() - j.StartDay)
 			if i < 0 {
 				i = 7 + i
 			}
@@ -304,33 +302,8 @@ func (j *task) at(hour, min int) *task {
 			mock = mock.UTC().AddDate(0, 0, -7).Local()
 		}
 	}
-	j.lastRunAt = &mock
+	j.LastRunAt = &mock
 	return j
-}
-
-// scheduleNextRun computes the instant when this task should run next
-func (j *task) scheduleNextRun() time.Time {
-	now := time.Now()
-	if j.lastRunAt == nil {
-		if j.unit == Weeks {
-			i := now.Weekday() - j.startDay
-			if i < 0 {
-				i = 7 + i
-			}
-			y, m, d := now.Date()
-			now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
-		}
-		j.lastRunAt = &now
-	}
-
-	j.nextRunAt = j.lastRunAt.Add(j.Duration())
-	/*
-		logger.KV(xlog.DEBUG,
-			"lastRunAt",j.lastRunAt.Format(time.RFC3339),
-			"nextRunAt",j.nextRunAt.Format(time.RFC3339),
-			"task",j.Name())
-	*/
-	return j.nextRunAt
 }
 
 // for given function fn, get the name of function.
@@ -350,15 +323,15 @@ func (j *task) Run() bool {
 	select {
 	case j.runLock <- struct{}{}:
 		timer.Stop()
-		now := time.Now()
-		j.lastRunAt = &now
+		now := TimeNow()
+		j.schedule.LastRunAt = &now
 		j.running = true
 		count := atomic.AddUint32(&j.count, 1)
 
 		logger.KV(xlog.DEBUG,
 			"status", "running",
 			"count", count,
-			"started_at", j.lastRunAt,
+			"started_at", j.schedule.LastRunAt,
 			"task", j.Name())
 
 		func() {
@@ -375,7 +348,7 @@ func (j *task) Run() bool {
 		}()
 
 		j.running = false
-		j.scheduleNextRun()
+		j.schedule.NextRun()
 		<-j.runLock
 		return true
 	case <-time.After(timeout):
@@ -384,7 +357,7 @@ func (j *task) Run() bool {
 	logger.KV(xlog.DEBUG,
 		"status", "already_running",
 		"count", j.count,
-		"started_at", j.lastRunAt,
+		"started_at", j.schedule.LastRunAt,
 		"task", j.Name())
 
 	return false
@@ -416,104 +389,152 @@ func parseTimeFormat(t string) (hour, min int, err error) {
 	return
 }
 
-func (j *task) parseTaskFormat(format string) error {
+// ParseSchedule parses a schedule string
+func ParseSchedule(format string) (*Schedule, error) {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
 
-	j.unit = 0
-	j.interval = 0
-	j.startDay = 0
-	j.period = 0
+	j := &Schedule{
+		Interval:  0,
+		Unit:      Never,
+		LastRunAt: nil,
+		NextRunAt: time.Unix(0, 0),
+		StartDay:  time.Sunday,
+	}
 
 	ts := strings.Split(strings.ToLower(format), " ")
 	for _, t := range ts {
 		switch t {
 		case "every":
-			if j.interval > 0 {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 0 {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.interval = 1
+			j.Interval = 1
 		case "second", "seconds":
-			j.unit = Seconds
+			j.Unit = Seconds
 		case "minute", "minutes":
-			j.unit = Minutes
+			j.Unit = Minutes
 		case "hour", "hours":
-			j.unit = Hours
+			j.Unit = Hours
 		case "day", "days":
-			j.unit = Days
+			j.Unit = Days
 		case "week", "weeks":
-			j.unit = Weeks
+			j.Unit = Weeks
 		case "monday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Monday
+			j.Unit = Weeks
+			j.StartDay = time.Monday
 		case "tuesday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Tuesday
+			j.Unit = Weeks
+			j.StartDay = time.Tuesday
 		case "wednesday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Wednesday
+			j.Unit = Weeks
+			j.StartDay = time.Wednesday
 		case "thursday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Thursday
+			j.Unit = Weeks
+			j.StartDay = time.Thursday
 		case "friday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Friday
+			j.Unit = Weeks
+			j.StartDay = time.Friday
 		case "saturday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Saturday
+			j.Unit = Weeks
+			j.StartDay = time.Saturday
 		case "sunday":
-			if j.interval > 1 || j.unit != Never {
-				return errors.WithStack(errTimeFormat)
+			if j.Interval > 1 || j.Unit != Never {
+				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.unit = Weeks
-			j.startDay = time.Sunday
+			j.Unit = Weeks
+			j.StartDay = time.Sunday
 		default:
 			if strings.Contains(t, ":") {
 				hour, min, err := parseTimeFormat(t)
 				if err != nil {
-					return errors.WithStack(errTimeFormat)
+					return nil, errors.WithStack(errTimeFormat)
 				}
-				if j.unit == Never {
-					j.unit = Days
-				} else if j.unit != Days && j.unit != Weeks {
-					return errors.WithStack(errTimeFormat)
+				if j.Unit == Never {
+					j.Unit = Days
+				} else if j.Unit != Days && j.Unit != Weeks {
+					return nil, errors.WithStack(errTimeFormat)
 				}
 				j.at(hour, min)
 			} else {
-				if j.interval > 1 {
-					return errors.WithStack(errTimeFormat)
+				if j.Interval > 1 {
+					return nil, errors.WithStack(errTimeFormat)
 				}
 				interval, err := strconv.ParseUint(t, 10, 0)
 				if err != nil || interval < 1 {
-					return errors.WithStack(errTimeFormat)
+					return nil, errors.WithStack(errTimeFormat)
 				}
-				j.interval = interval
+				j.Interval = interval
 			}
 		}
 	}
-	if j.interval == 0 {
-		j.interval = 1
+	if j.Interval == 0 {
+		j.Interval = 1
 	}
-	if j.unit == Never {
-		return errors.WithStack(errTimeFormat)
+	if j.Unit == Never {
+		return nil, errors.WithStack(errTimeFormat)
 	}
 
-	return nil
+	return j, nil
+}
+
+// ShouldRun returns true if the task should be run now
+func (j *Schedule) ShouldRun() bool {
+	return TimeNow().After(j.NextRunAt)
+}
+
+// NextRun computes the instant when this task should run next
+func (j *Schedule) NextRun() time.Time {
+	now := TimeNow()
+	if j.LastRunAt == nil {
+		if j.Unit == Weeks {
+			i := now.Weekday() - j.StartDay
+			if i < 0 {
+				i = 7 + i
+			}
+			y, m, d := now.Date()
+			now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
+		}
+		j.LastRunAt = &now
+	}
+
+	j.NextRunAt = j.LastRunAt.Add(j.Duration())
+
+	return j.NextRunAt
+}
+
+// // Duration returns interval between runs
+func (j *Schedule) Duration() time.Duration {
+	if j.period == 0 {
+		switch j.Unit {
+		case Seconds:
+			j.period = time.Duration(j.Interval) * time.Second
+		case Minutes:
+			j.period = time.Duration(j.Interval) * time.Minute
+		case Hours:
+			j.period = time.Duration(j.Interval) * time.Hour
+		case Days:
+			j.period = time.Duration(j.Interval) * time.Hour * 24
+		case Weeks:
+			j.period = time.Duration(j.Interval) * time.Hour * 24 * 7
+		}
+	}
+	return j.period
 }
