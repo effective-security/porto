@@ -48,17 +48,15 @@ type Task interface {
 	LastRunTime() time.Time
 	// Duration returns interval between runs
 	Duration() time.Duration
-
 	// UpdateSchedule updates the task with the new format
 	UpdateSchedule(format string) error
-
 	// ShouldRun returns true if the task should be run now
 	ShouldRun() bool
-
 	// Run will try to run the task, if it's not already running
 	// and immediately reschedule it after run
 	Run() bool
-
+	// SetNextRun updates next schedule time
+	SetNextRun(time.Duration) Task
 	// Do accepts a function that should be called every time the task runs
 	Do(taskName string, task interface{}, params ...interface{}) Task
 }
@@ -194,18 +192,18 @@ func NewTaskWithID(id, format string) (Task, error) {
 
 // UpdateSchedule updates the task with a new schedule
 func (j *task) UpdateSchedule(format string) error {
-	t, err := NewTask(format)
+	err := j.parseTaskFormat(format)
 	if err != nil {
 		return err
 	}
-
-	tsk := t.(*task)
-	j.unit = tsk.unit
-	j.interval = tsk.interval
-	j.startDay = tsk.startDay
-	j.period = tsk.period
-
+	j.nextRunAt = time.Unix(0, 0)
 	return nil
+}
+
+// SetNextRun updates next schedule time
+func (j *task) SetNextRun(after time.Duration) Task {
+	j.nextRunAt = time.Now().Add(after)
+	return j
 }
 
 // ID returns a id of the task
@@ -420,6 +418,11 @@ func parseTimeFormat(t string) (hour, min int, err error) {
 
 func (j *task) parseTaskFormat(format string) error {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
+
+	j.unit = 0
+	j.interval = 0
+	j.startDay = 0
+	j.period = 0
 
 	ts := strings.Split(strings.ToLower(format), " ")
 	for _, t := range ts {
