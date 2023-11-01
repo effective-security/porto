@@ -65,11 +65,11 @@ func Test_AddAndGet(t *testing.T) {
 	assert.Equal(t, 0, scheduler.Count())
 	defer scheduler.Stop()
 
-	t1, err := NewTaskWithID("test1", "every 5 hours")
+	t1, err := NewTask("every 5 hours", WithID("test1"))
 	require.NoError(t, err)
 	require.Equal(t, "test1", t1.ID())
 
-	t2, err := NewTaskWithID("test2", "every 5 hours")
+	t2, err := NewTask("every 5 hours", WithID("test2"))
 	require.NoError(t, err)
 	require.Equal(t, "test2", t2.ID())
 

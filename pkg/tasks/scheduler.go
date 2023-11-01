@@ -70,7 +70,9 @@ func (s *scheduler) Swap(i, j int) {
 
 // Less provides less-comparisson method for sorting interface
 func (s *scheduler) Less(i, j int) bool {
-	return s.tasks[j].NextScheduledTime().After(s.tasks[i].NextScheduledTime())
+	sj := s.tasks[j].Schedule()
+	si := s.tasks[i].Schedule()
+	return sj.NextRunAt.After(si.NextRunAt)
 }
 
 // NewScheduler creates a new scheduler
@@ -175,7 +177,7 @@ func (s *scheduler) Start() error {
 		// if not specified, then find a reasonable interval to schedule
 		interval = DefaultTickerInterval
 		for _, t := range s.tasks {
-			in := t.Duration()
+			in := t.Schedule().Duration()
 			if in < interval {
 				interval = in / 10 // use 1/10 of a task schedule interval
 			}
@@ -227,6 +229,8 @@ type Option interface {
 
 type options struct {
 	tickerInterval time.Duration
+	id             string
+	runTimeout     time.Duration
 }
 
 type funcOption struct {
@@ -247,5 +251,19 @@ func newFuncOption(f func(*options)) *funcOption {
 func WithTickerInterval(tickerInterval time.Duration) Option {
 	return newFuncOption(func(o *options) {
 		o.tickerInterval = tickerInterval
+	})
+}
+
+// WithID option to provide ID
+func WithID(id string) Option {
+	return newFuncOption(func(o *options) {
+		o.id = id
+	})
+}
+
+// WithRunTimeout option to provide run timeout
+func WithRunTimeout(runTimeout time.Duration) Option {
+	return newFuncOption(func(o *options) {
+		o.runTimeout = runTimeout
 	})
 }
