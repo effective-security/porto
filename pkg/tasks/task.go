@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/x/guid"
+	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
@@ -45,12 +46,8 @@ type Task interface {
 	Name() string
 	// RunCount species the number of times the task executed
 	RunCount() uint32
-	// NextScheduledTime returns the time of when this task is to run next
-	NextScheduledTime() time.Time
-	// LastRunTime returns the time of last run
-	LastRunTime() time.Time
-	// Duration returns interval between runs
-	Duration() time.Duration
+	// Schedule returns the task schedule
+	Schedule() *Schedule
 	// UpdateSchedule updates the task with the new format
 	UpdateSchedule(format string) error
 	// ShouldRun returns true if the task should be run now
@@ -105,7 +102,7 @@ type task struct {
 const DefaultRunTimeoutInterval = time.Second
 
 // NewTaskAtIntervals creates a new task with the time interval.
-func NewTaskAtIntervals(interval uint64, unit TimeUnit) Task {
+func NewTaskAtIntervals(interval uint64, unit TimeUnit, ops ...Option) Task {
 	s := &Schedule{
 		Interval:  interval,
 		Unit:      unit,
@@ -113,17 +110,11 @@ func NewTaskAtIntervals(interval uint64, unit TimeUnit) Task {
 		NextRunAt: time.Unix(0, 0),
 		StartDay:  time.Sunday,
 	}
-	return &task{
-		id:         guid.MustCreate(),
-		schedule:   s,
-		runLock:    make(chan struct{}, 1),
-		count:      0,
-		runTimeout: DefaultRunTimeoutInterval,
-	}
+	return New(s, ops...)
 }
 
 // NewTaskOnWeekday creates a new task to execute on specific day of the week.
-func NewTaskOnWeekday(startDay time.Weekday, hour, minute int) Task {
+func NewTaskOnWeekday(startDay time.Weekday, hour, minute int, ops ...Option) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value: time='%d:%d'", hour, minute)
 	}
@@ -135,18 +126,12 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int) Task {
 		StartDay:  startDay,
 	}
 	s.at(hour, minute)
-	j := &task{
-		id:         guid.MustCreate(),
-		schedule:   s,
-		runLock:    make(chan struct{}, 1),
-		count:      0,
-		runTimeout: DefaultRunTimeoutInterval,
-	}
-	return j
+
+	return New(s, ops...)
 }
 
 // NewTaskDaily creates a new task to execute daily at specific time
-func NewTaskDaily(hour, minute int) Task {
+func NewTaskDaily(hour, minute int, ops ...Option) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value:, time='%d:%d'", hour, minute)
 	}
@@ -158,14 +143,8 @@ func NewTaskDaily(hour, minute int) Task {
 		StartDay:  time.Sunday,
 	}
 	s.at(hour, minute)
-	j := &task{
-		id:         guid.MustCreate(),
-		schedule:   s,
-		runLock:    make(chan struct{}, 1),
-		count:      0,
-		runTimeout: DefaultRunTimeoutInterval,
-	}
-	return j
+
+	return New(s, ops...)
 }
 
 // NewTask creates a new task from parsed format string.
@@ -173,32 +152,35 @@ func NewTaskDaily(hour, minute int) Task {
 // seconds | minutes | ...
 // Monday | .. | Sunday
 // at %hh:mm
-func NewTask(format string) (Task, error) {
+func NewTask(format string, ops ...Option) (Task, error) {
 	s, err := ParseSchedule(format)
 	if err != nil {
 		return nil, err
 	}
-	j := &task{
-		id:       guid.MustCreate(),
-		schedule: s,
-		runLock:  make(chan struct{}, 1),
-		count:    0,
-	}
 
-	return j, nil
+	return New(s, ops...), nil
 }
 
-// NewTaskWithID creates a new task from the given id and format string.
-func NewTaskWithID(id, format string) (Task, error) {
-	j, err := NewTask(format)
-	if err != nil {
-		return nil, err
+// New returns new task
+func New(s *Schedule, ops ...Option) Task {
+	dops := options{
+		id:         guid.MustCreate(),
+		runTimeout: DefaultRunTimeoutInterval,
+	}
+	for _, op := range ops {
+		op.apply(&dops)
 	}
 
-	// overwrite default id
-	j.(*task).id = id
+	dops.id = slices.StringsCoalesce(dops.id, guid.MustCreate())
+	j := &task{
+		id:         dops.id,
+		schedule:   s,
+		runLock:    make(chan struct{}, 1),
+		count:      0,
+		runTimeout: dops.runTimeout,
+	}
 
-	return j, nil
+	return j
 }
 
 // UpdateSchedule updates the task with a new schedule
@@ -227,6 +209,11 @@ func (j *task) Name() string {
 	return j.name
 }
 
+// Schedule returns the task schedule
+func (j *task) Schedule() *Schedule {
+	return j.schedule
+}
+
 // RunCount species the number of times the task executed
 func (j *task) RunCount() uint32 {
 	return atomic.LoadUint32(&j.count)
@@ -234,25 +221,7 @@ func (j *task) RunCount() uint32 {
 
 // ShouldRun returns true if the task should be run now
 func (j *task) ShouldRun() bool {
-	return !j.running && TimeNow().After(j.schedule.NextRunAt)
-}
-
-// NextScheduledTime returns the time of when this task is to run next
-func (j *task) NextScheduledTime() time.Time {
-	return j.schedule.NextRunAt
-}
-
-// LastRunTime returns the time of last run
-func (j *task) LastRunTime() time.Time {
-	if j.schedule.LastRunAt != nil {
-		return *j.schedule.LastRunAt
-	}
-	return time.Unix(0, 0)
-}
-
-// // Duration returns interval between runs
-func (j *task) Duration() time.Duration {
-	return j.schedule.Duration()
+	return !j.running && j.schedule.ShouldRun()
 }
 
 // Do accepts a function that should be called every time the task runs
@@ -273,7 +242,7 @@ func (j *task) Do(taskName string, taskFunc interface{}, params ...interface{}) 
 	}
 
 	//schedule the next run
-	j.schedule.NextRun()
+	j.schedule.UpdateNextRun()
 
 	return j
 }
@@ -348,7 +317,7 @@ func (j *task) Run() bool {
 		}()
 
 		j.running = false
-		j.schedule.NextRun()
+		j.schedule.UpdateNextRun()
 		<-j.runLock
 		return true
 	case <-time.After(timeout):
@@ -500,8 +469,8 @@ func (j *Schedule) ShouldRun() bool {
 	return TimeNow().After(j.NextRunAt)
 }
 
-// NextRun computes the instant when this task should run next
-func (j *Schedule) NextRun() time.Time {
+// UpdateNextRun computes the instant when this task should run next
+func (j *Schedule) UpdateNextRun() time.Time {
 	now := TimeNow()
 	if j.LastRunAt == nil {
 		if j.Unit == Weeks {
