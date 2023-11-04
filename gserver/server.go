@@ -50,6 +50,36 @@ type GRPCRegistrator interface {
 	RegisterGRPC(*grpc.Server)
 }
 
+// GServer is the interface for gRPC server
+type GServer interface {
+	// Name returns server name
+	Name() string
+	// Configuration of the server
+	Configuration() *Config
+	// AddService to the server
+	AddService(svc Service)
+	// Service returns service by name
+	Service(name string) Service
+	// IsReady returns true when the server is ready to serve
+	IsReady() bool
+	// StartedAt returns Time when the server has started
+	StartedAt() time.Time
+	// ListenURLs is the list of URLs that the server listens on
+	ListenURLs() []string
+	// Hostname is the hostname
+	Hostname() string
+	// LocalIP is the local IP4
+	LocalIP() string
+	// Discovery returns Discovery interface
+	Discovery() discovery.Discovery
+	// Err returns error channel
+	Err() <-chan error
+	// Close gracefully shuts down all servers/listeners.
+	// Client requests will be terminated with request timeout.
+	// After timeout, enforce remaning requests be closed immediately.
+	Close()
+}
+
 // Server contains a running server and its listeners.
 type Server struct {
 	Listeners []net.Listener
@@ -84,7 +114,9 @@ func Start(
 	container *dig.Container,
 	serviceFactories map[string]ServiceFactory,
 	opts ...Option,
-) (e *Server, err error) {
+) (GServer, error) {
+	var e *Server
+	var err error
 	serving := false
 	defer func() {
 		// if no error, then do nothing
