@@ -23,7 +23,7 @@ import (
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "gserver")
 
 // ServiceFactory is interface to create Services
-type ServiceFactory func(*Server) interface{}
+type ServiceFactory func(GServer) interface{}
 
 // Service provides a way for subservices to be registered so they get added to the http API.
 type Service interface {

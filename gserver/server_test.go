@@ -146,7 +146,7 @@ func (s *tservice) handler() restserver.Handle {
 	}
 }
 
-func testServiceFactory(server *gserver.Server) interface{} {
+func testServiceFactory(server gserver.GServer) interface{} {
 	return func() {
 		svc := &tservice{}
 		server.AddService(svc)
