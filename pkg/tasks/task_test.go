@@ -309,8 +309,9 @@ func panicTask() {
 }
 
 func Test_TaskLongTime(t *testing.T) {
-	job1 := NewTaskAtIntervals(1, Seconds).Do("longTask1", longTask).(*task)
-	job2 := NewTaskAtIntervals(1, Seconds).Do("longTask2", longTask).(*task)
+	pub := &testPublisher{}
+	job1 := NewTaskAtIntervals(1, Seconds, WithPublisher(pub)).Do("longTask1", longTask).(*task)
+	job2 := NewTaskAtIntervals(1, Seconds).Do("longTask2", longTask).SetPublisher(pub).(*task)
 
 	var wg sync.WaitGroup
 
@@ -339,6 +340,9 @@ func Test_TaskLongTime(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, 2, executed)
 	assert.Equal(t, 4, skipped)
+	assert.Equal(t, 2, len(pub.published))
+	assert.GreaterOrEqual(t, pub.runCount, 2)
+	assert.GreaterOrEqual(t, pub.stopCount, 2)
 }
 
 func longTask() {

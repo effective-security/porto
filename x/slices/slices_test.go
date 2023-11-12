@@ -239,7 +239,7 @@ func TestSlices_Int64SlicesEqual(t *testing.T) {
 
 func TestSlices_NvlInt(t *testing.T) {
 	c := func(exp int, items ...int) {
-		act := NvlInt(items...)
+		act := NvlNumber(items...)
 		if act != exp {
 			t.Errorf("Expecting NvlInt(%v) to return %d, but got %d", items, exp, act)
 		}
@@ -255,7 +255,7 @@ func TestSlices_NvlInt(t *testing.T) {
 
 func TestSlices_NvlInt64(t *testing.T) {
 	c := func(exp int64, items ...int64) {
-		act := NvlInt64(items...)
+		act := NvlNumber(items...)
 		if act != exp {
 			t.Errorf("Expecting NvlInt64(%v) to return %d, but got %d", items, exp, act)
 		}
@@ -292,7 +292,7 @@ func TestSlices_UInt64SlicesEqual(t *testing.T) {
 
 func TestSlices_NvlUint64(t *testing.T) {
 	c := func(exp uint64, items ...uint64) {
-		act := NvlUint64(items...)
+		act := NvlNumber(items...)
 		if act != exp {
 			t.Errorf("Expecting NvlUnt64(%v) to return %d, but got %d", items, exp, act)
 		}
@@ -370,6 +370,18 @@ func TestSlices_StringsCoalesce(t *testing.T) {
 	assert.Equal(t, "3", StringsCoalesce("", "", "3"))
 }
 
+func TestSlices_Coalesce(t *testing.T) {
+	assert.Equal(t, "1", Coalesce("1", "2", "3"))
+	assert.Equal(t, "2", Coalesce("", "2", "3"))
+	assert.Equal(t, "3", Coalesce("", "", "3"))
+
+	assert.Equal(t, []string{"1"}, Coalesce([]string{"1"}, []string{"2", "3"}))
+	assert.Equal(t, []string{""}, Coalesce([]string{""}, []string{"2", "3"}))
+	assert.Equal(t, []string{"2", "3"}, Coalesce([]string{}, []string{"2", "3"}))
+	var empty []string
+	assert.Equal(t, []string{"3"}, Coalesce(empty, empty, []string{"3"}))
+}
+
 func TestSlices_StringUpto(t *testing.T) {
 	assert.Equal(t, "", StringUpto("", 0))
 	assert.Equal(t, "", StringUpto("", 2))
@@ -388,4 +400,9 @@ func Test_removeDuplicates(t *testing.T) {
 func TestNvlNumber(t *testing.T) {
 	assert.Equal(t, 1, NvlNumber(0, 1))
 	assert.Equal(t, uint64(1), NvlNumber(0, uint64(1)))
+}
+
+func TestChoise(t *testing.T) {
+	assert.Equal(t, 1, Select(false, 0, 1))
+	assert.Equal(t, uint64(0), Select(true, 0, uint64(1)))
 }

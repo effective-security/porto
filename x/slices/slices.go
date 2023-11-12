@@ -164,16 +164,6 @@ func StringUpto(str string, max int) string {
 	return str
 }
 
-// NvlInt returns the first value from the supplied list that is not 0, or 0 if there are no values that are not zero
-func NvlInt(items ...int) int {
-	for _, x := range items {
-		if x != 0 {
-			return x
-		}
-	}
-	return 0
-}
-
 // Int64SlicesEqual returns true only if the contents of the 2 slices are the same
 func Int64SlicesEqual(a, b []int64) bool {
 	if len(a) != len(b) {
@@ -187,16 +177,6 @@ func Int64SlicesEqual(a, b []int64) bool {
 	return true
 }
 
-// NvlInt64 returns the first value from the supplied list that is not 0, or 0 if there are no values that are not zero
-func NvlInt64(items ...int64) int64 {
-	for _, x := range items {
-		if x != 0 {
-			return x
-		}
-	}
-	return 0
-}
-
 // Uint64SlicesEqual returns true only if the contents of the 2 slices are the same
 func Uint64SlicesEqual(a, b []uint64) bool {
 	if len(a) != len(b) {
@@ -208,16 +188,6 @@ func Uint64SlicesEqual(a, b []uint64) bool {
 		}
 	}
 	return true
-}
-
-// NvlUint64 returns the first item from the list that is not 0, or 0 if there are no values that are not zero
-func NvlUint64(items ...uint64) uint64 {
-	for _, x := range items {
-		if x != 0 {
-			return x
-		}
-	}
-	return 0
 }
 
 // Float64SlicesEqual returns true only if the contents of the 2 slices are the same
@@ -258,4 +228,27 @@ func NvlNumber[T ~int | ~int32 | ~uint | ~uint32 | ~int64 | ~uint64](items ...T)
 		}
 	}
 	return 0
+}
+
+// Measurable interface
+type Measurable[T any] interface {
+	~string | ~[]string | ~[]T
+}
+
+// Coalesce returns the first non-empty value
+func Coalesce[M Measurable[any]](args ...M) M {
+	for _, s := range args {
+		if len(s) > 0 {
+			return s
+		}
+	}
+	return args[0]
+}
+
+// Select returns a if cond is true, otherwise b
+func Select[T any](cond bool, a, b T) T {
+	if cond {
+		return a
+	}
+	return b
 }

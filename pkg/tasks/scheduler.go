@@ -28,11 +28,14 @@ func SetGlobalLocation(newLocation *time.Location) {
 
 // Scheduler defines the scheduler interface
 type Scheduler interface {
+	SetPublisher(Publisher) Scheduler
 	// Add adds a task to a pool of scheduled tasks
 	Add(Task) Scheduler
 	// Get returns the task by id
 	// return nil if task not found
 	Get(id string) Task
+	// List returns all registered tasks
+	List() []Task
 	// Clear will delete all scheduled tasks
 	Clear()
 	// Count returns the number of registered tasks
@@ -43,6 +46,11 @@ type Scheduler interface {
 	Start() error
 	// Stop the scheduler
 	Stop() error
+}
+
+// Publisher defines a publisher interface
+type Publisher interface {
+	Publish(task Task)
 }
 
 // scheduler provides a task scheduler functionality
@@ -90,8 +98,22 @@ func NewScheduler(ops ...Option) Scheduler {
 	return s
 }
 
+// SetPublisher sets the publisher for all tasks
+func (s *scheduler) SetPublisher(pub Publisher) Scheduler {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.dops.publisher = pub
+	for i := range s.tasks {
+		s.tasks[i].SetPublisher(pub)
+	}
+	return s
+}
+
 // Count returns the number of registered tasks
 func (s *scheduler) Count() int {
+	// s.lock.Lock()
+	// defer s.lock.Unlock()
 	return len(s.tasks)
 }
 
@@ -110,8 +132,8 @@ func (s *scheduler) getRunnableTasks() []Task {
 	return runnable
 }
 
-// Get the current runnable tasks, which shouldRun is True
-func (s *scheduler) getAllTasks() []Task {
+// List returns all registered tasks
+func (s *scheduler) List() []Task {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -122,6 +144,10 @@ func (s *scheduler) getAllTasks() []Task {
 func (s *scheduler) Add(j Task) Scheduler {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
+	if s.dops.publisher != nil {
+		j.SetPublisher(s.dops.publisher)
+	}
 
 	s.tasks = append(s.tasks, j)
 	return s
@@ -200,6 +226,7 @@ func (s *scheduler) Start() error {
 			case <-ticker.C:
 				s.runPending()
 			case <-s.quit:
+				s.running = false
 				ticker.Stop()
 				return
 			}
@@ -231,6 +258,7 @@ type options struct {
 	tickerInterval time.Duration
 	id             string
 	runTimeout     time.Duration
+	publisher      Publisher
 }
 
 type funcOption struct {
@@ -265,5 +293,12 @@ func WithID(id string) Option {
 func WithRunTimeout(runTimeout time.Duration) Option {
 	return newFuncOption(func(o *options) {
 		o.runTimeout = runTimeout
+	})
+}
+
+// WithPublisher option to provide publisher
+func WithPublisher(publisher Publisher) Option {
+	return newFuncOption(func(o *options) {
+		o.publisher = publisher
 	})
 }
