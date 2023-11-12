@@ -59,6 +59,10 @@ type Task interface {
 	SetNextRun(time.Duration) Task
 	// Do accepts a function that should be called every time the task runs
 	Do(taskName string, task interface{}, params ...interface{}) Task
+	// IsRunning return the status
+	IsRunning() bool
+	// SetPublisher sets a publisher for the task, when the status changes
+	SetPublisher(Publisher) Task
 }
 
 // Schedule defines task schedule
@@ -96,6 +100,7 @@ type task struct {
 	running bool
 	// timeout interval to schedule a run
 	runTimeout time.Duration
+	publisher  Publisher
 }
 
 // DefaultRunTimeoutInterval specify a timeout for a task to start
@@ -178,8 +183,15 @@ func New(s *Schedule, ops ...Option) Task {
 		runLock:    make(chan struct{}, 1),
 		count:      0,
 		runTimeout: dops.runTimeout,
+		publisher:  dops.publisher,
 	}
 
+	return j
+}
+
+// SetPublisher sets the publisher for all tasks
+func (j *task) SetPublisher(pub Publisher) Task {
+	j.publisher = pub
 	return j
 }
 
@@ -222,6 +234,11 @@ func (j *task) RunCount() uint32 {
 // ShouldRun returns true if the task should be run now
 func (j *task) ShouldRun() bool {
 	return !j.running && j.schedule.ShouldRun()
+}
+
+// IsRunning return the status
+func (j *task) IsRunning() bool {
+	return j.running
 }
 
 // Do accepts a function that should be called every time the task runs
@@ -303,6 +320,10 @@ func (j *task) Run() bool {
 			"started_at", j.schedule.LastRunAt,
 			"task", j.Name())
 
+		if j.publisher != nil {
+			j.publisher.Publish(j)
+		}
+
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -318,6 +339,10 @@ func (j *task) Run() bool {
 
 		j.running = false
 		j.schedule.UpdateNextRun()
+
+		if j.publisher != nil {
+			j.publisher.Publish(j)
+		}
 		<-j.runLock
 		return true
 	case <-time.After(timeout):
