@@ -63,6 +63,8 @@ type Task interface {
 	IsRunning() bool
 	// SetPublisher sets a publisher for the task, when the status changes
 	SetPublisher(Publisher) Task
+	// Publish publishes the task status
+	Publish()
 }
 
 // Schedule defines task schedule
@@ -195,6 +197,13 @@ func (j *task) SetPublisher(pub Publisher) Task {
 	return j
 }
 
+// Publish the current state
+func (j *task) Publish() {
+	if j.publisher != nil {
+		j.publisher.Publish(j)
+	}
+}
+
 // UpdateSchedule updates the task with a new schedule
 func (j *task) UpdateSchedule(format string) error {
 	s, err := ParseSchedule(format)
@@ -320,9 +329,7 @@ func (j *task) Run() bool {
 			"started_at", j.schedule.LastRunAt,
 			"task", j.Name())
 
-		if j.publisher != nil {
-			j.publisher.Publish(j)
-		}
+		j.Publish()
 
 		func() {
 			defer func() {
@@ -339,10 +346,8 @@ func (j *task) Run() bool {
 
 		j.running = false
 		j.schedule.UpdateNextRun()
+		j.Publish()
 
-		if j.publisher != nil {
-			j.publisher.Publish(j)
-		}
 		<-j.runLock
 		return true
 	case <-time.After(timeout):

@@ -219,6 +219,10 @@ func (s *scheduler) Start() error {
 		"schedule_interval", interval,
 	)
 
+	for _, j := range s.tasks {
+		j.Publish()
+	}
+
 	ticker := time.NewTicker(interval)
 	go func() {
 		for {
