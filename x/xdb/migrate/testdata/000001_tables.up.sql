@@ -1,3 +1,0 @@
-BEGIN;
--- DO NOTHING
-COMMIT;
