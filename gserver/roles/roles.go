@@ -95,7 +95,7 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		tlsRoles:  make(map[string]string),
 		awsRoles:  make(map[string]string),
 		jwt:       jwt,
-		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, time.Millisecond*10),
+		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, CacheTTL),
 	}
 
 	if config.AWS.Enabled {
