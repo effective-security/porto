@@ -18,7 +18,7 @@ require (
 	github.com/oleiade/reflections v1.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.17.0
-	github.com/rs/cors v1.9.0
+	github.com/rs/cors v1.10.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.8.4
 	github.com/ugorji/go/codec v1.2.6
