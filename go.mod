@@ -21,7 +21,7 @@ require (
 	github.com/rs/cors v1.9.0
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.8.4
-	github.com/ugorji/go/codec v1.2.6
+	github.com/ugorji/go/codec v1.2.11
 	go.uber.org/config v1.4.0
 	go.uber.org/dig v1.13.0
 	golang.org/x/crypto v0.15.0
