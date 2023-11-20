@@ -3,9 +3,13 @@ package roles
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/x/slices"
@@ -14,6 +18,7 @@ import (
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -35,6 +40,9 @@ const (
 	// DPoPUserRoleName defines a generic role name for an authenticated user
 	DPoPUserRoleName = "dpop_user"
 
+	// AWSUserRoleName defines a generic role name for an authenticated user
+	AWSUserRoleName = "aws_user"
+
 	// DefaultSubjectClaim defines default JWT Subject claim
 	DefaultSubjectClaim = "sub"
 
@@ -43,7 +51,15 @@ const (
 
 	// DefaultTenantClaim defines default Tenant claim
 	DefaultTenantClaim = "tenant"
+
+	// stsArnPrefix arn prefix of sts token
+	stsArnPrefix = "arn:aws:iam::"
+
+	awsTokenType = "AWS4"
 )
+
+// CacheTTL defines TTL for AWS cache
+const CacheTTL = 5 * time.Minute
 
 // IdentityProvider interface to extract identity from requests
 type IdentityProvider interface {
@@ -64,7 +80,10 @@ type provider struct {
 	dpopRoles map[string]string
 	jwtRoles  map[string]string
 	tlsRoles  map[string]string
+	awsRoles  map[string]string
 	jwt       jwt.Parser
+
+	awsCache *expirable.LRU[string, *CallerIdentity]
 }
 
 // New returns Authz provider instance
@@ -74,7 +93,17 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		dpopRoles: make(map[string]string),
 		jwtRoles:  make(map[string]string),
 		tlsRoles:  make(map[string]string),
+		awsRoles:  make(map[string]string),
 		jwt:       jwt,
+		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, time.Millisecond*10),
+	}
+
+	if config.AWS.Enabled {
+		for role, users := range config.AWS.Roles {
+			for _, user := range users {
+				prov.awsRoles[user] = role
+			}
+		}
 	}
 
 	if config.DPoP.Enabled {
@@ -118,7 +147,7 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 
 // ApplicableForRequest returns true if the provider is applicable for the request
 func (p *provider) ApplicableForRequest(r *http.Request) bool {
-	if (p.config.DPoP.Enabled || p.config.JWT.Enabled) &&
+	if (p.config.AWS.Enabled || p.config.DPoP.Enabled || p.config.JWT.Enabled) &&
 		r.Header.Get(header.Authorization) != "" {
 		return true
 	}
@@ -134,7 +163,7 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	md, ok := metadata.FromIncomingContext(ctx)
 	authorization := ok && len(md["authorization"]) > 0
 
-	if authorization && (p.config.DPoP.Enabled || p.config.JWT.Enabled) {
+	if authorization && (p.config.AWS.Enabled || p.config.DPoP.Enabled || p.config.JWT.Enabled) {
 		return true
 	}
 
@@ -181,35 +210,41 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	var err error
 	var id identity.Identity
 
-	if p.config.DPoP.Enabled {
-		if strings.EqualFold(typ, "DPoP") {
-			phdr := r.Header.Get(dpop.HTTPHeader)
-			u := r.URL
-			coreURL := url.URL{
-				Scheme: slices.StringsCoalesce(u.Scheme, "https"),
-				Host:   slices.StringsCoalesce(u.Host, r.Host),
-				Path:   u.Path,
-			}
-
-			id, err = p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
-			if err != nil {
-				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-				//return nil, err
-			} else {
-				return id, nil
-			}
+	if p.config.AWS.Enabled && strings.EqualFold(typ, awsTokenType) {
+		id, err = p.awsIdentity(r.Context(), token, typ)
+		if err != nil {
+			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
+			//return nil, err
+		} else {
+			return id, nil
 		}
 	}
 
-	if p.config.JWT.Enabled {
-		if strings.EqualFold(typ, "Bearer") {
-			id, err = p.jwtIdentity(r.Context(), token, "Bearer")
-			if err != nil {
-				logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-				//return nil, err
-			} else {
-				return id, nil
-			}
+	if p.config.DPoP.Enabled && strings.EqualFold(typ, "DPoP") {
+		phdr := r.Header.Get(dpop.HTTPHeader)
+		u := r.URL
+		coreURL := url.URL{
+			Scheme: slices.StringsCoalesce(u.Scheme, "https"),
+			Host:   slices.StringsCoalesce(u.Host, r.Host),
+			Path:   u.Path,
+		}
+
+		id, err = p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
+		if err != nil {
+			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
+			//return nil, err
+		} else {
+			return id, nil
+		}
+	}
+
+	if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
+		id, err = p.jwtIdentity(r.Context(), token, typ)
+		if err != nil {
+			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
+			//return nil, err
+		} else {
+			return id, nil
 		}
 	}
 
@@ -256,6 +291,15 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 				"token_type", typ,
 			)
 			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
+		}
+
+		if p.config.AWS.Enabled &&
+			strings.EqualFold(typ, awsTokenType) {
+			id, err := p.awsIdentity(ctx, token, typ)
+			if err == nil {
+				return id, nil
+			}
+			logger.ContextKV(ctx, xlog.WARNING, "err", err.Error())
 		}
 
 		dhdr := md["dpop"]
@@ -341,6 +385,73 @@ func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, a
 	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
 }
 
+func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
+	u, err := base64.RawURLEncoding.DecodeString(auth)
+	if err != nil {
+		return nil, errors.WithMessage(err, "invalid AWS4 token")
+	}
+	url := string(u)
+	ci, ok := p.awsCache.Get(url)
+	if !ok {
+		r, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		r.Header.Set("Accept", "application/json")
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to get Caller Identity from AWS")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, errors.WithMessagef(err, "failed to get Caller Identity from AWS: %s", resp.Status)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.WithMessage(err, "failed to decode AWS response")
+		}
+
+		ci = new(CallerIdentity)
+		err = json.Unmarshal(body, &ci)
+		if err != nil {
+			logger.KV(xlog.DEBUG,
+				"body", string(body),
+				"err", err.Error(),
+			)
+			return nil, errors.WithMessage(err, "failed to decode AWS response")
+		}
+		p.awsCache.Add(url, ci)
+	}
+
+	callerIdentity := ci.GetCallerIdentityResponse.GetCallerIdentityResult
+	acc := callerIdentity.Account
+	if len(p.config.AWS.AllowedAccounts) > 0 && !slices.ContainsString(p.config.AWS.AllowedAccounts, acc) {
+		return nil, errors.Errorf("AWS account %q is not allowed", acc)
+	}
+	idn := strings.TrimPrefix(callerIdentity.Arn, stsArnPrefix)
+	role := slices.StringsCoalesce(p.awsRoles[idn], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
+	logger.KV(xlog.DEBUG,
+		"account", callerIdentity.Account,
+		"arn", callerIdentity.Arn,
+		"user", callerIdentity.UserID,
+		"role", role,
+	)
+	return identity.NewIdentity(role, idn, callerIdentity.Account, nil, auth, tokenType), nil
+}
+
+// CallerIdentity represents the Identity of the caller
+// AWS Caller Identity Response documentation: https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
+type CallerIdentity struct {
+	GetCallerIdentityResponse struct {
+		GetCallerIdentityResult struct {
+			Account string `json:"Account"`
+			Arn     string `json:"Arn"`
+			UserID  string `json:"UserId"`
+		} `json:"GetCallerIdentityResult"`
+		ResponseMetadata struct {
+			RequestID string `json:"RequestId"`
+		} `json:"ResponseMetadata"`
+	} `json:"GetCallerIdentityResponse"`
+}
+
 func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
@@ -361,10 +472,7 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (ide
 	subj := claims.String(p.config.JWT.SubjectClaim)
 	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
-	role := p.jwtRoles[roleClaim]
-	if role == "" {
-		role = p.config.JWT.DefaultAuthenticatedRole
-	}
+	role := slices.StringsCoalesce(p.jwtRoles[roleClaim], p.config.JWT.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"role", role,
 		"tenant", tenant,
@@ -378,11 +486,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 	peer := TLS.PeerCertificates[0]
 	if len(peer.URIs) == 1 && peer.URIs[0].Scheme == "spiffe" {
 		spiffe := peer.URIs[0].String()
-		role := p.tlsRoles[spiffe]
-		if role == "" {
-			role = p.config.TLS.DefaultAuthenticatedRole
-		}
-		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
+		role := slices.StringsCoalesce(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
 		claims := map[string]interface{}{
 			"role":   role,
 			"sub":    peer.Subject.String(),
@@ -392,10 +496,10 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 		if len(peer.EmailAddresses) > 0 {
 			claims["email"] = peer.EmailAddresses[0]
 		}
+		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
 		return identity.NewIdentity(role, peer.Subject.CommonName, "", claims, "", ""), nil
 	}
 
 	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)
-
 	return nil, errors.Errorf("could not determine identity: %q", peer.Subject.CommonName)
 }

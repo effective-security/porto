@@ -198,13 +198,16 @@ func (c *Client) WithAuthorization(storage *Storage) error {
 			return errors.WithMessage(err, "unable to load key for DPoP")
 		}
 		tktype = "DPoP"
-		c.signer, err = dpop.NewSigner(k.Key.(crypto.Signer))
+		c.dpopSigner, err = dpop.NewSigner(k.Key.(crypto.Signer))
 		if err != nil {
 			return errors.WithMessage(err, "unable to create signer")
 		}
 	}
-
-	c.AddHeader(header.Authorization, tktype+" "+at.AccessToken)
+	authHeader := header.Authorization
+	if tktype != "" {
+		authHeader = tktype + " " + authHeader
+	}
+	c.AddHeader(header.Authorization, authHeader)
 
 	return nil
 }
