@@ -3,13 +3,13 @@ module github.com/effective-security/porto
 go 1.21
 
 require (
-	github.com/deckarep/golang-set v1.7.1
+	github.com/deckarep/golang-set v1.8.0
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
 	github.com/effective-security/xlog v0.6.1-0.20231117065932-e993e47f2aa3
 	github.com/effective-security/xpki v0.12.0
 	github.com/go-jose/go-jose/v3 v3.0.1
-	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
+	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jinzhu/copier v0.3.5
@@ -18,12 +18,12 @@ require (
 	github.com/oleiade/reflections v1.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.17.0
-	github.com/rs/cors v1.9.0
+	github.com/rs/cors v1.10.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.8.4
-	github.com/ugorji/go/codec v1.2.6
+	github.com/ugorji/go/codec v1.2.11
 	go.uber.org/config v1.4.0
-	go.uber.org/dig v1.13.0
+	go.uber.org/dig v1.17.1
 	golang.org/x/crypto v0.15.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.31.0
