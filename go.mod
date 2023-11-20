@@ -3,7 +3,7 @@ module github.com/effective-security/porto
 go 1.21
 
 require (
-	github.com/deckarep/golang-set v1.7.1
+	github.com/deckarep/golang-set v1.8.0
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
 	github.com/effective-security/xlog v0.6.1-0.20231117065932-e993e47f2aa3
