@@ -23,7 +23,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/ugorji/go/codec v1.2.6
 	go.uber.org/config v1.4.0
-	go.uber.org/dig v1.13.0
+	go.uber.org/dig v1.17.1
 	golang.org/x/crypto v0.15.0
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.31.0
