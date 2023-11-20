@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/retriable"
 	"google.golang.org/grpc"
 )
@@ -39,6 +40,8 @@ type Config struct {
 
 	StorageFolder    string
 	EnvAuthTokenName string
+
+	CallerIdentity credentials.CallerIdentity
 }
 
 // LoadAuthToken returns AuthToken

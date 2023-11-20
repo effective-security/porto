@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
@@ -297,7 +298,10 @@ type Client struct {
 	host       string
 	headers    map[string]string
 	beforeSend BeforeSendRequest
-	signer     dpop.Signer
+	dpopSigner dpop.Signer
+
+	token          credentials.Token
+	callerIdentity credentials.CallerIdentity
 }
 
 // Default creates a default Client for the given host
@@ -427,6 +431,15 @@ func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.beforeSend = hook
+	return c
+}
+
+// WithCallerIdentity allows to specify token provider
+// to modify request before it's sent
+func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	c.callerIdentity = ci
 	return c
 }
 
@@ -690,16 +703,34 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 		*/
 	}
 
+	if req.Header.Get(header.XCorrelationID) == "" {
+		req.Header.Add(header.XCorrelationID, correlation.ID(ctx))
+	}
 	if c.beforeSend != nil {
 		req = c.beforeSend(req)
 	}
-	if req.Header.Get(header.XCorrelationID) == "" {
-		req.Header.Add(header.XCorrelationID, correlation.ID(ctx))
+
+	if c.callerIdentity != nil {
+		if c.token.AccessToken == "" || (c.token.Expires != nil && c.token.Expires.Before(time.Now())) {
+			ti, err := c.callerIdentity.GetCallerIdentity(ctx)
+			if err != nil {
+				return nil, err
+			}
+			c.token = *ti
+		}
+
+		if c.token.AccessToken != "" && (c.token.Expires == nil || c.token.Expires.After(time.Now())) {
+			authHeader := c.token.AccessToken
+			if c.token.TokenType != "" {
+				authHeader = c.token.TokenType + " " + authHeader
+			}
+			req.Header.Set(header.Authorization, authHeader)
+		}
 	}
 
 	authHeader := req.Header.Get(header.Authorization)
 	if strings.EqualFold(slices.StringUpto(authHeader, 5), "DPoP ") {
-		_, err := dpop.ForRequest(c.signer, req, nil)
+		_, err := dpop.ForRequest(c.dpopSigner, req, nil)
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to sign DPoP")
 		}

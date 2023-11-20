@@ -52,7 +52,7 @@ func Test_All(t *testing.T) {
 	}
 
 	p, err := roles.New(&roles.IdentityMap{
-		TLS: roles.TLSIdentityMap{
+		TLS: roles.GenericIdentityMap{
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "tls_authenticated",
 			Roles: map[string][]string{
@@ -336,7 +336,7 @@ func Test_DPoPInvalid(t *testing.T) {
 		}
 
 		p, err := roles.New(&roles.IdentityMap{
-			TLS: roles.TLSIdentityMap{
+			TLS: roles.GenericIdentityMap{
 				Enabled: false,
 			},
 			JWT: roles.JWTIdentityMap{
@@ -376,7 +376,7 @@ func Test_DPoPInvalid(t *testing.T) {
 		}
 
 		p, err := roles.New(&roles.IdentityMap{
-			TLS: roles.TLSIdentityMap{
+			TLS: roles.GenericIdentityMap{
 				Enabled: false,
 			},
 			JWT: roles.JWTIdentityMap{
@@ -408,7 +408,7 @@ func Test_DPoPInvalid(t *testing.T) {
 
 func TestTLSOnly(t *testing.T) {
 	p, err := roles.New(&roles.IdentityMap{
-		TLS: roles.TLSIdentityMap{
+		TLS: roles.GenericIdentityMap{
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "tls_authenticated",
 			Roles: map[string][]string{

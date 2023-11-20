@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/effective-security/xpki/jwt/dpop"
-	"google.golang.org/grpc/credentials"
 	grpccredentials "google.golang.org/grpc/credentials"
 )
 
@@ -25,12 +25,27 @@ type Config struct {
 	TLSConfig *tls.Config
 }
 
+// Token provides access token
+type Token struct {
+	TokenType   string
+	AccessToken string
+	// Expires is expiration time of the token
+	Expires *time.Time
+}
+
+// CallerIdentity interface
+type CallerIdentity interface {
+	// GetCallerIdentity returns token
+	GetCallerIdentity(ctx context.Context) (*Token, error)
+}
+
 // Bundle defines gRPC credential interface.
 // see https://pkg.go.dev/google.golang.org/grpc/credentials
 type Bundle interface {
 	grpccredentials.Bundle
-	UpdateAuthToken(typ, token string)
+	UpdateAuthToken(token Token)
 	WithDPoP(signer dpop.Signer)
+	WithCallerIdentity(provider CallerIdentity)
 }
 
 // NewBundle constructs a new gRPC credential bundle.
@@ -95,10 +110,10 @@ func (tc *transportCredential) OverrideServerName(serverNameOverride string) err
 
 // perRPCCredential implements "grpccredentials.PerRPCCredentials" interface.
 type perRPCCredential struct {
-	tokenType   string
-	accessToken string
-	signer      dpop.Signer
-	authTokenMu sync.RWMutex
+	token          Token
+	dpopSigner     dpop.Signer
+	callerIdentity CallerIdentity
+	authTokenMu    sync.RWMutex
 }
 
 func newPerRPCCredential() *perRPCCredential { return &perRPCCredential{} }
@@ -109,29 +124,42 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 
 func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
 	rc.authTokenMu.RLock()
-	typ := rc.tokenType
-	authToken := rc.accessToken
+	token := rc.token
 	rc.authTokenMu.RUnlock()
 
-	if authToken == "" {
-		return nil, nil
+	if token.AccessToken == "" ||
+		(token.Expires != nil && token.Expires.Before(time.Now())) {
+		if rc.callerIdentity != nil {
+			ti, err := rc.callerIdentity.GetCallerIdentity(ctx)
+			if err != nil {
+				return nil, err
+			}
+			rc.authTokenMu.Lock()
+			rc.token = *ti
+			token = rc.token
+			rc.authTokenMu.Unlock()
+		}
+		if token.AccessToken == "" ||
+			(token.Expires != nil && token.Expires.Before(time.Now())) {
+			return nil, nil
+		}
 	}
 
-	ri, _ := credentials.RequestInfoFromContext(ctx)
-	// if err := credentials.CheckSecurityLevel(ri.AuthInfo, credentials.PrivacyAndIntegrity); err != nil {
+	ri, _ := grpccredentials.RequestInfoFromContext(ctx)
+	// if err := grpccredentials.CheckSecurityLevel(ri.AuthInfo, grpccredentials.PrivacyAndIntegrity); err != nil {
 	// 	return nil, fmt.Errorf("unable to transfer Access Token: %v", err)
 	// }
 
 	res := map[string]string{
-		TokenFieldNameGRPC: typ + " " + authToken,
+		TokenFieldNameGRPC: token.TokenType + " " + token.AccessToken,
 	}
 
-	if rc.signer != nil && strings.EqualFold(typ, "DPoP") {
+	if rc.dpopSigner != nil && strings.EqualFold(token.TokenType, "DPoP") {
 		u := &url.URL{
 			Path: ri.Method,
 		}
 
-		dhdr, err := rc.signer.Sign(ctx, "POST", u, nil)
+		dhdr, err := rc.dpopSigner.Sign(ctx, "POST", u, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -141,9 +169,9 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 	return res, nil
 }
 
-func (b *bundle) UpdateAuthToken(typ, token string) {
+func (b *bundle) UpdateAuthToken(token Token) {
 	if b.rc != nil {
-		b.rc.UpdateAuthToken(typ, token)
+		b.rc.UpdateAuthToken(token)
 	}
 }
 
@@ -153,15 +181,26 @@ func (b *bundle) WithDPoP(signer dpop.Signer) {
 	}
 }
 
-func (rc *perRPCCredential) UpdateAuthToken(typ, token string) {
+func (b *bundle) WithCallerIdentity(provider CallerIdentity) {
+	if b.rc != nil {
+		b.rc.WithPresignedToken(provider)
+	}
+}
+
+func (rc *perRPCCredential) UpdateAuthToken(token Token) {
 	rc.authTokenMu.Lock()
-	rc.tokenType = typ
-	rc.accessToken = token
+	rc.token = token
 	rc.authTokenMu.Unlock()
 }
 
 func (rc *perRPCCredential) WithDPoP(signer dpop.Signer) {
 	rc.authTokenMu.Lock()
-	rc.signer = signer
+	rc.dpopSigner = signer
+	rc.authTokenMu.Unlock()
+}
+
+func (rc *perRPCCredential) WithPresignedToken(provider CallerIdentity) {
+	rc.authTokenMu.Lock()
+	rc.callerIdentity = provider
 	rc.authTokenMu.Unlock()
 }

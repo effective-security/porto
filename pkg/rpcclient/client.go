@@ -120,35 +120,43 @@ func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 		bundle := tcredentials.NewBundle(tcredentials.Config{TLSConfig: cfg.TLS})
 		creds = bundle.TransportCredentials()
 
-		at, err := cfg.LoadAuthToken()
-		if err != nil && !ignoreAccessTokenError {
-			return nil, errors.WithMessage(err, "failed to load access token")
-		}
-		if err == nil {
-			if at.Expired() {
-				if !ignoreAccessTokenError {
-					return nil, errors.Errorf("authorization: token expired")
-				}
-			} else {
-				// grpc: the credentials require transport level security
-				token := at.AccessToken
-				typ := slices.StringsCoalesce(at.TokenType, "Bearer")
-				if at.DpopJkt != "" {
-					k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
-					if err != nil {
-						return nil, errors.WithMessage(err, "unable to load key for DPoP")
+		if cfg.CallerIdentity != nil {
+			bundle.WithCallerIdentity(cfg.CallerIdentity)
+		} else {
+			at, err := cfg.LoadAuthToken()
+			if err != nil && !ignoreAccessTokenError {
+				return nil, errors.WithMessage(err, "failed to load access token")
+			}
+			if err == nil {
+				if at.Expired() {
+					if !ignoreAccessTokenError {
+						return nil, errors.Errorf("authorization: token expired")
 					}
-					typ = "DPoP"
-					signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
-					if err != nil {
-						return nil, errors.WithMessage(err, "unable to create DPoP signer")
+				} else {
+					// grpc: the credentials require transport level security
+					token := at.AccessToken
+					typ := slices.StringsCoalesce(at.TokenType, "Bearer")
+					if at.DpopJkt != "" {
+						k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
+						if err != nil {
+							return nil, errors.WithMessage(err, "unable to load key for DPoP")
+						}
+						typ = "DPoP"
+						signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
+						if err != nil {
+							return nil, errors.WithMessage(err, "unable to create DPoP signer")
+						}
+						bundle.WithDPoP(signer)
 					}
-					bundle.WithDPoP(signer)
+					tok := tcredentials.Token{
+						TokenType:   typ,
+						AccessToken: token,
+						Expires:     at.Expires,
+					}
+					bundle.UpdateAuthToken(tok)
 				}
-				bundle.UpdateAuthToken(typ, token)
 			}
 		}
-
 		dopts = append(dopts, grpc.WithPerRPCCredentials(bundle.PerRPCCredentials()))
 	}
 

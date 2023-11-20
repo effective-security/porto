@@ -6,21 +6,36 @@ type IdentityMap struct {
 	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
 
 	// TLS identity map
-	TLS TLSIdentityMap `json:"tls" yaml:"tls"`
+	TLS GenericIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map
 	JWT JWTIdentityMap `json:"jwt" yaml:"jwt"`
 	// DPoP identity map
 	DPoP JWTIdentityMap `json:"jwt_dpop" yaml:"jwt_dpop"`
+	// AWS identity map
+	AWS AWSIdentityMap `json:"aws" yaml:"aws"`
 }
 
-// TLSIdentityMap provides roles for TLS
-type TLSIdentityMap struct {
+// GenericIdentityMap provides roles mapping
+type GenericIdentityMap struct {
 	// DefaultAuthenticatedRole specifies role name for identity, if not found in maps
 	DefaultAuthenticatedRole string `json:"default_authenticated_role" yaml:"default_authenticated_role"`
 	// Enable TLS identities
 	Enabled bool `json:"enabled" yaml:"enabled"`
 	// Roles is a map of role to TLS identity
 	Roles map[string][]string `json:"roles" yaml:"roles"`
+}
+
+// AWSIdentityMap provides roles for AWS
+type AWSIdentityMap struct {
+	// DefaultAuthenticatedRole specifies role name for identity, if not found in maps
+	DefaultAuthenticatedRole string `json:"default_authenticated_role" yaml:"default_authenticated_role"`
+	// Enable TLS identities
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// Roles is a map of role to TLS identity
+	Roles map[string][]string `json:"roles" yaml:"roles"`
+	// AllowedAccounts is a list of allowed AWS accounts,
+	// if empty, all accounts are allowed
+	AllowedAccounts []string `json:"allowed_accounts" yaml:"allowed_accounts"`
 }
 
 // JWTIdentityMap provides roles for JWT

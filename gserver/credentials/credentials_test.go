@@ -22,7 +22,7 @@ func TestOauthAccess(t *testing.T) {
 func TestBundle(t *testing.T) {
 	b := credentials.NewBundle(credentials.Config{})
 	_, _ = b.NewWithMode("noop")
-	b.UpdateAuthToken("Bearer", "1234")
+	b.UpdateAuthToken(credentials.Token{TokenType: "Bearer", AccessToken: "1234"})
 
 	prpc := b.PerRPCCredentials()
 	md, err := prpc.GetRequestMetadata(context.Background(), "notused")
