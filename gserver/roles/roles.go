@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
+	"github.com/gigawattio/awsarn"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials"
@@ -51,9 +53,6 @@ const (
 
 	// DefaultTenantClaim defines default Tenant claim
 	DefaultTenantClaim = "tenant"
-
-	// stsArnPrefix arn prefix of sts token
-	stsArnPrefix = "arn:aws:iam::"
 
 	awsTokenType = "AWS4"
 )
@@ -400,13 +399,17 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 			return nil, errors.WithMessage(err, "unable to get Caller Identity from AWS")
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, errors.WithMessagef(err, "failed to get Caller Identity from AWS: %s", resp.Status)
-		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to decode AWS response")
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			logger.ContextKV(ctx, xlog.DEBUG,
+				//"url", url,
+				"body", string(body))
+			return nil, errors.WithMessagef(err, "failed to get Caller Identity from AWS: %s", resp.Status)
 		}
 
 		ci = new(CallerIdentity)
@@ -426,15 +429,35 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	if len(p.config.AWS.AllowedAccounts) > 0 && !slices.ContainsString(p.config.AWS.AllowedAccounts, acc) {
 		return nil, errors.Errorf("AWS account %q is not allowed", acc)
 	}
-	idn := strings.TrimPrefix(callerIdentity.Arn, stsArnPrefix)
-	role := slices.StringsCoalesce(p.awsRoles[idn], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
+
+	components, err := awsarn.Parse(callerIdentity.Arn)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to parse AWS ARN")
+	}
+	claims := map[string]any{
+		"aws_arn": callerIdentity.Arn,
+		//"aws_partition": components.Partition,
+		//"aws_service":   components.Service,
+		//"aws_region":     components.Region,
+		"aws_account": components.AccountID,
+		//"resource":   components.Resource,
+		"aws_type": components.ResourceType,
+	}
+	res := components.Resource
+	if components.ResourceType == "assumed-role" {
+		art := strings.Split(components.Resource, components.ResourceDelimiter)
+		res = art[0]
+	}
+	subj := fmt.Sprintf("%s:%s/%s", components.AccountID, components.ResourceType, res)
+
+	role := slices.StringsCoalesce(p.awsRoles[subj], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"account", callerIdentity.Account,
 		"arn", callerIdentity.Arn,
 		"user", callerIdentity.UserID,
 		"role", role,
 	)
-	return identity.NewIdentity(role, idn, callerIdentity.Account, nil, auth, tokenType), nil
+	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType), nil
 }
 
 // CallerIdentity represents the Identity of the caller
