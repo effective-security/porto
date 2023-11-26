@@ -14,7 +14,17 @@ const (
 	FileSource = "file://"
 	// EnvSource specifies to load config from an environment variable
 	EnvSource = "env://"
+	// SecretSource specifies to load config from a secret manager
+	SecretSource = "secret://"
 )
+
+// SecretLoader is an interface to load secrets
+type SecretLoader interface {
+	LoadSecret(name string) (string, error)
+}
+
+// SecretLoaderInstance is a global instance of SecretLoader
+var SecretLoaderInstance SecretLoader
 
 // LoadConfigWithSchema returns a configuration loaded from file:// or env://
 // If config does not start with file:// or env://, then the value is returned as is
@@ -34,6 +44,16 @@ func LoadConfigWithSchema(config string) (string, error) {
 		if config == "" {
 			return "", errors.Errorf("Environment variable %s is not set", env)
 		}
+	} else if strings.HasPrefix(config, SecretSource) {
+		if SecretLoaderInstance == nil {
+			return "", errors.Errorf("Secret loader is not set")
+		}
+		name := strings.TrimPrefix(config, SecretSource)
+		sec, err := SecretLoaderInstance.LoadSecret(name)
+		if err != nil {
+			return config, errors.WithStack(err)
+		}
+		config = sec
 	}
 
 	return config, nil
@@ -54,6 +74,8 @@ func SaveConfigWithSchema(path, value string) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
+	} else if strings.HasPrefix(path, SecretSource) {
+		return errors.Errorf("Secret source is not supported")
 	}
 
 	return nil

@@ -19,6 +19,8 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "configloader")
 
+type LoadSecretFunc func(name string) (string, error)
+
 // Factory is used to create Configuration instance
 type Factory struct {
 	nodeInfo    netutil.NodeInfo
@@ -27,6 +29,8 @@ type Factory struct {
 	overrideCfg string
 	searchDirs  []string
 	user        *string
+
+	secrets LoadSecretFunc
 }
 
 // NewFactory returns new configuration factory
@@ -44,6 +48,12 @@ func NewFactory(nodeInfo netutil.NodeInfo, searchDirs []string, envPrefix string
 		nodeInfo:   nodeInfo,
 		envPrefix:  envPrefix,
 	}, nil
+}
+
+// WithSecrets allows to specify secret loader
+func (f *Factory) WithSecrets(loader LoadSecretFunc) *Factory {
+	f.secrets = loader
+	return f
 }
 
 // WithOverride allows to specify additional override config file
@@ -115,7 +125,7 @@ func (f *Factory) LoadForHostName(configFile, hostnameOverride string, config in
 		variables[envNameTemplate] = baseDir
 		os.Setenv(envName, baseDir)
 	}
-	substituteEnvVars(config, variables)
+	f.substituteEnvVars(config, variables)
 
 	return configFile, nil
 }
@@ -267,8 +277,11 @@ func userName() string {
 	return u.Username
 }
 
+// SecretSource specifies to load config from a secret manager
+const secretSource = "secret://"
+
 // resolveEnvVars replace variables in the input string
-func resolveEnvVars(s string, variables map[string]string) string {
+func (f *Factory) resolveEnvVars(s string, variables map[string]string) string {
 	if strings.Contains(s, "${") {
 		for key, value := range variables {
 			s = strings.Replace(s, key, value, -1)
@@ -276,8 +289,20 @@ func resolveEnvVars(s string, variables map[string]string) string {
 	}
 
 	if strings.Contains(s, "${") {
-		//s = strings.Replace(s, key, value, -1)
 		s = os.Expand(s, func(env string) string {
+			if strings.HasPrefix(env, secretSource) {
+				if f.secrets == nil {
+					logger.KV(xlog.ERROR, "reason", "secret loader not set")
+					return ""
+				}
+				name := strings.TrimPrefix(env, secretSource)
+				sec, err := f.secrets(name)
+				if err != nil {
+					logger.KV(xlog.ERROR, "secret", name, "err", err.Error())
+				}
+				return sec
+			}
+
 			if va, ok := variables[env]; ok {
 				return va
 			}
@@ -288,11 +313,11 @@ func resolveEnvVars(s string, variables map[string]string) string {
 	return s
 }
 
-func substituteEnvVars(obj interface{}, variables map[string]string) {
-	doSubstituteEnvVars(reflect.ValueOf(obj), variables)
+func (f *Factory) substituteEnvVars(obj interface{}, variables map[string]string) {
+	f.doSubstituteEnvVars(reflect.ValueOf(obj), variables)
 }
 
-func doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
+func (f *Factory) doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
@@ -303,28 +328,28 @@ func doSubstituteEnvVars(v reflect.Value, variables map[string]string) {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
-			doSubstituteEnvVars(v.Field(i), variables)
+			f.doSubstituteEnvVars(v.Field(i), variables)
 		}
 	case reflect.Slice:
 		for i := 0; i < v.Len(); i++ {
-			doSubstituteEnvVars(v.Index(i), variables)
+			f.doSubstituteEnvVars(v.Index(i), variables)
 		}
 	case reflect.String:
 		if v.CanSet() {
-			v.SetString(resolveEnvVars(v.String(), variables))
+			v.SetString(f.resolveEnvVars(v.String(), variables))
 		}
 	case reflect.Ptr:
-		doSubstituteEnvVars(v.Elem(), variables)
+		f.doSubstituteEnvVars(v.Elem(), variables)
 	case reflect.Map:
 		if v.Type().String() == "map[string]string" {
 			m := v.Interface().(map[string]string)
 			for k, v := range m {
-				m[k] = resolveEnvVars(v, variables)
+				m[k] = f.resolveEnvVars(v, variables)
 			}
 		} else {
 			iter := v.MapRange()
 			for iter.Next() {
-				doSubstituteEnvVars(iter.Value(), variables)
+				f.doSubstituteEnvVars(iter.Value(), variables)
 			}
 		}
 	default:

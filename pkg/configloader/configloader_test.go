@@ -3,6 +3,7 @@ package configloader
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,12 +35,25 @@ func TestLoadYAML(t *testing.T) {
 	require.NoError(t, err, "failed to load config: %v", cfgFile)
 }
 
+func loadTestSecret(name string) (string, error) {
+	tokens := strings.Split(name, "/")
+	if tokens[0] == "secret1" {
+		return tokens[1], nil
+	}
+	if tokens[0] == "secret2" {
+		return tokens[1], nil
+	}
+	return "", fmt.Errorf("secret not found: %s", name)
+}
+
 func TestLoadYAMLOverrideByHostname(t *testing.T) {
 	cfgFile, err := GetAbsFilename("testdata/test_config.yaml", ".")
 	require.NoError(t, err, "unable to determine config file")
 
 	f, err := NewFactory(nil, []string{"testdata/override"}, "TEST_")
 	require.NoError(t, err)
+
+	f.WithSecrets(loadTestSecret)
 
 	os.Setenv("TEST_HOSTNAME", "UNIT_TEST")
 
@@ -50,6 +64,8 @@ func TestLoadYAMLOverrideByHostname(t *testing.T) {
 	assert.Equal(t, "local", c.Region)
 	assert.Equal(t, "porto-pod", c.ServiceName)
 	assert.NotEmpty(t, c.ClusterName)
+
+	assert.Equal(t, "api-key2", c.ClientAPIKey)
 
 	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/logs", c.Environment), c.Logs.Directory)
 	assert.Equal(t, 3, c.Logs.MaxAgeDays)
@@ -87,6 +103,7 @@ func TestLoadYAMLWithOverride(t *testing.T) {
 
 	f.WithOverride("custom_list.yaml")
 	f.WithEnvironment("test2")
+	f.WithSecrets(loadTestSecret)
 
 	var c configuration
 	_, err = f.Load(cfgFile, &c)
@@ -95,6 +112,7 @@ func TestLoadYAMLWithOverride(t *testing.T) {
 	assert.Equal(t, "test-override", c.Region)
 	assert.Equal(t, "porto-pod", c.ServiceName)
 	assert.NotEmpty(t, c.ClusterName)
+	assert.Equal(t, "api-key2", c.ClientAPIKey)
 
 	assert.Equal(t, fmt.Sprintf("/tmp/porto-%s/logs", c.Environment), c.Logs.Directory)
 	assert.Equal(t, 3, c.Logs.MaxAgeDays)
@@ -135,6 +153,9 @@ type configuration struct {
 
 	// ClusterName specifies the cluster name
 	ClusterName string `json:"cluster,omitempty" yaml:"cluster,omitempty"`
+
+	// ClientAPIKey specifies the API key
+	ClientAPIKey string `json:"client_api_key,omitempty" yaml:"client_api_key,omitempty"`
 
 	// Audit contains configuration for the audit logger
 	Audit Logger `json:"audit" yaml:"audit"`

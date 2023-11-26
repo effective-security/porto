@@ -7,6 +7,7 @@ import (
 
 	"github.com/effective-security/porto/x/fileutil"
 	"github.com/effective-security/porto/x/guid"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +49,41 @@ func Test_SaveConfigWithSchema_env(t *testing.T) {
 	c, err := fileutil.LoadConfigWithSchema(cfg)
 	require.NoError(t, err)
 	assert.Equal(t, "test", c)
+}
+
+func Test_ConfigWithSchema_Secret(t *testing.T) {
+	cfg := "secret://key1"
+
+	err := fileutil.SaveConfigWithSchema(cfg, "test")
+	assert.EqualError(t, err, "Secret source is not supported")
+
+	_, err = fileutil.LoadConfigWithSchema(cfg)
+	assert.EqualError(t, err, "Secret loader is not set")
+
+	fileutil.SecretLoaderInstance = &mockSecret{
+		secrets: map[string]string{
+			"key1": "value1",
+		},
+	}
+
+	val, err := fileutil.LoadConfigWithSchema(cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "value1", val)
+
+	_, err = fileutil.LoadConfigWithSchema("secret://key2")
+	assert.EqualError(t, err, "secret not found: key2")
+}
+
+type mockSecret struct {
+	secrets map[string]string
+}
+
+func (s *mockSecret) LoadSecret(name string) (string, error) {
+	sec := s.secrets[name]
+	if sec == "" {
+		return "", errors.Errorf("secret not found: %s", name)
+	}
+	return sec, nil
 }
 
 type config struct {
