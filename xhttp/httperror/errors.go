@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/x/slices"
 	"github.com/ugorji/go/codec"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

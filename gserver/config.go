@@ -8,7 +8,7 @@ import (
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
-	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/x/netutil"
 )
 
 // Config contains the configuration of the server

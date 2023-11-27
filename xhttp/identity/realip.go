@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/x/netutil"
 )
 
 // ClientIPFromRequest return client's real public IP address from http request headers.

@@ -18,10 +18,10 @@ import (
 
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/pkg/errors"

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/certutil"
 	"google.golang.org/grpc"

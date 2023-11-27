@@ -3,7 +3,7 @@ package testutils
 import (
 	"fmt"
 
-	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/x/netutil"
 )
 
 // CreateURL returns URL with a random port
