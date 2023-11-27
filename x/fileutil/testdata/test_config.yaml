@@ -1,5 +1,0 @@
----
-service: porto-pod
-region : local
-cluster: cl1
-environment: test

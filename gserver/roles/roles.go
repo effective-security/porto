@@ -13,9 +13,9 @@ import (
 	"time"
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
-	"github.com/effective-security/porto/x/slices"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
+	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"

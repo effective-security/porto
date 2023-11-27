@@ -25,8 +25,8 @@ jobs:
         run: |
           curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
         env:
-          GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-          GIT_USER: ${{ secrets.GIT_USER }}
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_USER: ${{ github.actor }}
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,8 +53,8 @@ jobs:
           (( $(echo "$total > ${MIN_TESTCOV}" | bc -l) )) && STATE=success || STATE=failure
           curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"${STATE}\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"${total}%\",\"context\": \"code cov\"}"
         env:
-          GIT_TOKEN: ${{ secrets.BUILDER_PAT }}
-          GIT_USER: ${{ secrets.GIT_USER }}
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_USER: ${{ github.actor }}
 
       - name: coveralls
         #if: github.event_name == 'pull_request'

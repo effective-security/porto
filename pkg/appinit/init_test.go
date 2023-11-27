@@ -5,7 +5,7 @@ import (
 	"path"
 	"testing"
 
-	"github.com/effective-security/porto/x/guid"
+	"github.com/effective-security/x/guid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -1,6 +1,0 @@
----
-environment: UNIT_TEST
-
-audit:
-  max_age_days: 99
-  max_size_mb: 99

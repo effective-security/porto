@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/effective-security/porto/x/netutil"
-	"github.com/effective-security/porto/x/slices"
+	"github.com/effective-security/x/netutil"
+	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xpki/jwt"
 )
 

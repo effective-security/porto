@@ -1,4 +1,0 @@
----
-override:
-  UNIT_TEST: test_config-override.yaml
-  ~: notfound.yaml

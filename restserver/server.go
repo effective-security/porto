@@ -12,12 +12,12 @@ import (
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
-	"github.com/effective-security/porto/x/netutil"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
+	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )

@@ -12,7 +12,7 @@ import (
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/authz"
-	"github.com/effective-security/porto/x/netutil"
+	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/pkg/errors"

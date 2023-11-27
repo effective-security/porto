@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/effective-security/porto/x/guid"
-	"github.com/effective-security/porto/x/slices"
+	"github.com/effective-security/x/guid"
+	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
