@@ -6,9 +6,9 @@ require (
 	github.com/deckarep/golang-set v1.8.0
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
-	github.com/effective-security/x v0.1.0
+	github.com/effective-security/x v0.1.1-0.20231127132411-787e96263399
 	github.com/effective-security/xlog v0.6.1-0.20231117065932-e993e47f2aa3
-	github.com/effective-security/xpki v0.13.0
+	github.com/effective-security/xpki v0.13.1-0.20231127133349-ea176aa1a613
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -32,8 +32,8 @@ require (
 
 require (
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
-	cloud.google.com/go/iam v1.1.1 // indirect
-	cloud.google.com/go/kms v1.15.0 // indirect
+	cloud.google.com/go/iam v1.1.3 // indirect
+	cloud.google.com/go/kms v1.15.5 // indirect
 	github.com/alecthomas/kong v0.8.1 // indirect
 	github.com/aws/aws-sdk-go v1.47.13 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -56,7 +56,7 @@ require (
 	golang.org/x/sys v0.14.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231030173426-d783a09b4405 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
