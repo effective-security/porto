@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Create code coverage status for the current commit
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         run: |
           curl "https://${GIT_USER}:${GIT_TOKEN}@api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${COMMIT_SHA}" -d "{\"state\": \"pending\",\"target_url\": \"https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_NUMBER}/checks?check_run_id=${RUN_ID}\",\"description\": \"in progress — This check has started... \",\"context\": \"code cov\"}"
         env:
@@ -43,7 +43,7 @@ jobs:
         run: make build covtest
 
       - name: Generate covarege Status
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         run: |
           set -x
           PROJECT_NAME=${PROJECT_NAME}
