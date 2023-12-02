@@ -297,7 +297,6 @@ func (j *Schedule) at(hour, min int) *Schedule {
 			mock = mock.UTC().AddDate(0, 0, -7).Local()
 		}
 	}
-	j.LastRunAt = &mock
 	return j
 }
 
