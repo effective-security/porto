@@ -79,9 +79,18 @@ type Schedule struct {
 	LastRunAt *time.Time
 	// NextRunAt specifies datetime of next run
 	NextRunAt time.Time
-
+	// RunCount specifies the number of runs
+	RunCount uint32
 	// cache the period between last an next run
 	period time.Duration
+}
+
+// GetLastRun returns the last run time
+func (s *Schedule) GetLastRun() *time.Time {
+	if s.LastRunAt == nil || s.RunCount == 0 {
+		return nil
+	}
+	return s.LastRunAt
 }
 
 // task describes a task schedule
@@ -89,8 +98,6 @@ type task struct {
 	// id is unique guide assigned to the task
 	id       string
 	schedule *Schedule
-	// number of runs
-	count uint32
 	// the task name
 	name string
 	// callback is the function to execute
@@ -183,7 +190,6 @@ func New(s *Schedule, ops ...Option) Task {
 		id:         dops.id,
 		schedule:   s,
 		runLock:    make(chan struct{}, 1),
-		count:      0,
 		runTimeout: dops.runTimeout,
 		publisher:  dops.publisher,
 	}
@@ -237,7 +243,7 @@ func (j *task) Schedule() *Schedule {
 
 // RunCount species the number of times the task executed
 func (j *task) RunCount() uint32 {
-	return atomic.LoadUint32(&j.count)
+	return atomic.LoadUint32(&j.schedule.RunCount)
 }
 
 // ShouldRun returns true if the task should be run now
@@ -277,27 +283,26 @@ func (j *Schedule) at(hour, min int) *Schedule {
 	now := TimeNow()
 	y, m, d := now.Date()
 
-	// time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
-	mock := time.Date(y, m, d, hour, min, 0, 0, loc)
+	lastRun := time.Date(y, m, d, hour, min, 0, 0, loc)
 
 	if j.Unit == Days {
-		if !now.After(mock) {
+		if !now.After(lastRun) {
 			// remove 1 day
-			mock = mock.UTC().AddDate(0, 0, -1).Local()
+			lastRun = lastRun.UTC().AddDate(0, 0, -1).Local()
 		}
 	} else if j.Unit == Weeks {
-		if j.StartDay != now.Weekday() || (now.After(mock) && j.StartDay == now.Weekday()) {
-			i := int(mock.Weekday() - j.StartDay)
+		if j.StartDay != now.Weekday() || (now.After(lastRun) && j.StartDay == now.Weekday()) {
+			i := int(lastRun.Weekday() - j.StartDay)
 			if i < 0 {
 				i = 7 + i
 			}
-			mock = mock.UTC().AddDate(0, 0, -i).Local()
+			lastRun = lastRun.UTC().AddDate(0, 0, -i).Local()
 		} else {
 			// remove 1 week
-			mock = mock.UTC().AddDate(0, 0, -7).Local()
+			lastRun = lastRun.UTC().AddDate(0, 0, -7).Local()
 		}
 	}
-	j.LastRunAt = &mock
+	j.LastRunAt = &lastRun
 	return j
 }
 
@@ -321,11 +326,11 @@ func (j *task) Run() bool {
 		now := TimeNow()
 		j.schedule.LastRunAt = &now
 		j.running = true
-		count := atomic.AddUint32(&j.count, 1)
+		count := atomic.AddUint32(&j.schedule.RunCount, 1)
 
 		logger.KV(xlog.DEBUG,
 			"status", "running",
-			"count", count,
+			"run_count", count,
 			"started_at", j.schedule.LastRunAt,
 			"task", j.Name())
 
@@ -355,7 +360,7 @@ func (j *task) Run() bool {
 
 	logger.KV(xlog.DEBUG,
 		"status", "already_running",
-		"count", j.count,
+		"run_count", j.schedule.RunCount,
 		"started_at", j.schedule.LastRunAt,
 		"task", j.Name())
 
