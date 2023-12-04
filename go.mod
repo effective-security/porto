@@ -22,7 +22,7 @@ require (
 	github.com/rs/cors v1.10.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.8.4
-	github.com/ugorji/go/codec v1.2.11
+	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
 	golang.org/x/crypto v0.15.0
 	google.golang.org/grpc v1.59.0
