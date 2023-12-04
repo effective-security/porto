@@ -220,14 +220,17 @@ func Timeout(msgFormat string, vals ...interface{}) *Error {
 
 // Wrap returns Error instance with NotFound, Timeout or Internal code,
 // depending on the error from DB
-func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
+func Wrap(err error, msgAndArgs ...any) *Error {
 	e := &Error{}
 	if goerrors.As(err, &e) {
-		return New(e.HTTPStatus, e.Code, msgFormat, vals...).WithCause(err)
+		if len(msgAndArgs) == 0 {
+			return e
+		}
+		return New(e.HTTPStatus, e.Code, errMsg(e.Message, msgAndArgs...)).WithCause(err)
 	}
 	me := &ManyError{}
 	if goerrors.As(err, &me) {
-		return New(me.HTTPStatus, me.Code, msgFormat, vals...).WithCause(err)
+		return New(me.HTTPStatus, me.Code, errMsg(me.Message, msgAndArgs...)).WithCause(err)
 	}
 
 	if se, ok := err.(interface {
@@ -236,30 +239,52 @@ func Wrap(err error, msgFormat string, vals ...interface{}) *Error {
 		st := se.GRPCStatus()
 		code := st.Code()
 		status := codeStatus[code]
-		return New(status, httpCode[status], msgFormat, vals...).WithCause(err)
+		return New(status, httpCode[status], errMsg(st.Message(), msgAndArgs...)).WithCause(err)
 	}
 
+	var errstr string
+	if err != nil {
+		errstr = err.Error()
+	}
+	msg := errMsg(errstr, msgAndArgs...)
 	if IsInvalidRequestError(err) {
-		return InvalidRequest(msgFormat, vals...).WithCause(err)
+		return InvalidRequest(msg).WithCause(err)
 	}
 	if IsSQLNotFoundError(err) {
-		return NotFound(msgFormat, vals...).WithCause(err)
+		return NotFound(msg).WithCause(err)
 	}
 	if IsTimeout(err) {
-		return Timeout(msgFormat, vals...).WithCause(err)
+		return Timeout(msg).WithCause(err)
 	}
-	return Unexpected(msgFormat, vals...).WithCause(err)
+	return Unexpected(msg).WithCause(err)
 }
 
 // WrapWithCtx returns wrapped Error with Context
-func WrapWithCtx(ctx context.Context, err error, msgFormat string, vals ...interface{}) *Error {
-	return Wrap(err, msgFormat, vals...).WithContext(ctx)
+func WrapWithCtx(ctx context.Context, err error, msgAndArgs ...any) *Error {
+	return Wrap(err, msgAndArgs...).WithContext(ctx)
+}
+
+func errMsg(err string, msgAndArgs ...any) string {
+	if len(msgAndArgs) == 0 || msgAndArgs == nil {
+		return err
+	}
+	if len(msgAndArgs) == 1 {
+		msg := msgAndArgs[0]
+		if msgAsStr, ok := msg.(string); ok {
+			return msgAsStr
+		}
+		return fmt.Sprintf("%+v", msg)
+	}
+	if len(msgAndArgs) > 1 {
+		return fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
+	}
+	return err
 }
 
 // IsSQLNotFoundError returns true, if error is NotFound
 func IsSQLNotFoundError(err error) bool {
 	return err != nil &&
-		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows in result set"))
+		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows"))
 }
 
 // IsInvalidModel returns true, if error is InvalidModel
