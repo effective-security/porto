@@ -3,7 +3,6 @@ package tlsconfig_test
 import (
 	"crypto/tls"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,9 +29,9 @@ func Test_BuildFromFiles(t *testing.T) {
 	pemFile := filepath.Join(tmpDir, "BuildFromFiles.pem")
 	keyFile := filepath.Join(tmpDir, "BuildFromFiles-key.pem")
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
 	cfg, err := tlsconfig.NewServerTLSFromFiles(pemFile, keyFile, "", tls.RequireAndVerifyClientCert)
@@ -67,9 +66,9 @@ func Test_RoundTripper(t *testing.T) {
 	pemFile := filepath.Join(os.TempDir(), "test-RoundTripper.pem")
 	keyFile := filepath.Join(os.TempDir(), "test-RoundTripper-key.pem")
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
 	h := makeTestHandler(t, "/v1/test", `{}`)
@@ -89,7 +88,7 @@ func Test_RoundTripper(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		// modify files
-		err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+		err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 		require.NoError(t, err)
 
 		time.Sleep(400 * time.Microsecond)

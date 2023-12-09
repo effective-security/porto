@@ -2,7 +2,6 @@ package retriable
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/pkg/errors"
@@ -39,12 +38,11 @@ func NewRequest(method, url string, rawBody io.ReadSeeker) (*Request, error) {
 	var contentLength int64
 
 	if rawBody != nil {
-		raw := rawBody.(io.ReadSeeker)
 		body = func() (io.Reader, error) {
-			_, _ = raw.Seek(0, 0)
-			return ioutil.NopCloser(raw), nil
+			_, _ = rawBody.Seek(0, 0)
+			return io.NopCloser(rawBody), nil
 		}
-		if lr, ok := raw.(lenReader); ok {
+		if lr, ok := rawBody.(lenReader); ok {
 			contentLength = int64(lr.Len())
 		}
 	}

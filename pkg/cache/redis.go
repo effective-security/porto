@@ -147,7 +147,7 @@ func (p *redisProv) Delete(ctx context.Context, key string) error {
 }
 
 // CleanExpired data
-func (p *redisProv) CleanExpired(ctx context.Context) {
+func (p *redisProv) CleanExpired(_ context.Context) {
 	// redis exires keys
 }
 

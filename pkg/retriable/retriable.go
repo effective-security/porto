@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -585,7 +584,7 @@ func (c *Client) Request(ctx context.Context, method string, host string, path s
 		case io.ReadSeeker:
 			body = val
 		case io.Reader:
-			b, err := ioutil.ReadAll(val)
+			b, err := io.ReadAll(val)
 			if err != nil {
 				return nil, 0, errors.WithStack(err)
 			}
@@ -739,7 +738,7 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 	var body io.ReadSeeker
 	if req != nil && req.Body != nil {
 		defer req.Body.Close()
-		bodyBytes, err := ioutil.ReadAll(req.Body)
+		bodyBytes, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -781,7 +780,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			if c, ok := body.(io.ReadCloser); ok {
 				req.Request.Body = c
 			} else {
-				req.Request.Body = ioutil.NopCloser(body)
+				req.Request.Body = io.NopCloser(body)
 			}
 		}
 
@@ -829,7 +828,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 // consumeResponseBody is a helper to safely consume the remaining response body
 func (c *Client) consumeResponseBody(r *http.Response) {
 	if r != nil && r.Body != nil {
-		_, _ = io.Copy(ioutil.Discard, r.Body)
+		_, _ = io.Copy(io.Discard, r.Body)
 	}
 }
 
@@ -868,7 +867,7 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 		bodyCopy := bytes.Buffer{}
 		bodyTee := io.TeeReader(resp.Body, &bodyCopy)
 		if err := json.NewDecoder(bodyTee).Decode(e); err != nil || e.Code == "" {
-			_, _ = io.Copy(ioutil.Discard, bodyTee) // ensure all of body is read
+			_, _ = io.Copy(io.Discard, bodyTee) // ensure all of body is read
 			// Unable to parse as Error, then return body as error
 			return resp.Header, resp.StatusCode, errors.New(bodyCopy.String())
 		}
