@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -251,7 +251,7 @@ func Test_NewServerWithCustomHandler(t *testing.T) {
 	url := fmt.Sprintf("%s://127.0.0.1:%s/v1/test", server.Protocol(), server.Port())
 	resp, err := http.Get(url)
 	require.NoError(t, err)
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(body), "value in context")
 

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -155,7 +155,7 @@ func TestNewRequest(t *testing.T) {
 		t.Run(reflect.TypeOf(tc.req).Name(), func(t *testing.T) {
 			r, err := NewRequest(http.MethodGet, "/test", tc.req)
 			require.NoError(t, err)
-			body, err := ioutil.ReadAll(r.Body)
+			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			assert.Equal(t, tc.exp, string(body))
 		})

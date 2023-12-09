@@ -46,7 +46,7 @@ func (p *memProv) IsLocal() bool {
 }
 
 // Set data
-func (p *memProv) Set(ctx context.Context, key string, v any, ttl time.Duration) error {
+func (p *memProv) Set(_ context.Context, key string, v any, ttl time.Duration) error {
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
@@ -70,7 +70,7 @@ func (p *memProv) Set(ctx context.Context, key string, v any, ttl time.Duration)
 }
 
 // Get data
-func (p *memProv) Get(ctx context.Context, key string, v any) error {
+func (p *memProv) Get(_ context.Context, key string, v any) error {
 	k := path.Join(p.prefix, key)
 	if ent, ok := p.cache.Load(k); ok {
 		e := ent.(*entry)
@@ -87,14 +87,14 @@ func (p *memProv) Get(ctx context.Context, key string, v any) error {
 }
 
 // Delete data
-func (p *memProv) Delete(ctx context.Context, key string) error {
+func (p *memProv) Delete(_ context.Context, key string) error {
 	k := path.Join(p.prefix, key)
 	p.cache.Delete(k)
 	return nil
 }
 
 // CleanExpired data
-func (p *memProv) CleanExpired(ctx context.Context) {
+func (p *memProv) CleanExpired(_ context.Context) {
 	now := NowFunc()
 	p.cache.Range(func(key any, value any) bool {
 		e := value.(*entry)
@@ -108,7 +108,7 @@ func (p *memProv) CleanExpired(ctx context.Context) {
 
 // Keys returns list of keys.
 // This method should be used mostly for testing, as in prod many keys maybe returned
-func (p *memProv) Keys(ctx context.Context, pattern string) ([]string, error) {
+func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
 	k := path.Join(p.prefix, pattern)
 	k = strings.TrimRight(k, "*?")
 
@@ -125,7 +125,7 @@ func (p *memProv) Keys(ctx context.Context, pattern string) ([]string, error) {
 }
 
 // Publish publishes message to channel
-func (p *memProv) Publish(ctx context.Context, channel, message string) error {
+func (p *memProv) Publish(_ context.Context, channel, message string) error {
 	p.subs.Range(func(key any, value any) bool {
 		s := value.(*msub)
 		if s.channel == channel {
@@ -138,7 +138,7 @@ func (p *memProv) Publish(ctx context.Context, channel, message string) error {
 }
 
 // Subscribe subscribes to channel
-func (p *memProv) Subscribe(ctx context.Context, channel string) Subscription {
+func (p *memProv) Subscribe(_ context.Context, channel string) Subscription {
 	s := &msub{
 		prov:    p,
 		channel: channel,

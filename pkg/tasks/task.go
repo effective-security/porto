@@ -279,20 +279,20 @@ func (j *task) Do(taskName string, taskFunc interface{}, params ...interface{}) 
 	return j
 }
 
-func (j *Schedule) at(hour, min int) *Schedule {
+func (s *Schedule) at(hour, min int) *Schedule {
 	now := TimeNow()
 	y, m, d := now.Date()
 
 	lastRun := time.Date(y, m, d, hour, min, 0, 0, loc)
 
-	if j.Unit == Days {
+	if s.Unit == Days {
 		if !now.After(lastRun) {
 			// remove 1 day
 			lastRun = lastRun.UTC().AddDate(0, 0, -1).Local()
 		}
-	} else if j.Unit == Weeks {
-		if j.StartDay != now.Weekday() || (now.After(lastRun) && j.StartDay == now.Weekday()) {
-			i := int(lastRun.Weekday() - j.StartDay)
+	} else if s.Unit == Weeks {
+		if s.StartDay != now.Weekday() || (now.After(lastRun) && s.StartDay == now.Weekday()) {
+			i := int(lastRun.Weekday() - s.StartDay)
 			if i < 0 {
 				i = 7 + i
 			}
@@ -302,8 +302,8 @@ func (j *Schedule) at(hour, min int) *Schedule {
 			lastRun = lastRun.UTC().AddDate(0, 0, -7).Local()
 		}
 	}
-	j.LastRunAt = &lastRun
-	return j
+	s.LastRunAt = &lastRun
+	return s
 }
 
 // for given function fn, get the name of function.
@@ -397,7 +397,7 @@ func parseTimeFormat(t string) (hour, min int, err error) {
 func ParseSchedule(format string) (*Schedule, error) {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
 
-	j := &Schedule{
+	s := &Schedule{
 		Interval:  0,
 		Unit:      Never,
 		LastRunAt: nil,
@@ -409,136 +409,136 @@ func ParseSchedule(format string) (*Schedule, error) {
 	for _, t := range ts {
 		switch t {
 		case "every":
-			if j.Interval > 0 {
+			if s.Interval > 0 {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Interval = 1
+			s.Interval = 1
 		case "second", "seconds":
-			j.Unit = Seconds
+			s.Unit = Seconds
 		case "minute", "minutes":
-			j.Unit = Minutes
+			s.Unit = Minutes
 		case "hour", "hours":
-			j.Unit = Hours
+			s.Unit = Hours
 		case "day", "days":
-			j.Unit = Days
+			s.Unit = Days
 		case "week", "weeks":
-			j.Unit = Weeks
+			s.Unit = Weeks
 		case "monday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Monday
+			s.Unit = Weeks
+			s.StartDay = time.Monday
 		case "tuesday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Tuesday
+			s.Unit = Weeks
+			s.StartDay = time.Tuesday
 		case "wednesday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Wednesday
+			s.Unit = Weeks
+			s.StartDay = time.Wednesday
 		case "thursday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Thursday
+			s.Unit = Weeks
+			s.StartDay = time.Thursday
 		case "friday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Friday
+			s.Unit = Weeks
+			s.StartDay = time.Friday
 		case "saturday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Saturday
+			s.Unit = Weeks
+			s.StartDay = time.Saturday
 		case "sunday":
-			if j.Interval > 1 || j.Unit != Never {
+			if s.Interval > 1 || s.Unit != Never {
 				return nil, errors.WithStack(errTimeFormat)
 			}
-			j.Unit = Weeks
-			j.StartDay = time.Sunday
+			s.Unit = Weeks
+			s.StartDay = time.Sunday
 		default:
 			if strings.Contains(t, ":") {
 				hour, min, err := parseTimeFormat(t)
 				if err != nil {
 					return nil, errors.WithStack(errTimeFormat)
 				}
-				if j.Unit == Never {
-					j.Unit = Days
-				} else if j.Unit != Days && j.Unit != Weeks {
+				if s.Unit == Never {
+					s.Unit = Days
+				} else if s.Unit != Days && s.Unit != Weeks {
 					return nil, errors.WithStack(errTimeFormat)
 				}
-				j.at(hour, min)
+				s.at(hour, min)
 			} else {
-				if j.Interval > 1 {
+				if s.Interval > 1 {
 					return nil, errors.WithStack(errTimeFormat)
 				}
 				interval, err := strconv.ParseUint(t, 10, 0)
 				if err != nil || interval < 1 {
 					return nil, errors.WithStack(errTimeFormat)
 				}
-				j.Interval = interval
+				s.Interval = interval
 			}
 		}
 	}
-	if j.Interval == 0 {
-		j.Interval = 1
+	if s.Interval == 0 {
+		s.Interval = 1
 	}
-	if j.Unit == Never {
+	if s.Unit == Never {
 		return nil, errors.WithStack(errTimeFormat)
 	}
 
-	return j, nil
+	return s, nil
 }
 
 // ShouldRun returns true if the task should be run now
-func (j *Schedule) ShouldRun() bool {
-	return TimeNow().After(j.NextRunAt)
+func (s *Schedule) ShouldRun() bool {
+	return TimeNow().After(s.NextRunAt)
 }
 
 // UpdateNextRun computes the instant when this task should run next
-func (j *Schedule) UpdateNextRun() time.Time {
+func (s *Schedule) UpdateNextRun() time.Time {
 	now := TimeNow()
-	if j.LastRunAt == nil {
-		if j.Unit == Weeks {
-			i := now.Weekday() - j.StartDay
+	if s.LastRunAt == nil {
+		if s.Unit == Weeks {
+			i := now.Weekday() - s.StartDay
 			if i < 0 {
 				i = 7 + i
 			}
 			y, m, d := now.Date()
 			now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
 		}
-		j.LastRunAt = &now
+		s.LastRunAt = &now
 	}
 
-	j.NextRunAt = j.LastRunAt.Add(j.Duration())
+	s.NextRunAt = s.LastRunAt.Add(s.Duration())
 
-	return j.NextRunAt
+	return s.NextRunAt
 }
 
 // // Duration returns interval between runs
-func (j *Schedule) Duration() time.Duration {
-	if j.period == 0 {
-		switch j.Unit {
+func (s *Schedule) Duration() time.Duration {
+	if s.period == 0 {
+		switch s.Unit {
 		case Seconds:
-			j.period = time.Duration(j.Interval) * time.Second
+			s.period = time.Duration(s.Interval) * time.Second
 		case Minutes:
-			j.period = time.Duration(j.Interval) * time.Minute
+			s.period = time.Duration(s.Interval) * time.Minute
 		case Hours:
-			j.period = time.Duration(j.Interval) * time.Hour
+			s.period = time.Duration(s.Interval) * time.Hour
 		case Days:
-			j.period = time.Duration(j.Interval) * time.Hour * 24
+			s.period = time.Duration(s.Interval) * time.Hour * 24
 		case Weeks:
-			j.period = time.Duration(j.Interval) * time.Hour * 24 * 7
+			s.period = time.Duration(s.Interval) * time.Hour * 24 * 7
 		}
 	}
-	return j.period
+	return s.period
 }

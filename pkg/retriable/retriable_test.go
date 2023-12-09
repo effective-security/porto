@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -679,7 +678,7 @@ func Test_Retriable_DoWithRetry(t *testing.T) {
 
 func Test_RetriableBody(t *testing.T) {
 	h := func(w http.ResponseWriter, r *http.Request) {
-		q, err := ioutil.ReadAll(r.Body)
+		q, err := io.ReadAll(r.Body)
 		if err != nil {
 			marshal.WriteJSON(w, r, httperror.Unexpected(err.Error()))
 			return
@@ -768,7 +767,7 @@ func (r *reader) Read(b []byte) (n int, err error) {
 }
 
 func Test_DecodeResponse(t *testing.T) {
-	res := http.Response{StatusCode: http.StatusNotFound, Body: ioutil.NopCloser(bytes.NewBufferString(`{"code":"MY_CODE","message":"doesn't exist"}`))}
+	res := http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewBufferString(`{"code":"MY_CODE","message":"doesn't exist"}`))}
 	c, err := retriable.New(retriable.ClientConfig{})
 	require.NoError(t, err)
 	require.NotNil(t, c)
@@ -791,20 +790,20 @@ func Test_DecodeResponse(t *testing.T) {
 
 	// if the body isn't valid json, we should get returned a json parser error, as well as the body
 	invalidResponse := `["foo"}`
-	res.Body = ioutil.NopCloser(bytes.NewBufferString(invalidResponse))
+	res.Body = io.NopCloser(bytes.NewBufferString(invalidResponse))
 	_, _, err = c.DecodeResponse(&res, &body)
 	require.Error(t, err)
 	assert.Equal(t, invalidResponse, err.Error())
 
 	// error body is valid json, but missing the error field
-	res.Body = ioutil.NopCloser(bytes.NewBufferString(`{"foo":"bar"}`))
+	res.Body = io.NopCloser(bytes.NewBufferString(`{"foo":"bar"}`))
 	_, _, err = c.DecodeResponse(&res, &body)
 	assert.Error(t, err)
 	assert.Equal(t, "{\"foo\":\"bar\"}", err.Error())
 
 	// statusCode < 300, with a decodeable body
 	res.StatusCode = http.StatusOK
-	res.Body = ioutil.NopCloser(bytes.NewBufferString(`{"foo":"baz"}`))
+	res.Body = io.NopCloser(bytes.NewBufferString(`{"foo":"baz"}`))
 	_, sc, err = c.DecodeResponse(&res, &body)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, sc)
@@ -813,7 +812,7 @@ func Test_DecodeResponse(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.TRACE)
 
 	// statusCode < 300, with a parsing error
-	res.Body = ioutil.NopCloser(bytes.NewBufferString(`[}`))
+	res.Body = io.NopCloser(bytes.NewBufferString(`[}`))
 	_, sc, err = c.DecodeResponse(&res, &body)
 	assert.Equal(t, http.StatusOK, sc, "decodeResponse returned unexpected statusCode, expecting 200")
 	assert.Error(t, err)

@@ -2,7 +2,6 @@ package tlsconfig_test
 
 import (
 	"crypto/tls"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,9 +24,9 @@ func Test_KeypairReloader(t *testing.T) {
 	pemFile := filepath.Join(os.TempDir(), "test-KeypairReloader.pem")
 	keyFile := filepath.Join(os.TempDir(), "test-KeypairReloader-key.pem")
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -46,11 +45,11 @@ func Test_KeypairReloader(t *testing.T) {
 	assert.True(t, loadedAt.After(now), "loaded time must be after test start time")
 	assert.Equal(t, uint32(1), k.LoadedCount())
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
 
 	time.Sleep(200 * time.Millisecond)
@@ -60,15 +59,15 @@ func Test_KeypairReloader(t *testing.T) {
 	assert.True(t, count >= 2 && count <= 4, "must be loaded at start, whithin period and after, loaded: %d", k.LoadedCount())
 	assert.True(t, loadedAt2.After(loadedAt), "re-loaded time must be after last loaded time")
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 	time.Sleep(200 * time.Millisecond)
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
 	time.Sleep(200 * time.Millisecond)
@@ -99,9 +98,9 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 	pemFile := filepath.Join(os.TempDir(), "test-KeypairReloader2.pem")
 	keyFile := filepath.Join(os.TempDir(), "test-KeypairReloader2-key.pem")
 
-	err = ioutil.WriteFile(pemFile, pemCert, os.ModePerm)
+	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
-	err = ioutil.WriteFile(keyFile, pemKey, os.ModePerm)
+	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
 	k, err := tlsconfig.NewKeypairReloader("test", pemFile, keyFile, 100*time.Millisecond)
