@@ -6,9 +6,9 @@ import (
 	"os"
 	"runtime/pprof"
 
+	"github.com/effective-security/x/ctl"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xlog/logrotate"
-	"github.com/effective-security/xpki/x/ctl"
 	"github.com/pkg/errors"
 )
 
