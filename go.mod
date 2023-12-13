@@ -3,7 +3,6 @@ module github.com/effective-security/porto
 go 1.21.5
 
 require (
-	github.com/deckarep/golang-set v1.8.0
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/docker/docker v24.0.7+incompatible
 	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
