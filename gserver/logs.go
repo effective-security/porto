@@ -23,7 +23,19 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
-		defer logRequest(ctx, info, startTime, req, resp, err)
+		defer func() {
+			if err == nil {
+				fm := info.FullMethod
+				for _, skip := range s.cfg.SkipLogPaths {
+					pathMatch := skip.Path == "*" || fm == skip.Path
+					if pathMatch {
+						return
+					}
+				}
+
+				logRequest(ctx, info, startTime, req, resp, err)
+			}
+		}()
 		return resp, err
 	}
 }
