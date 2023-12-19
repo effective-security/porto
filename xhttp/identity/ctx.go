@@ -133,19 +133,29 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 		ctx = AddToContext(ctx, NewRequestContext(id))
 		role := id.Role()
 		if role != "guest" {
-			claims := id.Claims()
-			var email string
-			var spiffe string
-			if len(claims) > 0 {
-				email = claims.String("email")
-				spiffe = claims.String("spiffe")
+			tenant := id.Tenant()
+			subject := id.Subject()
+			entries := []any{"role", role}
+			if tenant != "" {
+				entries = append(entries, "tenant", tenant)
 			}
-			ctx = xlog.ContextWithKV(ctx,
-				"tenant", id.Tenant(),
-				"user", id.Subject(),
-				"email", email,
-				"spiffe", spiffe,
-				"role", role)
+			if subject != "" {
+				entries = append(entries, "user", subject)
+			}
+
+			claims := id.Claims()
+			if len(claims) > 0 {
+				claims := id.Claims()
+				email := claims.String("email")
+				if email != "" {
+					entries = append(entries, "email", email)
+				}
+				spiffe := claims.String("spiffe")
+				if spiffe != "" {
+					entries = append(entries, "spiffe", spiffe)
+				}
+			}
+			ctx = xlog.ContextWithKV(ctx, entries...)
 		}
 
 		return handler(ctx, req)
