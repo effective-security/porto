@@ -120,8 +120,9 @@ func TestWithAuthorization(t *testing.T) {
 	t.Log(fn)
 
 	t.Run("plain", func(t *testing.T) {
-		err = storage.SaveAuthToken(tk)
+		fn, err := storage.SaveAuthToken(tk)
 		require.NoError(t, err)
+		assert.NotEmpty(t, fn)
 
 		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
@@ -134,8 +135,9 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)},
 		}
-		err = storage.SaveAuthToken(vals.Encode())
+		fn, err = storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
+		assert.NotEmpty(t, fn)
 
 		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
@@ -148,8 +150,9 @@ func TestWithAuthorization(t *testing.T) {
 			"dpop_jkt":     {dk.KeyID},
 			"exp":          {strconv.FormatInt(time.Now().Unix(), 10)},
 		}
-		err = storage.SaveAuthToken(vals.Encode())
+		fn, err = storage.SaveAuthToken(vals.Encode())
 		require.NoError(t, err)
+		assert.NotEmpty(t, fn)
 
 		err = client.WithAuthorization(storage)
 		assert.EqualError(t, err, "authorization: token expired")

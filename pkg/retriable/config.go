@@ -182,10 +182,13 @@ func (c *Client) WithAuthorization(storage *Storage) error {
 		storage = c.Config.Storage()
 	}
 
-	at, err := storage.LoadAuthToken()
+	at, location, err := storage.LoadAuthToken()
 	if err != nil {
 		return err
 	}
+	logger.KV(xlog.DEBUG,
+		"token_location", location,
+		"expires", at.Expires)
 
 	if at.Expired() {
 		return errors.Errorf("authorization: token expired")
@@ -195,12 +198,12 @@ func (c *Client) WithAuthorization(storage *Storage) error {
 	if at.DpopJkt != "" {
 		k, _, err := storage.LoadKey(at.DpopJkt)
 		if err != nil {
-			return errors.WithMessage(err, "unable to load key for DPoP")
+			return errors.WithMessagef(err, "unable to load key for DPoP: %s", at.DpopJkt)
 		}
 		tktype = "DPoP"
 		c.dpopSigner, err = dpop.NewSigner(k.Key.(crypto.Signer))
 		if err != nil {
-			return errors.WithMessage(err, "unable to create signer")
+			return errors.WithMessage(err, "unable to create DPoP signer")
 		}
 	}
 	authHeader := header.Authorization
