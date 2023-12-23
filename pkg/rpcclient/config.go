@@ -45,7 +45,7 @@ type Config struct {
 }
 
 // LoadAuthToken returns AuthToken
-func (c *Config) LoadAuthToken() (*retriable.AuthToken, error) {
+func (c *Config) LoadAuthToken() (*retriable.AuthToken, string, error) {
 	return c.Storage().LoadAuthToken()
 }
 

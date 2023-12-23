@@ -50,13 +50,14 @@ func (c *Storage) Clean() {
 // SaveAuthToken persists auth token
 // the token format can be as opaque string, or as form encoded
 // access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
-func (c *Storage) SaveAuthToken(token string) error {
+func (c *Storage) SaveAuthToken(token string) (string, error) {
 	_ = os.MkdirAll(c.folder, 0755)
-	err := os.WriteFile(path.Join(c.folder, authTokenFileName), []byte(token), 0600)
+	location := path.Join(c.folder, authTokenFileName)
+	err := os.WriteFile(location, []byte(token), 0600)
 	if err != nil {
-		return errors.WithMessagef(err, "unable to store token")
+		return location, errors.WithMessagef(err, "unable to store token")
 	}
-	return nil
+	return location, nil
 }
 
 // LoadKey returns *jose.JSONWebKey
@@ -71,24 +72,24 @@ func (c *Storage) SaveKey(k *jose.JSONWebKey) (string, error) {
 }
 
 // LoadAuthToken returns LoadAuthToken
-func (c *Storage) LoadAuthToken() (*AuthToken, error) {
+func (c *Storage) LoadAuthToken() (*AuthToken, string, error) {
 	if c.envAuthTokenName != "" {
 		val := os.Getenv(c.envAuthTokenName)
 		if val != "" {
-			return ParseAuthToken(val)
+			return ParseAuthToken(val, "env://"+c.envAuthTokenName)
 		}
 	}
 	return LoadAuthToken(c.folder)
 }
 
 // LoadAuthToken loads .auth_token file
-func LoadAuthToken(dir string) (*AuthToken, error) {
+func LoadAuthToken(dir string) (*AuthToken, string, error) {
 	file := path.Join(dir, ".auth_token")
 	t, err := os.ReadFile(file)
 	if err != nil {
-		return nil, errors.WithMessage(err, "credentials not found")
+		return nil, file, errors.WithMessage(err, "credentials not found")
 	}
-	return ParseAuthToken(string(t))
+	return ParseAuthToken(string(t), file)
 }
 
 // AuthToken provides auth token info
@@ -108,7 +109,7 @@ func (t *AuthToken) Expired() bool {
 }
 
 // ParseAuthToken parses stored token and validates expiration
-func ParseAuthToken(rawToken string) (*AuthToken, error) {
+func ParseAuthToken(rawToken, location string) (*AuthToken, string, error) {
 	t := &AuthToken{
 		Raw:         rawToken,
 		TokenType:   "Bearer",
@@ -117,7 +118,7 @@ func ParseAuthToken(rawToken string) (*AuthToken, error) {
 	if strings.Contains(rawToken, "=") {
 		vals, err := url.ParseQuery(rawToken)
 		if err != nil {
-			return nil, errors.WithMessagef(err, "failed to parse token values")
+			return nil, location, errors.WithMessagef(err, "failed to parse token values")
 		}
 		t.AccessToken = slices.StringsCoalesce(getValue(vals, "access_token"),
 			getValue(vals, "id_token"),
@@ -129,14 +130,14 @@ func ParseAuthToken(rawToken string) (*AuthToken, error) {
 		if exp != "" {
 			ux, err := strconv.ParseInt(exp, 10, 64)
 			if err != nil {
-				return nil, errors.WithMessagef(err, "invalid exp value")
+				return nil, location, errors.WithMessagef(err, "invalid exp value")
 			}
 			expires := time.Unix(ux, 0)
 			t.Expires = &expires
 		}
 	}
 
-	return t, nil
+	return t, location, nil
 }
 
 // ExpandFolder returns expanded StorageFolder

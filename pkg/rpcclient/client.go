@@ -123,7 +123,9 @@ func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 		if cfg.CallerIdentity != nil {
 			bundle.WithCallerIdentity(cfg.CallerIdentity)
 		} else {
-			at, err := cfg.LoadAuthToken()
+			at, location, err := cfg.LoadAuthToken()
+			logger.KV(xlog.DEBUG, "token_location", location)
+
 			if err != nil && !ignoreAccessTokenError {
 				return nil, errors.WithMessage(err, "failed to load access token")
 			}
