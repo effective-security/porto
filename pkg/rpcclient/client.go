@@ -114,6 +114,11 @@ func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 
 	var dopts []grpc.DialOption
 	var creds credentials.TransportCredentials
+
+	if cfg.UserAgent != "" {
+		dopts = append(dopts, grpc.WithUserAgent(cfg.UserAgent))
+	}
+
 	if cfg.TLS != nil &&
 		(strings.HasPrefix(dialEndpoint, "https://") || strings.HasPrefix(dialEndpoint, "unixs://")) {
 

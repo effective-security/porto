@@ -3,6 +3,7 @@ package gserver
 import (
 	"context"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/effective-security/porto/metricskey"
@@ -11,6 +12,7 @@ import (
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -19,16 +21,28 @@ const (
 	warnUnaryRequestLatency = 300 * time.Millisecond
 )
 
+func headerFromContext(ctx context.Context, name string) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		vals := md.Get(name)
+		if len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
+}
+
 func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		defer func() {
 			if err == nil {
+				userAgent := strings.Split(headerFromContext(ctx, "user-agent"), " ")[0]
 				fm := info.FullMethod
 				for _, skip := range s.cfg.SkipLogPaths {
 					pathMatch := skip.Path == "*" || fm == skip.Path
-					if pathMatch {
+					if pathMatch && (userAgent == skip.Agent || skip.Agent == "*") {
 						return
 					}
 				}
@@ -44,13 +58,14 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	duration := time.Since(startTime)
 	expensiveRequest := duration > warnUnaryRequestLatency
 
-	remote := "no_remote_client_info"
+	var remote string
 	peerInfo, ok := peer.FromContext(ctx)
 	if ok {
 		remote = peerInfo.Addr.String()
 	}
-	responseType := info.FullMethod
 
+	userAgent := headerFromContext(ctx, "user-agent")
+	responseType := info.FullMethod
 	idx := identity.FromContext(ctx)
 	role := idx.Identity().Role()
 
@@ -83,6 +98,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 		"req", reflect.TypeOf(req),
 		"res", responseType,
 		"remote", remote,
+		"ua", userAgent,
 		"duration", duration.Milliseconds(),
 		"code", code,
 	)

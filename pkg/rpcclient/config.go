@@ -40,6 +40,7 @@ type Config struct {
 
 	StorageFolder    string
 	EnvAuthTokenName string
+	UserAgent        string
 
 	CallerIdentity credentials.CallerIdentity
 }
