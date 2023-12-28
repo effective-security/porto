@@ -8,7 +8,7 @@ require (
 	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
 	github.com/effective-security/x v0.1.1-0.20231213103727-26a6f8d87418
 	github.com/effective-security/xlog v0.6.1-0.20231117065932-e993e47f2aa3
-	github.com/effective-security/xpki v0.15.0
+	github.com/effective-security/xpki v0.15.1-0.20231228162539-27062172b411
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -93,7 +93,7 @@ require (
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.10.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231120223509-83a465c0220f // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231127180814-3a041ad873d4 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
