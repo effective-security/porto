@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/retriable"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/xhttp/header"
@@ -111,10 +112,15 @@ func Test_New(t *testing.T) {
 		retriable.WithTLS(nil),
 		retriable.WithTransport(nil),
 		retriable.WithTimeout(time.Second*300),
+		retriable.WithUserAgent("test"),
+		retriable.WithCallerIdentity(nil),
 	)
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 	c.AddHeader("test", "for client")
+
+	assert.NotNil(t, c.HTTPClient())
+	assert.NotNil(t, c.Storage())
 
 	// TLS
 	clientTls, err := tlsconfig.NewClientTLSFromFiles(
@@ -125,6 +131,9 @@ func Test_New(t *testing.T) {
 	c, err = retriable.New(retriable.ClientConfig{}, retriable.WithTLS(clientTls))
 	require.NoError(t, err)
 	assert.NotNil(t, c)
+
+	c = c.WithTLS(clientTls)
+	assert.NotNil(t, c.HTTPClient().Transport)
 }
 
 func TestDefaultPolicy(t *testing.T) {
@@ -344,15 +353,28 @@ func Test_Retriable_OK(t *testing.T) {
 	})
 }
 
+type callerIdentity struct {
+}
+
+func (ci *callerIdentity) GetCallerIdentity(ctx context.Context) (*credentials.Token, error) {
+	exp := time.Now().Add(1 * time.Hour)
+	return &credentials.Token{
+		TokenType:   "Bearer",
+		AccessToken: "accessKeyID",
+		Expires:     &exp,
+	}, nil
+}
+
 func Test_RetriableWithHeaders(t *testing.T) {
 	h := func(w http.ResponseWriter, r *http.Request) {
 		headers := map[string]string{
-			header.Accept:      r.Header.Get(header.Accept),
-			header.ContentType: r.Header.Get(header.ContentType),
-			"h1":               r.Header.Get("header1"),
-			"h2":               r.Header.Get("header2"),
-			"h3":               r.Header.Get("header3"),
-			"h4":               r.Header.Get("header4"),
+			header.Accept:        r.Header.Get(header.Accept),
+			header.ContentType:   r.Header.Get(header.ContentType),
+			"h1":                 r.Header.Get("header1"),
+			"h2":                 r.Header.Get("header2"),
+			"h3":                 r.Header.Get("header3"),
+			"h4":                 r.Header.Get("header4"),
+			header.Authorization: r.Header.Get(header.Authorization),
 		}
 
 		marshal.WriteJSON(w, r, headers)
@@ -361,7 +383,7 @@ func Test_RetriableWithHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(h))
 	defer server.Close()
 
-	client, err := retriable.New(retriable.ClientConfig{})
+	client, err := retriable.New(retriable.ClientConfig{}, retriable.WithCallerIdentity(&callerIdentity{}))
 	require.NoError(t, err)
 	require.NotNil(t, client)
 
@@ -386,6 +408,7 @@ func Test_RetriableWithHeaders(t *testing.T) {
 		assert.Equal(t, "val2", headers["h2"])
 		assert.Equal(t, "val3", headers["h3"])
 		assert.Empty(t, headers["h4"])
+		assert.NotEmpty(t, headers[header.Authorization])
 	})
 
 	t.Run("call.setHeader", func(t *testing.T) {

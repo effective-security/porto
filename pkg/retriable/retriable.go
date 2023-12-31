@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
@@ -283,6 +285,21 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 	})
 }
 
+// WithUserAgent adds User-Agent, X-CLIENT-HOSTNAME, X-CLIENT-IP headers.
+func WithUserAgent(name string) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.WithUserAgent(name)
+	})
+}
+
+// WithCallerIdentity allows to specify token provider
+// to modify request before it's sent
+func WithCallerIdentity(ci credentials.CallerIdentity) ClientOption {
+	return optionFunc(func(c *Client) {
+		c.WithCallerIdentity(ci)
+	})
+}
+
 // Client is custom implementation of http.Client
 type Client struct {
 	Name             string
@@ -477,6 +494,16 @@ func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.Policy.RequestTimeout = timeout
+	return c
+}
+
+// WithUserAgent adds User-Agent, X-CLIENT-HOSTNAME, X-CLIENT-IP headers.
+func (c *Client) WithUserAgent(name string) *Client {
+	ipaddr, _ := netutil.WaitForNetwork(time.Second)
+	hostname, _ := os.Hostname()
+	c.AddHeader(header.UserAgent, name)
+	c.AddHeader("X-CLIENT-HOSTNAME", hostname)
+	c.AddHeader("X-CLIENT-IP", ipaddr)
 	return c
 }
 
