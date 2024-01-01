@@ -46,17 +46,14 @@ type CloudWatch struct {
 	// AwsRegion where the service is deployed.
 	AwsRegion string `json:"aws_region" yaml:"aws_region"`
 
+	// AwsEndpoint is the optional AWS endpoint to use
+	AwsEndpoint string
+
 	// Namespace specifies CloudWatch namespace to push metrics and logs to.
 	Namespace string `json:"namespace" yaml:"namespace"`
 
 	// PublishInterval specifies the publish interval.
 	PublishInterval time.Duration `json:"publish_interval" yaml:"publish_interval"`
-
-	// PublishTimeout specifies the timeout interval.
-	PublishTimeout time.Duration `json:"publish_timeout" yaml:"publish_timeout"`
-
-	// ScrapeURL specifies the URL to scrape metrics from.
-	ScrapeURL string `json:"scrape_url" yaml:"scrape_url"`
 
 	// AdditionalTags specifies additional tags/labels to send to CloudWatch
 	AdditionalTags map[string]string `json:"add_tags" yaml:"add_tags"`
