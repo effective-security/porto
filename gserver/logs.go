@@ -3,7 +3,6 @@ package gserver
 import (
 	"context"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/effective-security/porto/metricskey"
@@ -38,13 +37,9 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 		resp, err := handler(ctx, req)
 		defer func() {
 			if err == nil {
-				userAgent := strings.Split(headerFromContext(ctx, "user-agent"), " ")[0]
 				fm := info.FullMethod
-				for _, skip := range s.cfg.SkipLogPaths {
-					pathMatch := skip.Path == "*" || fm == skip.Path
-					if pathMatch && (userAgent == skip.Agent || skip.Agent == "*") {
-						return
-					}
+				if s.cfg.SkipLogPaths.ShouldSkip(fm, headerFromContext(ctx, "user-agent")) {
+					return
 				}
 
 				logRequest(ctx, info, startTime, req, resp, err)
