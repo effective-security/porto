@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/metricskey"
+	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
@@ -38,7 +39,7 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 		defer func() {
 			if err == nil {
 				fm := info.FullMethod
-				if s.cfg.SkipLogPaths.ShouldSkip(fm, headerFromContext(ctx, "user-agent")) {
+				if telemetry.ShouldSkip(s.cfg.SkipLogPaths, fm, headerFromContext(ctx, "user-agent")) {
 					return
 				}
 

@@ -112,7 +112,7 @@ type Config struct {
 
 	// SkipLogPaths if set, specifies a list of paths to not log.
 	// this can be used for /v1/status/node or /metrics
-	SkipLogPaths telemetry.LoggerSkipPaths `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
+	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 }
 
 // Provider represents an Authorization provider,
@@ -393,7 +393,8 @@ func (c *Provider) isAllowed(ctx context.Context, path, userAgent string, idn id
 		allowRole = node.allowRole(role)
 	}
 	res := allowAny || allowRole
-	if !c.cfg.SkipLogPaths.ShouldSkip(path, userAgent) {
+
+	if !telemetry.ShouldSkip(c.cfg.SkipLogPaths, path, userAgent) {
 		if res {
 			if allowRole && c.cfg.LogAllowed {
 				logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",

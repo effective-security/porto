@@ -19,12 +19,9 @@ type LoggerSkipPath struct {
 	Agent string `json:"agent,omitempty" yaml:"agent,omitempty"`
 }
 
-// LoggerSkipPaths allows to skip a log for specified Path and Agent
-type LoggerSkipPaths []LoggerSkipPath
-
 // ShouldSkip returns true if the logs should be skipped
-func (l LoggerSkipPaths) ShouldSkip(path, userAgent string) bool {
-	for _, skip := range l {
+func ShouldSkip(cfg []LoggerSkipPath, path, userAgent string) bool {
+	for _, skip := range cfg {
 		pathMatch := skip.Path == "*" || path == skip.Path
 		agentMatch := skip.Agent == "*" || strings.Contains(userAgent, skip.Agent)
 		if pathMatch && agentMatch {
@@ -35,13 +32,13 @@ func (l LoggerSkipPaths) ShouldSkip(path, userAgent string) bool {
 }
 
 type configuration struct {
-	skippaths   LoggerSkipPaths
+	skippaths   []LoggerSkipPath
 	granularity int64
 	logger      xlog.KeyValueLogger
 }
 
 // WithLoggerSkipPaths is an Option allows to skip logs on path/agent match
-func WithLoggerSkipPaths(value LoggerSkipPaths) Option {
+func WithLoggerSkipPaths(value []LoggerSkipPath) Option {
 	return func(c *configuration) {
 		c.skippaths = value
 	}
@@ -97,7 +94,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		agent = "no-agent"
 	}
 
-	if l.cfg.skippaths.ShouldSkip(r.URL.Path, agent) {
+	if ShouldSkip(l.cfg.skippaths, r.URL.Path, agent) {
 		return
 	}
 

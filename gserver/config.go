@@ -33,7 +33,7 @@ type Config struct {
 
 	// SkipLogPaths if set, specifies a list of paths to not log.
 	// this can be used for /v1/status/node or /metrics
-	SkipLogPaths telemetry.LoggerSkipPaths `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
+	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 
 	// Services is a list of services to enable for this server
 	Services []string `json:"services" yaml:"services"`
