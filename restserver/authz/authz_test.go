@@ -123,7 +123,7 @@ func TestConfig_WalkTree(t *testing.T) {
 }
 
 func checkAllowed(t *testing.T, c *Provider, path string, idn identity.Identity, expectedAllowed bool) {
-	actual := c.isAllowed(ctx, path, idn)
+	actual := c.isAllowed(ctx, path, "", idn)
 	assert.Equal(t, expectedAllowed, actual, "isAllowed(%v, %v) returned unexpected results", path, idn.String())
 }
 
@@ -275,7 +275,7 @@ func Test_AccessLogs(t *testing.T) {
 
 	shouldLog := func(path, service, expLog string) {
 		buf.Reset()
-		c.isAllowed(ctx, path, identity.NewIdentity(service, "test", "", nil, "", ""))
+		c.isAllowed(ctx, path, "", identity.NewIdentity(service, "test", "", nil, "", ""))
 		result := buf.String()
 		assert.Equal(t, expLog, result, "Unexpected log output for isAllowed(%q, %q)", path, service)
 	}
@@ -295,12 +295,12 @@ func Test_AccessLogs(t *testing.T) {
 		c.cfg.LogAllowed = false
 		c.cfg.LogDenied = false
 		buf.Reset()
-		c.isAllowed(ctx, "/", identity.NewIdentity("bobby", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bob", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bar", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/foo/eve", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/", "test", identity.NewIdentity("bobby", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bob", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
 		assert.Empty(t, buf.Bytes())
 	})
 }
@@ -326,8 +326,8 @@ func TestConfig_Clone(t *testing.T) {
 	c.Allow("/foo", "alice")
 	require.NotNil(t, clone.requestRoleMapper, "Config.Clone() didn't clone roleMapper")
 	assert.Equal(t, "bob", clone.requestRoleMapper(nil).Role(), "Config.Clone() has a roleMapper set, but it doesn't appear to be ours!")
-	assert.False(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("alise", "test", "", nil, "", "")), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
-	assert.True(t, clone.isAllowed(ctx, "/foo", identity.NewIdentity("bob", "test", "", nil, "", "")), "Config.Clone() return a clone that's missing an Allow() from the source")
+	assert.False(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("alise", "test", "", nil, "", "")), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
+	assert.True(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("bob", "test", "", nil, "", "")), "Config.Clone() return a clone that's missing an Allow() from the source")
 }
 
 func TestConfig_checkAccess_defaultMapper(t *testing.T) {

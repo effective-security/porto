@@ -35,6 +35,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
@@ -43,6 +44,7 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/restserver", "authz")
@@ -107,6 +109,10 @@ type Config struct {
 
 	// LogDenied specifies to log denied access
 	LogDenied bool `json:"log_denied" yaml:"log_denied"`
+
+	// SkipLogPaths if set, specifies a list of paths to not log.
+	// this can be used for /v1/status/node or /metrics
+	SkipLogPaths telemetry.LoggerSkipPaths `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 }
 
 // Provider represents an Authorization provider,
@@ -367,13 +373,15 @@ func (c *Provider) walkPath(path string, create bool) *pathNode {
 }
 
 // isAllowed returns true if access to 'path' is allowed for the specified role.
-func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Identity) bool {
+func (c *Provider) isAllowed(ctx context.Context, path, userAgent string, idn identity.Identity) bool {
 	role := idn.Role()
 
 	if len(path) == 0 || path[0] != '/' {
-		logger.ContextKV(ctx, xlog.NOTICE,
-			"status", "denied",
-			"invalid_path", path)
+		if c.cfg.LogDenied {
+			logger.ContextKV(ctx, xlog.NOTICE,
+				"status", "denied",
+				"invalid_path", path)
+		}
 		return false
 	}
 
@@ -385,20 +393,22 @@ func (c *Provider) isAllowed(ctx context.Context, path string, idn identity.Iden
 		allowRole = node.allowRole(role)
 	}
 	res := allowAny || allowRole
-	if res {
-		if allowRole && c.cfg.LogAllowed {
-			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",
-				"path", path,
-				"node", node.value)
-		} else if c.cfg.LogAllowedAny {
-			logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed_any",
+	if !c.cfg.SkipLogPaths.ShouldSkip(path, userAgent) {
+		if res {
+			if allowRole && c.cfg.LogAllowed {
+				logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",
+					"path", path,
+					"node", node.value)
+			} else if c.cfg.LogAllowedAny {
+				logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed_any",
+					"path", path,
+					"node", node.value)
+			}
+		} else if c.cfg.LogDenied {
+			logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
 				"path", path,
 				"node", node.value)
 		}
-	} else if c.cfg.LogDenied {
-		logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
-			"path", path,
-			"node", node.value)
 	}
 	return res
 }
@@ -412,7 +422,7 @@ func (c *Provider) checkAccess(r *http.Request) error {
 
 	idn := c.requestRoleMapper(r)
 	ctx := r.Context()
-	if !c.isAllowed(ctx, r.URL.Path, idn) {
+	if !c.isAllowed(ctx, r.URL.Path, r.UserAgent(), idn) {
 		return httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
 	}
 
@@ -458,10 +468,22 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		idn := c.grpcRoleMapper(ctx)
-		if !c.isAllowed(ctx, info.FullMethod, idn) {
+		userAgent := headerFromContext(ctx, "user-agent")
+		if !c.isAllowed(ctx, info.FullMethod, userAgent, idn) {
 			return nil, httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
 		}
 
 		return handler(ctx, req)
 	}
+}
+
+func headerFromContext(ctx context.Context, name string) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		vals := md.Get(name)
+		if len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
 }
