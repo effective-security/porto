@@ -94,11 +94,10 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	case "cloudwatch":
 		c := cloudwatch.Config{
 			AwsRegion:       cfg.CloudWatch.AwsRegion,
+			AwsEndpoint:     cfg.CloudWatch.AwsEndpoint,
 			Namespace:       cfg.CloudWatch.Namespace,
 			PublishInterval: cfg.CloudWatch.PublishInterval,
-			PublishTimeout:  cfg.CloudWatch.PublishTimeout,
 			WithSampleCount: cfg.CloudWatch.WithSampleCount,
-			Validate:        false,
 			WithCleanup:     true, // reset after each Flush
 		}
 
@@ -149,7 +148,7 @@ type contextCloser struct {
 
 func (c *contextCloser) Close() error {
 	if cwSink != nil {
-		err := cwSink.Flush()
+		err := cwSink.Flush(context.Background())
 		if err != nil {
 			logger.KV(xlog.ERROR, "reason", "metrics_flush", "err", err.Error())
 		}

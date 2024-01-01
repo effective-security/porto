@@ -9,6 +9,7 @@ import (
 	"github.com/effective-security/x/ctl"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xlog/logrotate"
+	"github.com/effective-security/xlog/stackdriver"
 	"github.com/pkg/errors"
 )
 
@@ -16,11 +17,12 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "a
 
 // LogConfig defines config for logs
 type LogConfig struct {
-	LogStd    bool   `help:"output logs to stderr"`
-	LogDebug  bool   `help:"output logs with debug info, such as filename:line"`
-	LogPretty bool   `help:"output logs in pretty format, with colors"`
-	LogJSON   bool   `help:"output logs in JSON format"`
-	LogDir    string `help:"Store logs in folder"`
+	LogStd         bool   `help:"output logs to stderr"`
+	LogDebug       bool   `help:"output logs with debug info, such as filename:line"`
+	LogPretty      bool   `help:"output logs in pretty format, with colors"`
+	LogJSON        bool   `help:"output logs in JSON format"`
+	LogStackdriver bool   `help:"output logs in GCP stackdriver format"`
+	LogDir         string `help:"Store logs in folder"`
 }
 
 // Flags defines common flags
@@ -79,6 +81,8 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 
 	} else if flags.LogDir == nullDevName {
 		formatter = xlog.NewNilFormatter()
+	} else if flags.LogStackdriver {
+		formatter = stackdriver.NewFormatter(os.Stderr, serviceName)
 	} else if flags.LogJSON {
 		formatter = xlog.NewJSONFormatter(os.Stderr)
 	} else if flags.LogPretty {

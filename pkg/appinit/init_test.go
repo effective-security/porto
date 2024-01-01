@@ -15,16 +15,31 @@ func TestLogs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, closer)
 
-	dir := path.Join(os.TempDir(), "proto-test", "logs")
-	_ = os.MkdirAll(dir, os.ModePerm)
-	defer os.Remove(dir)
+	dir := t.TempDir()
 
 	closer, err = Logs(&LogConfig{LogDir: dir, LogStd: true}, "test")
 	require.NoError(t, err)
 	require.NotNil(t, closer)
 	closer.Close()
 
+	closer, err = Logs(&LogConfig{LogDir: dir + "/notfound", LogStd: false}, "test")
+	require.NoError(t, err)
+	require.NotNil(t, closer)
+	closer.Close()
+
 	closer, err = Logs(&LogConfig{LogDir: nullDevName}, "test")
+	require.NoError(t, err)
+	assert.Nil(t, closer)
+
+	closer, err = Logs(&LogConfig{LogJSON: true}, "test")
+	require.NoError(t, err)
+	assert.Nil(t, closer)
+
+	closer, err = Logs(&LogConfig{LogStackdriver: true}, "test")
+	require.NoError(t, err)
+	assert.Nil(t, closer)
+
+	closer, err = Logs(&LogConfig{}, "test")
 	require.NoError(t, err)
 	assert.Nil(t, closer)
 }

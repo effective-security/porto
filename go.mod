@@ -5,10 +5,10 @@ go 1.21.5
 require (
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/docker/docker v24.0.7+incompatible
-	github.com/effective-security/metrics v0.2.1-0.20231117075147-3686848ff7a6
+	github.com/effective-security/metrics v0.2.1-0.20240101104213-da18109a2223
 	github.com/effective-security/x v0.1.1-0.20231213103727-26a6f8d87418
-	github.com/effective-security/xlog v0.6.1-0.20231117065932-e993e47f2aa3
-	github.com/effective-security/xpki v0.15.1-0.20231228162539-27062172b411
+	github.com/effective-security/xlog v0.7.1
+	github.com/effective-security/xpki v0.15.1-0.20231231113631-8fd430fe74bf
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -18,7 +18,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.17.0
+	github.com/prometheus/client_golang v1.18.0
 	github.com/redis/go-redis/v9 v9.3.1
 	github.com/rs/cors v1.10.1
 	github.com/soheilhy/cmux v0.1.5
@@ -42,7 +42,20 @@ require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.11.4 // indirect
 	github.com/alecthomas/kong v0.8.1 // indirect
-	github.com/aws/aws-sdk-go v1.47.13 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.24.0 // indirect
+	github.com/aws/aws-sdk-go-v2/config v1.26.2 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.16.13 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.14.10 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.2.9 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.5.9 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/ini v1.7.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.32.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.10.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.10.9 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.18.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.21.5 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.26.6 // indirect
+	github.com/aws/smithy-go v1.19.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -74,9 +87,9 @@ require (
 	github.com/opencontainers/runc v1.1.5 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_model v0.4.1-0.20230718164431-9a2bf3000d16 // indirect
+	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
-	github.com/prometheus/procfs v0.11.1 // indirect
+	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.11 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
