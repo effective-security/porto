@@ -137,14 +137,14 @@ func TestHttp_RequestLoggerWithSkip(t *testing.T) {
 		agent string
 		exp   bool
 	}{
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "", Agent: ""}}), "/foo", "", true},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "*", Agent: ""}}), "/foo", "", false},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "*", Agent: "*"}}), "/foo", "Google HB", false},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "", Agent: "*"}}), "/foo", "Google HB", true},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "", Agent: "Google"}}), "/foo", "Google HB", true},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "/foo", Agent: "Google"}}), "/foo", "Google HB", false},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "/bar", Agent: "Google"}}), "/foo", "Google HB", true},
-		{WithLoggerSkipPaths(LoggerSkipPaths{{Path: "/foo", Agent: "Google"}}), "/foo", "Prom", true},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "", Agent: ""}}), "/foo", "", true},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "*", Agent: ""}}), "/foo", "", false},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "*", Agent: "*"}}), "/foo", "Google HB", false},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "", Agent: "*"}}), "/foo", "Google HB", true},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "", Agent: "Google"}}), "/foo", "Google HB", true},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "/foo", Agent: "Google"}}), "/foo", "Google HB", false},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "/bar", Agent: "Google"}}), "/foo", "Google HB", true},
+		{WithLoggerSkipPaths([]LoggerSkipPath{{Path: "/foo", Agent: "Google"}}), "/foo", "Prom", true},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
