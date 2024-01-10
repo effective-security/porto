@@ -9,6 +9,19 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    groups:
+      aws:
+        patterns:
+          - aws-sdk-go-v2*
+      es:
+        patterns:
+          - effective-security*
+      go:
+        patterns:
+          - golang.org*
+      google:
+        patterns:
+          - google.golang.org*
   # Enable version updates for Actions
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
