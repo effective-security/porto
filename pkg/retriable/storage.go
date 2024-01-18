@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/effective-security/x/slices"
+	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	jose "github.com/go-jose/go-jose/v3"
@@ -120,7 +120,7 @@ func ParseAuthToken(rawToken, location string) (*AuthToken, string, error) {
 		if err != nil {
 			return nil, location, errors.WithMessagef(err, "failed to parse token values")
 		}
-		t.AccessToken = slices.StringsCoalesce(getValue(vals, "access_token"),
+		t.AccessToken = values.StringsCoalesce(getValue(vals, "access_token"),
 			getValue(vals, "id_token"),
 			getValue(vals, "token"))
 		t.RefreshToken = getValue(vals, "refresh_token")

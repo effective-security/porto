@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/effective-security/x/guid"
-	"github.com/effective-security/x/slices"
+	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/pkg/errors"
 )
@@ -185,7 +185,7 @@ func New(s *Schedule, ops ...Option) Task {
 		op.apply(&dops)
 	}
 
-	dops.id = slices.StringsCoalesce(dops.id, guid.MustCreate())
+	dops.id = values.StringsCoalesce(dops.id, guid.MustCreate())
 	j := &task{
 		id:         dops.id,
 		schedule:   s,
