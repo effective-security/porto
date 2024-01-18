@@ -8,7 +8,7 @@ import (
 
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/effective-security/x/slices"
+	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/pkg/errors"
@@ -142,7 +142,7 @@ func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 				} else {
 					// grpc: the credentials require transport level security
 					token := at.AccessToken
-					typ := slices.StringsCoalesce(at.TokenType, "Bearer")
+					typ := values.StringsCoalesce(at.TokenType, "Bearer")
 					if at.DpopJkt != "" {
 						k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
 						if err != nil {

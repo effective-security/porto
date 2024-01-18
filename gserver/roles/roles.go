@@ -16,6 +16,7 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/x/slices"
+	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
@@ -109,9 +110,9 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		if jwt == nil {
 			return nil, errors.Errorf("dpop: JWT parser is required")
 		}
-		prov.config.DPoP.SubjectClaim = slices.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
-		prov.config.DPoP.RoleClaim = slices.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
-		prov.config.DPoP.TenantClaim = slices.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
+		prov.config.DPoP.SubjectClaim = values.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
+		prov.config.DPoP.RoleClaim = values.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
+		prov.config.DPoP.TenantClaim = values.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
@@ -123,9 +124,9 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		if jwt == nil {
 			return nil, errors.Errorf("jwt: JWT parser is required")
 		}
-		prov.config.JWT.SubjectClaim = slices.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
-		prov.config.JWT.RoleClaim = slices.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
-		prov.config.JWT.TenantClaim = slices.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
+		prov.config.JWT.SubjectClaim = values.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
+		prov.config.JWT.RoleClaim = values.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
+		prov.config.JWT.TenantClaim = values.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -223,8 +224,8 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		phdr := r.Header.Get(dpop.HTTPHeader)
 		u := r.URL
 		coreURL := url.URL{
-			Scheme: slices.StringsCoalesce(u.Scheme, "https"),
-			Host:   slices.StringsCoalesce(u.Host, r.Host),
+			Scheme: values.StringsCoalesce(u.Scheme, "https"),
+			Host:   values.StringsCoalesce(u.Host, r.Host),
 			Path:   u.Path,
 		}
 
@@ -450,7 +451,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	}
 	subj := fmt.Sprintf("%s:%s/%s", components.AccountID, components.ResourceType, res)
 
-	role := slices.StringsCoalesce(p.awsRoles[subj], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
+	role := values.StringsCoalesce(p.awsRoles[subj], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"account", callerIdentity.Account,
 		"arn", callerIdentity.Arn,
@@ -495,7 +496,7 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (ide
 	subj := claims.String(p.config.JWT.SubjectClaim)
 	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
-	role := slices.StringsCoalesce(p.jwtRoles[roleClaim], p.config.JWT.DefaultAuthenticatedRole)
+	role := values.StringsCoalesce(p.jwtRoles[roleClaim], p.config.JWT.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"role", role,
 		"tenant", tenant,
@@ -509,7 +510,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 	peer := TLS.PeerCertificates[0]
 	if len(peer.URIs) == 1 && peer.URIs[0].Scheme == "spiffe" {
 		spiffe := peer.URIs[0].String()
-		role := slices.StringsCoalesce(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
+		role := values.StringsCoalesce(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
 		claims := map[string]interface{}{
 			"role":   role,
 			"sub":    peer.Subject.String(),

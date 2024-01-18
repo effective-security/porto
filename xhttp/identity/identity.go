@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/effective-security/x/netutil"
-	"github.com/effective-security/x/slices"
+	"github.com/effective-security/x/values"
 	"github.com/effective-security/xpki/jwt"
 )
 
@@ -100,7 +100,7 @@ func (c identity) Claims() jwt.MapClaims {
 // String returns the identity as a single string value
 // in the format of {tenant/}subject{:role}
 func (c identity) String() string {
-	s := slices.StringsCoalesce(c.subject, "unknown")
+	s := values.StringsCoalesce(c.subject, "unknown")
 	if c.tenant != "" {
 		s = c.tenant + "/" + s
 	}
