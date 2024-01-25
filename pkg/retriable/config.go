@@ -206,7 +206,7 @@ func (c *Client) WithAuthorization(storage *Storage) error {
 			return errors.WithMessage(err, "unable to create DPoP signer")
 		}
 	}
-	authHeader := header.Authorization
+	authHeader := at.AccessToken
 	if tktype != "" {
 		authHeader = tktype + " " + authHeader
 	}
