@@ -129,9 +129,10 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	}
 
 	xlog.OnError(func(pkg string) {
+		pmetricskey.HealthLogPackageErrors.IncrCounter(1, pkg)
+		pmetricskey.HealthLogBuildErrors.IncrCounter(1, version)
 		pmetricskey.HealthLogErrors.IncrCounter(1, pkg, version)
 	})
-	pmetricskey.HealthLogErrors.IncrCounter(0, "appinit", version)
 
 	logger.KV(xlog.INFO,
 		"status", "metrics_started",
