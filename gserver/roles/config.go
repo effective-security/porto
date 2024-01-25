@@ -4,6 +4,9 @@ package roles
 type IdentityMap struct {
 	// DebugLogs allows to add extra debog logs
 	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
+	// Strict mode returns error if any Auth method fails,
+	// without strict mode, it will try all methods and return
+	Strict bool `json:"strict" yaml:"strict"`
 
 	// TLS identity map
 	TLS GenericIdentityMap `json:"tls" yaml:"tls"`

@@ -298,8 +298,10 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			id, err := p.awsIdentity(ctx, token, typ)
 			if err == nil {
 				return id, nil
+			} else if p.config.Strict {
+				return nil, err
 			}
-			logger.ContextKV(ctx, xlog.WARNING, "err", err.Error())
+			logger.ContextKV(ctx, xlog.DEBUG, "reason", "awsIdentity", "err", err.Error())
 		}
 
 		dhdr := md["dpop"]
@@ -308,14 +310,20 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, "DPoP")
 			if err == nil {
 				return id, nil
+			} else if p.config.Strict {
+				return nil, err
 			}
+			logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 		}
 
 		if p.config.JWT.Enabled && typ != "" {
 			id, err := p.jwtIdentity(ctx, token, typ)
 			if err == nil {
 				return id, nil
+			} else if p.config.Strict {
+				return nil, err
 			}
+			logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "err", err.Error())
 		}
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
 	} else {
@@ -410,7 +418,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 			logger.ContextKV(ctx, xlog.DEBUG,
 				//"url", url,
 				"body", string(body))
-			return nil, errors.WithMessagef(err, "failed to get Caller Identity from AWS: %s", resp.Status)
+			return nil, errors.Errorf("failed to get Caller Identity from AWS: %s", resp.Status)
 		}
 
 		ci = new(CallerIdentity)
