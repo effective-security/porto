@@ -127,6 +127,7 @@ func TestWithAuthorization(t *testing.T) {
 		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "Bearer")
+		assert.Contains(t, client.headers[header.Authorization], tk)
 	})
 
 	t.Run("dpop", func(t *testing.T) {
@@ -142,6 +143,7 @@ func TestWithAuthorization(t *testing.T) {
 		err = client.WithAuthorization(storage)
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "DPoP")
+		assert.Contains(t, client.headers[header.Authorization], tk)
 	})
 
 	t.Run("dpop_expired", func(t *testing.T) {
