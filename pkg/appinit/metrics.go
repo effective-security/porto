@@ -29,6 +29,16 @@ var (
 
 // Metrics initializer
 func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (io.Closer, error) {
+	if cfg.Provider == "" || cfg.GetDisabled() {
+		logger.KV(xlog.INFO,
+			"status", "metrics_disabled",
+			"version", version,
+			"commit", commitNumber,
+			"provider", cfg.Provider,
+		)
+		return nil, nil
+	}
+
 	var err error
 	var sinks []metrics.Sink
 	var closer io.Closer
@@ -127,6 +137,8 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 			closer = ctxcloser
 
 		case "inmem", "inmemory":
+
+		case "":
 
 		default:
 			return nil, errors.Errorf("metrics provider %q not supported", cfg.Provider)
