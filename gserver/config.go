@@ -35,6 +35,9 @@ type Config struct {
 	// this can be used for /v1/status/node or /metrics
 	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 
+	// PromGrpc allows to submit gRPC metrics to Prometheus interceptors
+	PromGrpc bool `json:"prom_grpc" yaml:"prom_grpc"`
+
 	// Services is a list of services to enable for this server
 	Services []string `json:"services" yaml:"services"`
 
