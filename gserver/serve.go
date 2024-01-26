@@ -378,7 +378,9 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
 		s.authz.NewUnaryInterceptor(),
-		grpc_prometheus.UnaryServerInterceptor,
+	}
+	if s.cfg.PromGrpc {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
 	if len(s.opts.unary) > 0 {
 		chainUnaryInterceptors = append(chainUnaryInterceptors, s.opts.unary...)
@@ -386,7 +388,9 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		newStreamInterceptor(s),
-		grpc_prometheus.StreamServerInterceptor,
+	}
+	if s.cfg.PromGrpc {
+		chainStreamInterceptors = append(chainStreamInterceptors, grpc_prometheus.StreamServerInterceptor)
 	}
 	if len(s.opts.stream) > 0 {
 		chainStreamInterceptors = append(chainStreamInterceptors, s.opts.stream...)

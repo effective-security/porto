@@ -44,20 +44,6 @@ var (
 		Help:         "log_errors provides the counter of errors in logs",
 		RequiredTags: []string{"pkg", "build"},
 	}
-	// HealthLogPackageErrors is counter metric for log errors
-	HealthLogPackageErrors = metrics.Describe{
-		Type:         metrics.TypeCounter,
-		Name:         "log_errors_pkg",
-		Help:         "log_errors_pkg provides the counter of errors in logs by package",
-		RequiredTags: []string{"pkg"},
-	}
-	// HealthLogBuildErrors is counter metric for log errors
-	HealthLogBuildErrors = metrics.Describe{
-		Type:         metrics.TypeCounter,
-		Name:         "log_errors_build",
-		Help:         "log_errors_build provides the counter of errors in logs by build",
-		RequiredTags: []string{"build"},
-	}
 )
 
 // Metrics returns slice of metrics from this repo
@@ -69,6 +55,4 @@ var Metrics = []*metrics.Describe{
 	&GRPCReqByRole,
 	&StatsVersion,
 	&HealthLogErrors,
-	&HealthLogPackageErrors,
-	&HealthLogBuildErrors,
 }
