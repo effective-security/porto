@@ -106,8 +106,8 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 							"status", "starting_prometheus",
 							"endpoint", cfg.Prometheus.Addr)
 						// remove Prom metrics
-						h := promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{})
-						logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, h).Error())
+						//h := promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{})
+						logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, promhttp.Handler()).Error())
 					}()
 				}
 			}
