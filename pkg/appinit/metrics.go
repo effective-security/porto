@@ -83,37 +83,41 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	for _, p := range providers {
 		switch p {
 		case "prometheus":
-			if promSink == nil {
-				// Remove Go collector
-				prom.Unregister(collectors.NewGoCollector())
-				prom.Unregister(collectors.NewBuildInfoCollector())
-				prom.Unregister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+			if promSink != nil {
+				return nil, errors.New("prometheus sink already initialized")
+			}
+			// Remove Go collector
+			prom.Unregister(collectors.NewGoCollector())
+			prom.Unregister(collectors.NewBuildInfoCollector())
+			prom.Unregister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-				ops := prometheus.Opts{
-					Expiration: cfg.Prometheus.Expiration,
-					Registerer: prom.DefaultRegisterer,
-					Help:       mcfg.Help(describe, pmetricskey.Metrics),
-				}
+			ops := prometheus.Opts{
+				Expiration: cfg.Prometheus.Expiration,
+				Registerer: prom.DefaultRegisterer,
+				Help:       mcfg.Help(describe, pmetricskey.Metrics),
+			}
 
-				promSink, err = prometheus.NewSinkFrom(ops)
-				if err != nil {
-					return nil, nil
-				}
-
-				if cfg.Prometheus != nil && cfg.Prometheus.Addr != "" {
-					go func() {
-						logger.KV(xlog.INFO,
-							"status", "starting_prometheus",
-							"endpoint", cfg.Prometheus.Addr)
-						// remove Prom metrics
-						//h := promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{})
-						logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, promhttp.Handler()).Error())
-					}()
-				}
+			promSink, err = prometheus.NewSinkFrom(ops)
+			if err != nil {
+				return nil, nil
 			}
 			sinks = append(sinks, promSink)
 
+			if cfg.Prometheus != nil && cfg.Prometheus.Addr != "" {
+				go func() {
+					logger.KV(xlog.INFO,
+						"status", "starting_prometheus",
+						"endpoint", cfg.Prometheus.Addr)
+					// remove Prom metrics
+					//h := promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{})
+					logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, promhttp.Handler()).Error())
+				}()
+			}
+
 		case "cloudwatch":
+			if cwSink != nil {
+				return nil, errors.New("cloudwatch sink already initialized")
+			}
 			c := cloudwatch.Config{
 				AwsRegion:       cfg.CloudWatch.AwsRegion,
 				AwsEndpoint:     cfg.CloudWatch.AwsEndpoint,
@@ -127,13 +131,13 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 			if err != nil {
 				return nil, err
 			}
+			sinks = append(sinks, cwSink)
 
 			ctxcloser := &contextCloser{
 				ctx: context.Background(),
 			}
 
 			go cwSink.Run(ctxcloser.ctx)
-			sinks = append(sinks, promSink)
 			closer = ctxcloser
 
 		case "inmem", "inmemory":
