@@ -4,7 +4,7 @@ go 1.21.5
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.1
-	github.com/docker/docker v25.0.0+incompatible
+	github.com/docker/docker v25.0.1+incompatible
 	github.com/effective-security/metrics v0.4.0
 	github.com/effective-security/x v0.3.1-0.20240118072040-88453553908b
 	github.com/effective-security/xlog v0.7.1
@@ -28,7 +28,7 @@ require (
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
 	golang.org/x/crypto v0.18.0
-	google.golang.org/grpc v1.60.1
+	google.golang.org/grpc v1.61.0
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v3 v3.0.1
 )

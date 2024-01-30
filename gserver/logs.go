@@ -37,14 +37,10 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		defer func() {
-			if err == nil {
-				fm := info.FullMethod
-				if telemetry.ShouldSkip(s.cfg.SkipLogPaths, fm, headerFromContext(ctx, "user-agent")) {
-					return
-				}
-
-				logRequest(ctx, info, startTime, req, resp, err)
+			if err == nil && telemetry.ShouldSkip(s.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+				return
 			}
+			logRequest(ctx, info, startTime, req, resp, err)
 		}()
 		return resp, err
 	}
