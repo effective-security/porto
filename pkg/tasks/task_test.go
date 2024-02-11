@@ -376,3 +376,33 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.Equal(t, 7*24*time.Hour, sch.period)
 	//assert.Equal(t, time.Unix(0, 0), sch.NextRunAt)
 }
+
+func Test_schedulesEqual(t *testing.T) {
+	type schedule struct {
+		s1    string
+		s2    string
+		equal bool
+	}
+
+	tests := []schedule{
+		{s1: "every Saturday 16:00", s2: "every 7 days", equal: false},
+		{s1: "every Saturday 16:00", s2: "every Sunday 16:00", equal: false},
+		{s1: "every Saturday 16:00", s2: "every Saturday 17:00", equal: false},
+		{s1: "every Saturday", s2: "every Monday", equal: false},
+		{s1: "every 2 days", s2: "every 3 days", equal: false},
+		{s1: "every day", s2: "every 2 days", equal: false},
+		{s1: "every Saturday 16:00", s2: "every Saturday 16:00", equal: true},
+		{s1: "every Saturday", s2: "every Saturday", equal: true},
+		{s1: "every Monday", s2: "every Monday", equal: true},
+		{s1: "every 2 days", s2: "every 2 days", equal: true},
+	}
+
+	for _, tc := range tests {
+		s1, err := ParseSchedule(tc.s1)
+		assert.NoError(t, err)
+		s2, err := ParseSchedule(tc.s2)
+		assert.NoError(t, err)
+		equal := s1.Equal(s2)
+		assert.Equal(t, tc.equal, equal)
+	}
+}
