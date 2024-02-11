@@ -69,6 +69,8 @@ type Task interface {
 
 // Schedule defines task schedule
 type Schedule struct {
+	// Format specifies the schedule format
+	Format string
 	// Interval * unit bettween runs
 	Interval uint64
 	// Unit specifies time units, ,e.g. 'minutes', 'hours'...
@@ -83,6 +85,14 @@ type Schedule struct {
 	RunCount uint32
 	// cache the period between last an next run
 	period time.Duration
+}
+
+// Equal returns true if the schedules are equal
+func (s *Schedule) Equal(other *Schedule) bool {
+	return s.Interval == other.Interval &&
+		s.Unit == other.Unit &&
+		s.StartDay == other.StartDay &&
+		s.Format == other.Format
 }
 
 // GetLastRun returns the last run time
@@ -398,6 +408,7 @@ func ParseSchedule(format string) (*Schedule, error) {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
 
 	s := &Schedule{
+		Format:    format,
 		Interval:  0,
 		Unit:      Never,
 		LastRunAt: nil,

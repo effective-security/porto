@@ -46,6 +46,8 @@ type Scheduler interface {
 	Start() error
 	// Stop the scheduler
 	Stop() error
+	// Publish the tasks to Publisher
+	Publish()
 }
 
 // Publisher defines a publisher interface
@@ -108,6 +110,16 @@ func (s *scheduler) SetPublisher(pub Publisher) Scheduler {
 		s.tasks[i].SetPublisher(pub)
 	}
 	return s
+}
+
+// Publish the tasks to Publisher
+func (s *scheduler) Publish() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	for i := range s.tasks {
+		s.tasks[i].Publish()
+	}
 }
 
 // Count returns the number of registered tasks
