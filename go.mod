@@ -27,7 +27,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/redis v0.27.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
-	golang.org/x/crypto v0.18.0
+	golang.org/x/crypto v0.19.0
 	google.golang.org/grpc v1.61.0
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -109,7 +109,7 @@ require (
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/sys v0.16.0 // indirect
+	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.10.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240102182953-50ed04b92917 // indirect
