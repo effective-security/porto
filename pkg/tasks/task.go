@@ -85,6 +85,11 @@ type Schedule struct {
 	RunCount uint32
 	// cache the period between last an next run
 	period time.Duration
+
+	// hour at which task should be scheduled
+	hour int
+	// minute at which task should be scheduled
+	min int
 }
 
 // Equal returns true if the schedules are equal
@@ -313,6 +318,8 @@ func (s *Schedule) at(hour, min int) *Schedule {
 		}
 	}
 	s.LastRunAt = &lastRun
+	s.hour = hour
+	s.min = min
 	return s
 }
 
@@ -518,19 +525,25 @@ func (s *Schedule) ShouldRun() bool {
 // UpdateNextRun computes the instant when this task should run next
 func (s *Schedule) UpdateNextRun() time.Time {
 	now := TimeNow()
-	if s.LastRunAt == nil {
-		if s.Unit == Weeks {
-			i := now.Weekday() - s.StartDay
-			if i < 0 {
-				i = 7 + i
-			}
-			y, m, d := now.Date()
-			now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
+	if s.Unit == Weeks {
+		i := now.Weekday() - s.StartDay
+		if i < 0 {
+			i = 7 + i
 		}
+		y, m, d := now.Date()
+		now = time.Date(y, m, d-int(i), s.hour, s.min, 0, 0, loc)
+
+	}
+
+	if s.LastRunAt == nil {
 		s.LastRunAt = &now
 	}
 
-	s.NextRunAt = s.LastRunAt.Add(s.Duration())
+	if s.Unit == Weeks {
+		s.NextRunAt = now.Add(s.Duration())
+	} else {
+		s.NextRunAt = s.LastRunAt.Add(s.Duration())
+	}
 
 	return s.NextRunAt
 }

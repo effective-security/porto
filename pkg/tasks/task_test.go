@@ -406,3 +406,59 @@ func Test_schedulesEqual(t *testing.T) {
 		assert.Equal(t, tc.equal, equal)
 	}
 }
+
+func Test_updateNextRun(t *testing.T) {
+	tm := time.Date(2024, time.February, 12, 0, 0, 0, 0, time.Local)
+	s := Schedule{
+		Unit:     Days,
+		Interval: 2,
+	}
+	nextRunAt := s.UpdateNextRun()
+	assert.NotNil(t, s.LastRunAt)
+	assert.NotNil(t, s.NextRunAt)
+	assert.Equal(t, nextRunAt, s.NextRunAt)
+
+	s = Schedule{
+		Unit:      Days,
+		Interval:  2,
+		LastRunAt: &tm,
+	}
+	nextRunAt = s.UpdateNextRun()
+	assert.Equal(t, tm, *s.LastRunAt)
+	assert.Equal(t, time.Date(2024, time.February, 14, 0, 0, 0, 0, time.Local), s.NextRunAt)
+	assert.Equal(t, nextRunAt, s.NextRunAt)
+
+	s = Schedule{
+		Unit:     Weeks,
+		StartDay: time.Wednesday,
+	}
+	now := TimeNow()
+	i := now.Weekday() - s.StartDay
+	if i < 0 {
+		i = 7 + i
+	}
+	y, m, d := now.Date()
+	now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
+	nextRunAt = s.UpdateNextRun()
+	assert.NotNil(t, s.LastRunAt)
+	assert.Equal(t, now, *s.LastRunAt)
+	assert.Equal(t, now.Add(s.Duration()), s.NextRunAt)
+	assert.Equal(t, nextRunAt, s.NextRunAt)
+
+	s = Schedule{
+		Unit:      Weeks,
+		StartDay:  time.Wednesday,
+		LastRunAt: &tm,
+	}
+	now = TimeNow()
+	i = now.Weekday() - s.StartDay
+	if i < 0 {
+		i = 7 + i
+	}
+	y, m, d = now.Date()
+	now = time.Date(y, m, d-int(i), 0, 0, 0, 0, loc)
+	nextRunAt = s.UpdateNextRun()
+	assert.Equal(t, tm, *s.LastRunAt)
+	assert.Equal(t, now.Add(s.Duration()), s.NextRunAt)
+	assert.Equal(t, nextRunAt, s.NextRunAt)
+}
