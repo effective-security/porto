@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"time"
 
@@ -68,6 +70,34 @@ type Provider interface {
 	Publish(ctx context.Context, channel, message string) error
 	// Subscribe subscribes to channel
 	Subscribe(ctx context.Context, channel string) Subscription
+}
+
+// GetOrSet gets value from cache, or sets it using getter
+func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error {
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return &json.InvalidUnmarshalError{Type: reflect.TypeOf(value)}
+	}
+
+	var res any
+	err := p.Get(ctx, key, value)
+	if err != nil {
+		if IsNotFoundError(err) {
+			res, err = getter()
+			if err == nil {
+				rv2 := reflect.ValueOf(res)
+				if rv2.Kind() != reflect.Pointer || rv2.IsNil() {
+					return &json.InvalidUnmarshalError{Type: reflect.TypeOf(rv2)}
+				}
+				rv2 = reflect.Indirect(rv2)
+				if rv2.Kind() == reflect.Interface {
+					rv2 = rv2.Elem()
+				}
+				rv.Elem().Set(rv2)
+			}
+		}
+	}
+	return err
 }
 
 // ErrNotFound defines not found error

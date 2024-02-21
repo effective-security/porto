@@ -149,6 +149,12 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 	}()
 
 	for _, tc := range tcases {
+		err = cache.GetOrSet(ctx, p, tc.name, tc.out, func() (any, error) {
+			return &tc.in, nil
+		})
+		require.NoError(t, err)
+		testutils.CompareJSON(t, tc.in, tc.out)
+
 		err = p.Set(ctx, tc.name, tc.in, time.Hour)
 		require.NoError(t, err)
 		err = p.Get(ctx, tc.name, tc.out)
