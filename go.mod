@@ -10,7 +10,7 @@ require (
 	github.com/effective-security/xlog v0.7.1
 	github.com/effective-security/xpki v0.16.1-0.20240221190341-4d755723db1a
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
-	github.com/go-jose/go-jose/v3 v3.0.1
+	github.com/go-jose/go-jose/v3 v3.0.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
