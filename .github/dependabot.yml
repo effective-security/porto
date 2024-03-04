@@ -12,7 +12,7 @@ updates:
     groups:
       aws:
         patterns:
-          - aws-sdk-go-v2*
+          - github.com/aws/*
       es:
         patterns:
           - effective-security*
