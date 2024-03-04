@@ -27,7 +27,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/redis v0.28.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
-	golang.org/x/crypto v0.19.0
+	golang.org/x/crypto v0.20.0
 	google.golang.org/grpc v1.62.0
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/yaml.v3 v3.0.1
