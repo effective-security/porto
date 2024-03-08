@@ -8,7 +8,7 @@ require (
 	github.com/effective-security/metrics v0.4.1-0.20240306105844-fe932e0fd622
 	github.com/effective-security/x v0.3.1-0.20240304123641-8de43cd9f090
 	github.com/effective-security/xlog v0.7.1
-	github.com/effective-security/xpki v0.16.1-0.20240306110840-f77f13fa1c54
+	github.com/effective-security/xpki v0.17.0
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
