@@ -47,6 +47,18 @@ jobs:
             version:
               paths:
                 - '.VERSION'
+      - name: Detect Version Changes
+        # https://github.com/fkirc/skip-duplicate-actions
+        id: version
+        uses: fkirc/skip-duplicate-actions@v5.3.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          do_not_skip: '["push","schedule","release"]'
+          concurrent_skipping: true
+          paths_filter: |
+            version:
+              paths:
+                - '.VERSION'
 
       - name: vars
         run: |
@@ -77,6 +89,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Version
+        run: |
+          ver = $(cat .VERSION)
+          echo "VERSION: $ver.${{env.RUN_NUMBER}}"
+
       - name: Prepare
         run: make vars tools generate
 
@@ -98,7 +115,14 @@ jobs:
           GIT_USER: ${{ github.actor }}
 
       - name: coveralls
-        #if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         env:
           COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make coveralls-github
+
+      - name: set-tag
+        #if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          ver = $(cat .VERSION).${{env.RUN_NUMBER}}
+          echo "VERSION: $ver"
+          echo "git tag $ver"
