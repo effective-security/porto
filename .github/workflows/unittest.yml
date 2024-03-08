@@ -47,18 +47,6 @@ jobs:
             version:
               paths:
                 - '.VERSION'
-      - name: Detect Version Changes
-        # https://github.com/fkirc/skip-duplicate-actions
-        id: version
-        uses: fkirc/skip-duplicate-actions@v5.3.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          do_not_skip: '["push","schedule","release"]'
-          concurrent_skipping: true
-          paths_filter: |
-            version:
-              paths:
-                - '.VERSION'
 
       - name: vars
         run: |
@@ -71,6 +59,8 @@ jobs:
 
   UnitTest:
     runs-on: ubuntu-latest
+    needs:
+      - detect-noop
 
     steps:
       - name: Create code coverage status for the current commit
@@ -121,8 +111,21 @@ jobs:
         run: make coveralls-github
 
       - name: set-tag
-        #if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          ver=$(cat .VERSION).${{env.RUN_NUMBER}}
-          echo "VERSION: ${ver}"
-          echo "git tag ${ver}"
+          VERSION=$(cat .VERSION).${{env.RUN_NUMBER}}
+          echo "VERSION: ${VERSION}"
+          echo "DIST_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "git tag ${VERSION}"
+
+      - name: Create Tag
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-noop.outputs.paths_result.version != 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const {DIST_VERSION} = process.env          
+            github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${DIST_VERSION}`,
+                sha: context.sha
+            })
