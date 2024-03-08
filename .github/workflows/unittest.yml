@@ -91,8 +91,8 @@ jobs:
 
       - name: Version
         run: |
-          ver = $(cat .VERSION)
-          echo "VERSION: $ver.${{env.RUN_NUMBER}}"
+          ver=$(cat .VERSION)
+          echo "VERSION: ${ver}.${{env.RUN_NUMBER}}"
 
       - name: Prepare
         run: make vars tools generate
@@ -123,6 +123,6 @@ jobs:
       - name: set-tag
         #if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          ver = $(cat .VERSION).${{env.RUN_NUMBER}}
-          echo "VERSION: $ver"
-          echo "git tag $ver"
+          ver=$(cat .VERSION).${{env.RUN_NUMBER}}
+          echo "VERSION: ${ver}"
+          echo "git tag ${ver}"
