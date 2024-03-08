@@ -8,16 +8,57 @@ on:
       - "v*"
   pull_request:
 
+env:
+  EVENT_NUMBER: ${{ github.event.number }}
+  COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+  MIN_TESTCOV: 80
+  # A unique number for each workflow run within a repository.
+  # This number does not change if you re-run the workflow run.
+  RUN_ID: ${{ github.run_id }}
+  # A unique number for each run of a particular workflow in a repository.
+  # This number begins at 1 for the workflow's first run, and increments with each new run.
+  # This number does not change if you re-run the workflow run.
+  RUN_NUMBER: ${{ github.run_number }}
+  # A unique number for each attempt of a particular workflow run in a repository.
+  # This number begins at 1 for the workflow run's first attempt, and increments with each re-run.
+  RUN_ATTEMPT: ${{ github.run_attempt }}
+  PULL_NUMBER: ${{ github.event.pull_request.number }}
+    
 jobs:
- 
+  detect-noop:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.noop.outputs.should_skip }}
+      paths_result: ${{ steps.noop.outputs.paths_result }}
+    steps:
+      - name: Detect No-op Changes
+        # https://github.com/fkirc/skip-duplicate-actions
+        id: noop
+        uses: fkirc/skip-duplicate-actions@v5.3.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          paths_ignore: '["**.md", "**.png", "**.jpg", "**/Documentation/**"]'
+          do_not_skip: '["push","schedule","release"]'
+          concurrent_skipping: false
+          paths_filter: |
+            go:
+              paths:
+                - '**/*.go'
+            version:
+              paths:
+                - '.VERSION'
+
+      - name: vars
+        run: |
+          echo "EVENT_NUMBER: ${{env.EVENT_NUMBER}}"
+          echo "COMMIT_SHA: ${{env.COMMIT_SHA}}"
+          echo "PULL_NUMBER: ${{env.PULL_NUMBER}}"
+          echo "RUN_ID: ${{env.RUN_ID}}"
+          echo "RUN_NUMBER: ${{env.RUN_NUMBER}}"
+          echo "RUN_ATTEMPT: ${{env.RUN_ATTEMPT}}"
+
   UnitTest:
     runs-on: ubuntu-latest
-    env:
-      ITEST_IMAGE_TAG: rc-${{ github.event.number }}
-      COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
-      RUN_ID: ${{ github.run_id }}
-      PULL_NUMBER: ${{ github.event.pull_request.number }}
-      MIN_TESTCOV: 80
 
     steps:
       - name: Create code coverage status for the current commit
