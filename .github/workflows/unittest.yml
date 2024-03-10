@@ -105,6 +105,19 @@ jobs:
           COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make coveralls-github
 
+      - name: Detect Version Changes
+        # https://github.com/fkirc/skip-duplicate-actions
+        id: version-changed
+        uses: fkirc/skip-duplicate-actions@v5.3.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          paths: '[".VERSION"]'
+          paths_filter: |
+            version:
+              paths:
+                - '.VERSION'
+              backtracking: 1
+
       - name: set-tag
         run: |
           VERSION=$(cat .VERSION).${{env.RUN_NUMBER}}
@@ -113,8 +126,8 @@ jobs:
           echo "git tag ${VERSION}"
 
       - name: Create Tag
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-noop.outputs.paths_result.version != 'true'
-        uses: actions/github-script@v6
+        if: github.ref == 'refs/heads/main' && fromJSON(steps.version-changed.outputs.paths_result).version.should_skip == 'false'
+        uses: actions/github-script@v7
         with:
           script: |
             const {DIST_VERSION} = process.env          
