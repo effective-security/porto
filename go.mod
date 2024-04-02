@@ -5,10 +5,10 @@ go 1.22.1
 require (
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/docker/docker v26.0.0+incompatible
-	github.com/effective-security/metrics v0.5.102-0.20240401094052-2d7bb7a4d1c5
-	github.com/effective-security/x v0.4.32-0.20240401094434-79be38167d54
+	github.com/effective-security/metrics v0.5.101
+	github.com/effective-security/x v0.4.39
 	github.com/effective-security/xlog v0.8.79
-	github.com/effective-security/xpki v0.18.382-0.20240401094527-197e4bbdcdcb
+	github.com/effective-security/xpki v0.18.382-0.20240402081322-6f4adab7c484
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -114,7 +114,7 @@ require (
 	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.13.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240311132316-a219d84964c2 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
