@@ -23,8 +23,8 @@ require (
 	github.com/rs/cors v1.10.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.9.0
-	github.com/testcontainers/testcontainers-go v0.29.1
-	github.com/testcontainers/testcontainers-go/modules/redis v0.29.1
+	github.com/testcontainers/testcontainers-go v0.30.0
+	github.com/testcontainers/testcontainers-go/modules/redis v0.30.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
 	golang.org/x/crypto v0.21.0
