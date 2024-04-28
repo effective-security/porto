@@ -34,12 +34,12 @@ func Test_BuildFromFiles(t *testing.T) {
 	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
-	cfg, err := tlsconfig.NewServerTLSFromFiles(pemFile, keyFile, "", tls.RequireAndVerifyClientCert)
+	cfg, err := tlsconfig.NewServerTLSFromFiles(pemFile, keyFile, "", "", tls.RequireAndVerifyClientCert)
 	assert.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, tls.RequireAndVerifyClientCert, cfg.ClientAuth)
 
-	cfg, err = tlsconfig.NewServerTLSFromFiles(pemFile, keyFile, pemFile, tls.RequireAndVerifyClientCert)
+	cfg, err = tlsconfig.NewServerTLSFromFiles(pemFile, keyFile, pemFile, pemFile, tls.RequireAndVerifyClientCert)
 	assert.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, tls.RequireAndVerifyClientCert, cfg.ClientAuth)

@@ -87,6 +87,9 @@ type TLSInfo struct {
 	// TrustedCAFile specifies location of the trusted Root file
 	TrustedCAFile string `json:"trusted_ca,omitempty" yaml:"trusted_ca,omitempty"`
 
+	// ClientCAFile specifies location of the trusted Root file
+	ClientCAFile string `json:"client_ca,omitempty" yaml:"client_ca,omitempty"`
+
 	// CRLFile specifies location of the CRL
 	CRLFile string `json:"crl,omitempty" yaml:"crl,omitempty"`
 

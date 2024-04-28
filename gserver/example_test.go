@@ -27,6 +27,7 @@ func ExampleServer() {
 			CertFile:      "testdata/test-server.pem",
 			KeyFile:       "testdata/test-server-key.pem",
 			TrustedCAFile: "testdata/test-server-rootca.pem",
+			ClientCAFile:  "testdata/test-server-rootca.pem", // CA bundle for client certificates
 		},
 		RateLimit: &gserver.RateLimit{
 			RequestsPerSecond: 10,

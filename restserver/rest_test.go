@@ -157,6 +157,8 @@ type tlsConfig struct {
 	KeyFile string
 	// TrustedCAFile specifies location of the CA file
 	TrustedCAFile string
+	// ClientCAFile specifies location of the CA file
+	ClientCAFile string
 	// WithClientAuth controls client auth
 	WithClientAuth bool
 }
@@ -183,6 +185,14 @@ func (c *tlsConfig) GetTrustedCAFile() string {
 		return ""
 	}
 	return c.TrustedCAFile
+}
+
+// GetClientCAFile specifies location of the CA file
+func (c *tlsConfig) GetClientCAFile() string {
+	if c == nil {
+		return ""
+	}
+	return c.ClientCAFile
 }
 
 // GetClientCertAuth controls client auth
@@ -248,7 +258,7 @@ func createServerTLSInfo(cfg *tlsConfig) (*tls.Config, *tlsconfig.KeypairReloade
 		clientauthType = tls.RequireAndVerifyClientCert
 	}
 
-	tls, err := tlsconfig.NewServerTLSFromFiles(certFile, keyFile, cfg.GetTrustedCAFile(), clientauthType)
+	tls, err := tlsconfig.NewServerTLSFromFiles(certFile, keyFile, cfg.GetTrustedCAFile(), cfg.GetClientCAFile(), clientauthType)
 	if err != nil {
 		return nil, nil, errors.WithMessagef(err, "reason=BuildFromFiles, cert=%q, key=%q",
 			certFile, keyFile)
