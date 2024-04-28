@@ -14,6 +14,7 @@ import (
 type TLSInfo struct {
 	CertFile            string
 	KeyFile             string
+	ClientCAFile        string
 	TrustedCAFile       string
 	ClientAuthType      tls.ClientAuthType
 	CRLVerifier         crlcache.Verifier
@@ -48,8 +49,8 @@ type TLSInfo struct {
 }
 
 func (info *TLSInfo) String() string {
-	return fmt.Sprintf("cert=%s, key=%s, trusted-ca=%s, client-cert-auth=%d",
-		info.CertFile, info.KeyFile, info.TrustedCAFile, int(info.ClientAuthType))
+	return fmt.Sprintf("cert=%s, key=%s, trusted-ca=%s, client-ca=%s, client-cert-auth=%d",
+		info.CertFile, info.KeyFile, info.TrustedCAFile, info.ClientCAFile, int(info.ClientAuthType))
 }
 
 // Empty returns true if TLS info is empty
@@ -85,6 +86,7 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		info.CertFile,
 		info.KeyFile,
 		info.TrustedCAFile,
+		info.ClientCAFile,
 		info.ClientAuthType)
 	if err != nil {
 		return nil, err

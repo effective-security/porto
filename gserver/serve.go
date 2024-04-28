@@ -72,6 +72,7 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			CertFile:       from.CertFile,
 			KeyFile:        from.KeyFile,
 			TrustedCAFile:  from.TrustedCAFile,
+			ClientCAFile:   from.ClientCAFile,
 			ClientAuthType: clientauthType,
 			CipherSuites:   from.CipherSuites,
 			// CRLVerifier : TODO

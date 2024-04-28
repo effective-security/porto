@@ -401,6 +401,7 @@ func Test_Authz(t *testing.T) {
 		"testdata/test-server.pem",
 		"testdata/test-server-key.pem",
 		"testdata/test-server-rootca.pem",
+		"testdata/test-server.pem",
 		tls.RequireAndVerifyClientCert,
 	)
 	require.NoError(t, err)

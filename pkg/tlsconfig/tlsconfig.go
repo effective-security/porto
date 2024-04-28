@@ -20,7 +20,7 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "t
 // format.
 // caBundle is optional.
 // rootsFile is optional, if not specified the standard OS CA roots will be used.
-func NewServerTLSFromFiles(certFile, keyFile, rootsFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
+func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
 	tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 	if err != nil {
 		return nil, err
@@ -38,14 +38,25 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile string, clientauthType t
 		roots.AppendCertsFromPEM(rootsBytes)
 	}
 
-	return &tls.Config{
+	cfg := &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		NextProtos:   []string{"h2", "http/1.1"},
 		Certificates: []tls.Certificate{*tlscert},
 		ClientAuth:   clientauthType,
 		ClientCAs:    roots,
 		RootCAs:      roots,
-	}, nil
+	}
+	if caFile != "" {
+		caBytes, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		cfg.ClientCAs = x509.NewCertPool()
+		cfg.ClientCAs.AppendCertsFromPEM(caBytes)
+	}
+
+	return cfg, nil
 }
 
 // NewClientTLSFromFiles will build a tls.Config from the supplied certificate, key

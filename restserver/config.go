@@ -13,6 +13,8 @@ type TLSInfoConfig interface {
 	GetKeyFile() string
 	// GetTrustedCAFile specifies location of the Trusted CA file
 	GetTrustedCAFile() string
+	// GetClientCAFile specifies location of the client CA bundle file
+	GetClientCAFile() string
 	// GetClientCertAuth controls client auth
 	GetClientCertAuth() *bool
 }
