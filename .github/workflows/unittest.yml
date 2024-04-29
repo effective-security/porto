@@ -23,7 +23,7 @@ env:
   # This number begins at 1 for the workflow run's first attempt, and increments with each re-run.
   RUN_ATTEMPT: ${{ github.run_attempt }}
   PULL_NUMBER: ${{ github.event.pull_request.number }}
-    
+
 jobs:
   detect-noop:
     runs-on: ubuntu-latest
@@ -119,11 +119,11 @@ jobs:
             version:
               paths:
                 - '.VERSION'
-              backtracking: 1
+              backtracking: 2
 
       - name: set-tag
         run: |
-          VERSION=$(cat .VERSION).${{env.RUN_NUMBER}}
+          VERSION=$(cat .VERSION).$(git rev-list --count HEAD)
           echo "VERSION: ${VERSION}"
           echo "DIST_VERSION=${VERSION}" >> $GITHUB_ENV
           echo "git tag ${VERSION}"

@@ -27,7 +27,7 @@ jobs:
         run: |
           if [ -z "${{ github.event.inputs.tag }}" ]; then
             echo "No tag provided, using default"         
-            VERSION=$(cat .VERSION).${{env.RUN_NUMBER}}
+            VERSION=$(cat .VERSION).$(git rev-list --count HEAD)
             echo "VERSION: ${VERSION}"
             echo "DIST_VERSION=${VERSION}" >> $GITHUB_ENV
           else
