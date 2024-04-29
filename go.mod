@@ -6,7 +6,7 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/docker/docker v26.1.0+incompatible
 	github.com/effective-security/metrics v0.5.101
-	github.com/effective-security/x v0.4.39
+	github.com/effective-security/x v0.5.43
 	github.com/effective-security/xlog v0.8.81
 	github.com/effective-security/xpki v0.18.382-0.20240402081322-6f4adab7c484
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
@@ -106,13 +106,14 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/config v1.4.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
-	golang.org/x/exp v0.0.0-20230510235704-dd950f8aeaea // indirect
+	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
-	golang.org/x/mod v0.16.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/tools v0.13.0 // indirect
+	golang.org/x/tools v0.20.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
