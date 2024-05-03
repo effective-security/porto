@@ -15,7 +15,7 @@ updates:
           - github.com/aws/*
       es:
         patterns:
-          - effective-security*
+          - github.com/effective-security*
       go:
         patterns:
           - golang.org*
