@@ -23,7 +23,7 @@ require (
 	github.com/rs/cors v1.11.0
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.9.0
-	github.com/testcontainers/testcontainers-go v0.30.0
+	github.com/testcontainers/testcontainers-go v0.31.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.30.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.17.1
@@ -59,7 +59,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/containerd/containerd v1.7.12 // indirect
+	github.com/containerd/containerd v1.7.15 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
