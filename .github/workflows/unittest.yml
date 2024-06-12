@@ -116,11 +116,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           paths: '[".VERSION"]'
           skip_after_successful_duplicate: false
-          paths_filter: |
-            version:
-              paths:
-                - '.VERSION'
-              backtracking: 2
 
       - name: set-tag
         run: |
@@ -128,12 +123,10 @@ jobs:
           echo "VERSION: ${VERSION}"
           echo "DIST_VERSION=${VERSION}" >> $GITHUB_ENV
           echo "git tag ${VERSION}"
+          echo "should_skip: ${{steps.version-changed.outputs.should_skip}}"
 
       - name: Create Tag
-        # If 'skip-duplicate-actions' terminates before the paths checks are performed (for example, when a successful duplicate run has
-        # been found) 'paths_result' outputs an empty object ('{}'). This can be easily intercepted in the if condition of a job
-        # by checking the result of the "global" 'should_skip' output first.
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.version-changed.outputs.should_skip != 'true' && !fromJSON(steps.version-changed.outputs.paths_result).version.should_skip
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.version-changed.outputs.should_skip != 'true'
         uses: actions/github-script@v7
         with:
           script: |
