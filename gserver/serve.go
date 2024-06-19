@@ -442,6 +442,16 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 			grpcWeb := ct == header.ApplicationGRPCWebProto
 			wh := w.Header()
 			if grpcWeb {
+				if r.ProtoMajor != 2 {
+					logger.ContextKV(r.Context(), xlog.INFO,
+						"reason", "http2_required",
+						"method", r.Method,
+						"major", r.ProtoMajor,
+						"proto", r.Proto,
+					)
+					r.ProtoMajor, r.ProtoMinor, r.Proto = 2, 0, "HTTP/2.0"
+				}
+
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
 				if origin != "" {
 					if len(allowedOrigins) > 0 && !slices.ContainsString(allowedOrigins, origin) {
