@@ -3,7 +3,7 @@ module github.com/effective-security/porto
 go 1.22.2
 
 require (
-	github.com/didip/tollbooth/v7 v7.0.1
+	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v26.1.4+incompatible
 	github.com/effective-security/metrics v0.6.54
 	github.com/effective-security/x v0.6.37
@@ -68,7 +68,7 @@ require (
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/go-pkgz/expirable-cache v0.1.0 // indirect
+	github.com/go-pkgz/expirable-cache/v3 v3.0.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
