@@ -1,12 +1,13 @@
 module github.com/effective-security/porto
 
 go 1.22.2
+toolchain go1.22.4
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.1
 	github.com/docker/docker v26.1.4+incompatible
 	github.com/effective-security/metrics v0.6.54
-	github.com/effective-security/x v0.6.37
+	github.com/effective-security/x v0.6.39
 	github.com/effective-security/xlog v0.9.39
 	github.com/effective-security/xpki v0.19.161
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
