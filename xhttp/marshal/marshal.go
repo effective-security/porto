@@ -119,12 +119,13 @@ func logError(r *http.Request, status int, code, message string, cause error) {
 	_, fn, line, _ := runtime.Caller(3)
 
 	ctx := r.Context()
-	sv := xlog.WARNING
+	sv := xlog.INFO
 	typ := "API_ERROR"
 	if status >= 500 {
 		sv = xlog.ERROR
 		typ = "INTERNAL_ERROR"
 	}
+
 	if cause != nil {
 		if sv == xlog.ERROR {
 			// for ERROR log with stack
