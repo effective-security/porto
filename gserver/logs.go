@@ -17,8 +17,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	warnUnaryRequestLatency = 300 * time.Millisecond
+var (
+	// WarnUnaryRequestLatency is the threshold for logging a warning for a slow unary request.
+	WarnUnaryRequestLatency = 2 * time.Second
 )
 
 func headerFromContext(ctx context.Context, name string) string {
@@ -48,7 +49,7 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.Time, req interface{}, _ interface{}, err error) {
 	duration := time.Since(startTime)
-	expensiveRequest := duration > warnUnaryRequestLatency
+	expensiveRequest := duration > WarnUnaryRequestLatency
 
 	var remote string
 	peerInfo, ok := peer.FromContext(ctx)
