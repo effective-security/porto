@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/docker/docker v27.0.3+incompatible
+	github.com/docker/docker v27.1.1+incompatible
 	github.com/effective-security/metrics v0.6.55
 	github.com/effective-security/x v0.6.40
 	github.com/effective-security/xlog v0.9.39
@@ -19,7 +19,7 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.19.1
-	github.com/redis/go-redis/v9 v9.5.3
+	github.com/redis/go-redis/v9 v9.6.1
 	github.com/rs/cors v1.11.0
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.9.0
