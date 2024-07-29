@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/xpki/jwt/dpop"
 	grpccredentials "google.golang.org/grpc/credentials"
 )
@@ -18,6 +19,8 @@ import (
 var (
 	// TokenFieldNameGRPC specifies name for token
 	TokenFieldNameGRPC = "authorization"
+
+	DefaultTokenExpiration = 60 * time.Minute
 )
 
 // Config defines gRPC credential configuration.
@@ -122,13 +125,23 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 	return true
 }
 
+func isExpired(token Token) bool {
+	now := time.Now().Add(-roles.CacheTTL)
+	expires := token.Expires
+	if expires == nil {
+		exp := now.Add(DefaultTokenExpiration)
+		expires = &exp
+	}
+
+	return expires.Before(now)
+}
+
 func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
 	rc.authTokenMu.RLock()
 	token := rc.token
 	rc.authTokenMu.RUnlock()
 
-	if token.AccessToken == "" ||
-		(token.Expires != nil && token.Expires.Before(time.Now())) {
+	if token.AccessToken == "" || isExpired(token) {
 		if rc.callerIdentity != nil {
 			ti, err := rc.callerIdentity.GetCallerIdentity(ctx)
 			if err != nil {
@@ -139,8 +152,7 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 			token = rc.token
 			rc.authTokenMu.Unlock()
 		}
-		if token.AccessToken == "" ||
-			(token.Expires != nil && token.Expires.Before(time.Now())) {
+		if token.AccessToken == "" || isExpired(token) {
 			return nil, nil
 		}
 	}
