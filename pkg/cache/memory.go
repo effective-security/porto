@@ -114,7 +114,7 @@ func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
 
 	var list []string
 
-	p.cache.Range(func(key any, value any) bool {
+	p.cache.Range(func(key any, _ any) bool {
 		name := key.(string)
 		if strings.HasPrefix(name, k) {
 			list = append(list, name)
@@ -126,7 +126,7 @@ func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
 
 // Publish publishes message to channel
 func (p *memProv) Publish(_ context.Context, channel, message string) error {
-	p.subs.Range(func(key any, value any) bool {
+	p.subs.Range(func(_ any, value any) bool {
 		s := value.(*msub)
 		if s.channel == channel {
 			s.ch <- message

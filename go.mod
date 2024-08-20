@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/docker/docker v27.1.1+incompatible
+	github.com/docker/docker v27.1.2+incompatible
 	github.com/effective-security/metrics v0.6.55
 	github.com/effective-security/x v0.6.40
 	github.com/effective-security/xlog v0.9.39
@@ -80,6 +80,7 @@ require (
 	github.com/moby/patternmatcher v0.6.0 // indirect
 	github.com/moby/sys/sequential v0.5.0 // indirect
 	github.com/moby/sys/user v0.1.0 // indirect
+	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.0 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

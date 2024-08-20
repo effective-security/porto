@@ -58,9 +58,6 @@ const (
 	awsTokenType = "AWS4"
 )
 
-// CacheTTL defines TTL for AWS cache
-const CacheTTL = 5 * time.Minute
-
 // IdentityProvider interface to extract identity from requests
 type IdentityProvider interface {
 	// ApplicableForRequest returns true if the provider is applicable for the request
@@ -95,7 +92,7 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		tlsRoles:  make(map[string]string),
 		awsRoles:  make(map[string]string),
 		jwt:       jwt,
-		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, CacheTTL),
+		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, tcredentials.CacheTTL),
 	}
 
 	if config.AWS.Enabled {
@@ -401,6 +398,11 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	url := string(u)
 	ci, ok := p.awsCache.Get(url)
 	if !ok {
+		expires, err := ParseSTSTokenExpiration(url)
+		if err != nil {
+			return nil, errors.WithMessage(err, "failed to parse AWS4 token")
+		}
+
 		r, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		r.Header.Set("Accept", "application/json")
 		resp, err := http.DefaultClient.Do(r)
@@ -430,7 +432,12 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 			)
 			return nil, errors.WithMessage(err, "failed to decode AWS response")
 		}
+		ci.Expires = *expires
 		p.awsCache.Add(url, ci)
+	}
+
+	if ci.Expires.Before(time.Now()) {
+		return nil, errors.Errorf("AWS4 token has expired")
 	}
 
 	callerIdentity := ci.GetCallerIdentityResponse.GetCallerIdentityResult
@@ -469,6 +476,31 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType), nil
 }
 
+func ParseSTSTokenExpiration(presignedURL string) (*time.Time, error) {
+	u, err := url.Parse(presignedURL)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to parse presigned URL")
+	}
+	q := u.Query()
+	// The date and time format must follow the ISO 8601 standard, and must be formatted with the "yyyyMMddTHHmmssZ" format
+	qexp := q.Get("X-Amz-Expires")
+	qdate := q.Get("X-Amz-Date")
+	if qexp != "" && qdate != "" {
+		return nil, errors.Errorf("invalid presigned URL: missing X-Amz-Date or X-Amz-Expires")
+	}
+	qt, err := time.Parse("20060102T150405Z", qdate)
+	if err == nil {
+		return nil, errors.WithMessage(err, "failed to parse X-Amz-Date")
+	}
+	d, err := time.ParseDuration(qexp + "s")
+	if err != nil {
+		d = tcredentials.CacheTTL
+
+	}
+	exp := qt.Add(d - time.Minute)
+	return &exp, nil
+}
+
 // CallerIdentity represents the Identity of the caller
 // AWS Caller Identity Response documentation: https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
 type CallerIdentity struct {
@@ -482,6 +514,8 @@ type CallerIdentity struct {
 			RequestID string `json:"RequestId"`
 		} `json:"ResponseMetadata"`
 	} `json:"GetCallerIdentityResponse"`
+
+	Expires time.Time `json:"-"`
 }
 
 func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {

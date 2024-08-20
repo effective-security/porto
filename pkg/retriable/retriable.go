@@ -527,7 +527,7 @@ func (c *Client) WithDNSServer(dns string) *Client {
 		d := net.Dialer{}
 		d.Resolver = &net.Resolver{
 			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				d := net.Dialer{}
 				return d.DialContext(ctx, network, dns)
 			},
@@ -920,7 +920,7 @@ func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Hea
 
 // DefaultShouldRetryFactory returns default ShouldRetry
 func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry {
-	return func(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
+	return func(_ *http.Request, _ *http.Response, _ error, retries int) (bool, time.Duration, string) {
 		return (limit >= retries), wait, reason
 	}
 }

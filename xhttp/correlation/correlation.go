@@ -67,7 +67,7 @@ func NewHandler(delegate http.Handler) http.Handler {
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context
 func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var rctx *RequestContext
 		v := ctx.Value(keyContext)
 		if v == nil {
