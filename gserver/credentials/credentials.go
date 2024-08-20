@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/xpki/jwt/dpop"
 	grpccredentials "google.golang.org/grpc/credentials"
 )
@@ -21,6 +20,9 @@ var (
 	TokenFieldNameGRPC = "authorization"
 
 	DefaultTokenExpiration = 60 * time.Minute
+
+	// CacheTTL defines TTL for AWS cache
+	CacheTTL = 5 * time.Minute
 )
 
 // Config defines gRPC credential configuration.
@@ -126,7 +128,7 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 }
 
 func isExpired(token Token) bool {
-	now := time.Now().Add(-roles.CacheTTL)
+	now := time.Now().Add(-CacheTTL)
 	expires := token.Expires
 	if expires == nil {
 		exp := now.Add(DefaultTokenExpiration)

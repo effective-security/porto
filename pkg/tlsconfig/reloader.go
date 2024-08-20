@@ -198,7 +198,7 @@ func (k *KeypairReloader) tlsCert() *tls.Certificate {
 
 // GetKeypairFunc is a callback for TLSConfig to provide TLS certificate and key pair for Server
 func (k *KeypairReloader) GetKeypairFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	return func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		k.lock.RLock()
 		defer k.lock.RUnlock()
 		return k.tlsCert(), nil
