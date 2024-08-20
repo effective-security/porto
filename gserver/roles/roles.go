@@ -485,11 +485,11 @@ func ParseSTSTokenExpiration(presignedURL string) (*time.Time, error) {
 	// The date and time format must follow the ISO 8601 standard, and must be formatted with the "yyyyMMddTHHmmssZ" format
 	qexp := q.Get("X-Amz-Expires")
 	qdate := q.Get("X-Amz-Date")
-	if qexp != "" && qdate != "" {
+	if qexp == "" || qdate == "" {
 		return nil, errors.Errorf("invalid presigned URL: missing X-Amz-Date or X-Amz-Expires")
 	}
 	qt, err := time.Parse("20060102T150405Z", qdate)
-	if err == nil {
+	if err != nil {
 		return nil, errors.WithMessage(err, "failed to parse X-Amz-Date")
 	}
 	d, err := time.ParseDuration(qexp + "s")
