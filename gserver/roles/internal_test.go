@@ -2,6 +2,7 @@ package roles
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,9 +74,12 @@ func Test_dumpDM(t *testing.T) {
 }
 
 func TestParseSTSTokenExpiration(t *testing.T) {
-	exp, err := ParseSTSTokenExpiration("https://sts.us-west-2.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAWG7G5M3OC4MROMXA%2F20240824%2Fus-west-2%2Fsts%2Faws4_request&X-Amz-Date=20240824T113458Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=56d8506ba47302a7af22f592960317c8465e6bb4af882ebf607ad7d3fe423126")
+	exp, amzDate, amzExpiry, err := ParseSTSTokenExpiration("https://sts.us-west-2.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAWG7G5M3OC4MROMXA%2F20240824%2Fus-west-2%2Fsts%2Faws4_request&X-Amz-Date=20240824T113458Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=56d8506ba47302a7af22f592960317c8465e6bb4af882ebf607ad7d3fe423126")
 	require.NoError(t, err)
+	assert.Equal(t, "20240824T113458Z", amzDate)
+	assert.Equal(t, "3600", amzExpiry)
 	assert.Equal(t, "20240824T123458Z", exp.Format("20060102T150405Z"))
+	assert.Equal(t, time.UTC, exp.Location())
 
 	expu := exp.UTC()
 	assert.Equal(t, "20240824T123458Z", expu.Format("20060102T150405Z"))
