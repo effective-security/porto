@@ -18,13 +18,20 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "credentials")
 
+const TimeFormatISO8601 = "20060102T150405Z"
+
 var (
+
 	// TokenFieldNameGRPC specifies name for token
 	TokenFieldNameGRPC = "authorization"
 
 	// CacheTTL defines TTL for AWS cache
 	CacheTTL = 5 * time.Minute
 )
+
+func TimeISO8601(t time.Time) string {
+	return t.Format(TimeFormatISO8601)
+}
 
 // Config defines gRPC credential configuration.
 type Config struct {
@@ -52,9 +59,9 @@ func (t Token) Expired() bool {
 	expired := diff < time.Minute // 1 minute before actual expiration
 	if expired {
 		logger.KV(xlog.DEBUG,
-			"now", now.Format("20060102T150405Z"),
+			"now", TimeISO8601(now),
 			"expired", expired,
-			"expires", t.Expires.Format("20060102T150405Z"),
+			"expires", TimeISO8601(*t.Expires),
 			"expires_in", diff.String(),
 		)
 	}
@@ -174,7 +181,7 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 
 			logger.ContextKV(ctx, xlog.DEBUG,
 				"status", "GetCallerIdentity",
-				"expires", token.Expires.Format("20060102T150405Z"),
+				"expires", TimeISO8601(*token.Expires),
 				"expires_in", time.Until(*token.Expires).String(),
 			)
 		}

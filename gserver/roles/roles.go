@@ -391,6 +391,7 @@ func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, a
 }
 
 func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
+	now := time.Now().UTC()
 	u, err := base64.RawURLEncoding.DecodeString(auth)
 	if err != nil {
 		return nil, errors.WithMessage(err, "invalid AWS4 token")
@@ -398,7 +399,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	url := string(u)
 	ci, ok := p.awsCache.Get(url)
 	if !ok {
-		expires, err := ParseSTSTokenExpiration(url)
+		expires, amzDate, amzExpiry, err := ParseSTSTokenExpiration(url)
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to parse AWS4 token")
 		}
@@ -419,7 +420,10 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 		if resp.StatusCode != http.StatusOK {
 			logger.ContextKV(ctx, xlog.WARNING,
 				"url", url,
-				"expires", expires.Format("20060102T150405Z"),
+				"amz_date", amzDate,
+				"amz_expiry", amzExpiry,
+				"expires", tcredentials.TimeISO8601(*expires),
+				"now", tcredentials.TimeISO8601(now),
 				"body", string(body))
 			return nil, errors.Errorf("failed to get Caller Identity from AWS: %s", resp.Status)
 		}
@@ -437,8 +441,8 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 		p.awsCache.Add(url, ci)
 	}
 
-	if ci.Expires.Before(time.Now()) {
-		return nil, errors.Errorf("AWS4 token has expired on %s", ci.Expires.Format("20060102T150405Z"))
+	if ci.Expires.Before(time.Now().UTC()) {
+		return nil, errors.Errorf("AWS4 token has expired on %s, now %s", ci.Expires.Format("20060102T150405Z"), now.Format("20060102T150405Z"))
 	}
 
 	callerIdentity := ci.GetCallerIdentityResponse.GetCallerIdentityResult
@@ -477,29 +481,33 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType), nil
 }
 
-func ParseSTSTokenExpiration(presignedURL string) (*time.Time, error) {
+func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error) {
 	u, err := url.Parse(presignedURL)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse presigned URL")
+		return nil, "", "", errors.Wrapf(err, "failed to parse presigned URL")
 	}
 	q := u.Query()
 	// The date and time format must follow the ISO 8601 standard, and must be formatted with the "yyyyMMddTHHmmssZ" format
 	qexp := q.Get("X-Amz-Expires")
 	qdate := q.Get("X-Amz-Date")
 	if qexp == "" || qdate == "" {
-		return nil, errors.Errorf("invalid presigned URL: missing X-Amz-Date or X-Amz-Expires")
+		return nil, qdate, qexp, errors.Errorf("invalid presigned URL: missing X-Amz-Date or X-Amz-Expires")
 	}
 	qt, err := time.Parse("20060102T150405Z", qdate)
 	if err != nil {
-		return nil, errors.WithMessage(err, "failed to parse X-Amz-Date")
+		return nil, qdate, qexp, errors.WithMessagef(err, "failed to parse X-Amz-Date: %s", qdate)
 	}
 	d, err := time.ParseDuration(qexp + "s")
 	if err != nil {
+		logger.KV(xlog.ERROR,
+			"reason", "ParseDuration",
+			"expiry_header", qexp,
+			"err", err.Error())
 		d = tcredentials.CacheTTL
 
 	}
-	exp := qt.Add(d)
-	return &exp, nil
+	exp := qt.Add(d).UTC()
+	return &exp, qdate, qexp, nil
 }
 
 // CallerIdentity represents the Identity of the caller
