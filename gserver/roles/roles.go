@@ -417,8 +417,9 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			logger.ContextKV(ctx, xlog.DEBUG,
-				//"url", url,
+			logger.ContextKV(ctx, xlog.WARNING,
+				"url", url,
+				"expires", expires.Format("20060102T150405Z"),
 				"body", string(body))
 			return nil, errors.Errorf("failed to get Caller Identity from AWS: %s", resp.Status)
 		}
@@ -426,7 +427,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 		ci = new(CallerIdentity)
 		err = json.Unmarshal(body, &ci)
 		if err != nil {
-			logger.KV(xlog.DEBUG,
+			logger.KV(xlog.ERROR,
 				"body", string(body),
 				"err", err.Error(),
 			)
@@ -437,7 +438,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	}
 
 	if ci.Expires.Before(time.Now()) {
-		return nil, errors.Errorf("AWS4 token has expired")
+		return nil, errors.Errorf("AWS4 token has expired on %s", ci.Expires.Format("20060102T150405Z"))
 	}
 
 	callerIdentity := ci.GetCallerIdentityResponse.GetCallerIdentityResult
@@ -497,7 +498,7 @@ func ParseSTSTokenExpiration(presignedURL string) (*time.Time, error) {
 		d = tcredentials.CacheTTL
 
 	}
-	exp := qt.Add(d - time.Minute)
+	exp := qt.Add(d)
 	return &exp, nil
 }
 

@@ -11,15 +11,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	grpccredentials "google.golang.org/grpc/credentials"
 )
 
+var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "credentials")
+
 var (
 	// TokenFieldNameGRPC specifies name for token
 	TokenFieldNameGRPC = "authorization"
-
-	DefaultTokenExpiration = 60 * time.Minute
 
 	// CacheTTL defines TTL for AWS cache
 	CacheTTL = 5 * time.Minute
@@ -36,6 +37,28 @@ type Token struct {
 	AccessToken string
 	// Expires is expiration time of the token
 	Expires *time.Time
+}
+
+func (t Token) Expired() bool {
+	if t.AccessToken == "" {
+		return true
+	}
+	if t.Expires == nil {
+		return false
+	}
+
+	now := time.Now().UTC()
+	diff := t.Expires.Sub(now)
+	expired := diff < time.Minute // 1 minute before actual expiration
+	if expired {
+		logger.KV(xlog.DEBUG,
+			"now", now.Format("20060102T150405Z"),
+			"expired", expired,
+			"expires", t.Expires.Format("20060102T150405Z"),
+			"expires_in", diff.String(),
+		)
+	}
+	return expired
 }
 
 // CallerIdentity interface
@@ -127,37 +150,48 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 	return true
 }
 
-func isExpired(token Token) bool {
-	now := time.Now().Add(-CacheTTL)
-	expires := token.Expires
-	if expires == nil {
-		exp := now.Add(DefaultTokenExpiration)
-		expires = &exp
-	}
-
-	return expires.Before(now)
-}
-
 func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
 	rc.authTokenMu.RLock()
 	token := rc.token
 	rc.authTokenMu.RUnlock()
 
-	if token.AccessToken == "" || isExpired(token) {
+	if token.Expired() {
 		if rc.callerIdentity != nil {
 			ti, err := rc.callerIdentity.GetCallerIdentity(ctx)
 			if err != nil {
 				return nil, err
 			}
+
+			if ti.Expires == nil {
+				exp := time.Now().Add(CacheTTL).UTC()
+				ti.Expires = &exp
+			}
+
 			rc.authTokenMu.Lock()
 			rc.token = *ti
 			token = rc.token
 			rc.authTokenMu.Unlock()
+
+			logger.ContextKV(ctx, xlog.DEBUG,
+				"status", "GetCallerIdentity",
+				"expires", token.Expires.Format("20060102T150405Z"),
+				"expires_in", time.Until(*token.Expires).String(),
+			)
 		}
-		if token.AccessToken == "" || isExpired(token) {
+		if token.AccessToken == "" {
+			logger.ContextKV(ctx, xlog.DEBUG,
+				"reason", "no_token",
+			)
 			return nil, nil
 		}
-	}
+	} /* else {
+		logger.ContextKV(ctx, xlog.DEBUG,
+			"status", "existing_token",
+			"now", time.Now().UTC().Format("20060102T150405Z"),
+			"expires", token.Expires.Format("20060102T150405Z"),
+			"expires_in", time.Until(*token.Expires).String(),
+		)
+	} */
 
 	ri, _ := grpccredentials.RequestInfoFromContext(ctx)
 	// if err := grpccredentials.CheckSecurityLevel(ri.AuthInfo, grpccredentials.PrivacyAndIntegrity); err != nil {
