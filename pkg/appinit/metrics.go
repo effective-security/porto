@@ -66,15 +66,6 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 			if nn := os.Getenv("NODE_NAME"); nn != "" {
 				mcfg.GlobalTags = append(mcfg.GlobalTags, metrics.Tag{Name: tag, Value: nn})
 			}
-		case "pod":
-			if podn := os.Getenv("POD_NAME"); podn != "" {
-				l := len(podn)
-				if l > 5 {
-					// kubes uses random suffixes
-					podn = podn[l-5 : l]
-				}
-				mcfg.GlobalTags = append(mcfg.GlobalTags, metrics.Tag{Name: tag, Value: podn})
-			}
 		}
 	}
 
