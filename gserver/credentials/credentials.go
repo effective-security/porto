@@ -60,8 +60,9 @@ func (t Token) Expired() bool {
 	if expired {
 		logger.KV(xlog.DEBUG,
 			"now", TimeISO8601(now),
-			"expired", expired,
-			"expires", TimeISO8601(*t.Expires),
+			"reason", "expired",
+			"expired_at", expired,
+			"token_expires", TimeISO8601(*t.Expires),
 			"expires_in", diff.String(),
 		)
 	}
@@ -179,7 +180,8 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 			token = rc.token
 			rc.authTokenMu.Unlock()
 
-			logger.ContextKV(ctx, xlog.DEBUG,
+			// this is an infrequent operation, so log it
+			logger.ContextKV(ctx, xlog.INFO,
 				"status", "GetCallerIdentity",
 				"expires", TimeISO8601(*token.Expires),
 				"expires_in", time.Until(*token.Expires).String(),
@@ -191,14 +193,14 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 			)
 			return nil, nil
 		}
-	} /* else {
+	} /*else if token.Expires != nil {
 		logger.ContextKV(ctx, xlog.DEBUG,
 			"status", "existing_token",
-			"now", time.Now().UTC().Format("20060102T150405Z"),
-			"expires", token.Expires.Format("20060102T150405Z"),
+			"now", TimeISO8601(time.Now().UTC()),
+			"expires", TimeISO8601(*token.Expires),
 			"expires_in", time.Until(*token.Expires).String(),
 		)
-	} */
+	}*/
 
 	ri, _ := grpccredentials.RequestInfoFromContext(ctx)
 	// if err := grpccredentials.CheckSecurityLevel(ri.AuthInfo, grpccredentials.PrivacyAndIntegrity); err != nil {
