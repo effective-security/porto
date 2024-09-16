@@ -4,7 +4,7 @@ go 1.22.3
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/docker/docker v27.2.0+incompatible
+	github.com/docker/docker v27.2.1+incompatible
 	github.com/effective-security/metrics v0.6.55
 	github.com/effective-security/x v0.6.40
 	github.com/effective-security/xlog v0.9.39
