@@ -95,14 +95,12 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 	if len(info.tlsCfg.Certificates) > 0 &&
 		info.tlsCfg.Certificates[0].Leaf != nil &&
 		info.tlsCfg.Certificates[0].Leaf.NotAfter.Before(time.Now()) {
-		return nil, errors.Errorf("tls: certificate has expired")
+		return nil, errors.New("tls: certificate has expired")
 	}
 
 	if err = tlsconfig.UpdateCipherSuites(info.tlsCfg, info.CipherSuites); err != nil {
 		return nil, err
 	}
-
-	logger.Infof(info.String())
 
 	info.tlsReloader, err = tlsconfig.NewKeypairReloader(
 		"",

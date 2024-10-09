@@ -76,7 +76,7 @@ func (d *disco) Find(server string, v interface{}) error {
 		}
 	}
 
-	return errors.Errorf("not implemented: " + rv.String())
+	return errors.Errorf("not implemented: %s", rv.String())
 }
 
 // ForEach interface

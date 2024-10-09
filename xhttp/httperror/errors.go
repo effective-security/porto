@@ -226,11 +226,11 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 		if len(msgAndArgs) == 0 {
 			return e
 		}
-		return New(e.HTTPStatus, e.Code, errMsg(e.Message, msgAndArgs...)).WithCause(err)
+		return New(e.HTTPStatus, e.Code, "%s", errMsg(e.Message, msgAndArgs...)).WithCause(err)
 	}
 	me := &ManyError{}
 	if goerrors.As(err, &me) {
-		return New(me.HTTPStatus, me.Code, errMsg(me.Message, msgAndArgs...)).WithCause(err)
+		return New(me.HTTPStatus, me.Code, "%s", errMsg(me.Message, msgAndArgs...)).WithCause(err)
 	}
 
 	if se, ok := err.(interface {
@@ -239,7 +239,7 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 		st := se.GRPCStatus()
 		code := st.Code()
 		status := codeStatus[code]
-		return New(status, httpCode[status], errMsg(st.Message(), msgAndArgs...)).WithCause(err)
+		return New(status, httpCode[status], "%s", errMsg(st.Message(), msgAndArgs...)).WithCause(err)
 	}
 
 	var errstr string
@@ -248,15 +248,15 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 	}
 	msg := errMsg(errstr, msgAndArgs...)
 	if IsInvalidRequestError(err) {
-		return InvalidRequest(msg).WithCause(err)
+		return InvalidRequest("%s", msg).WithCause(err)
 	}
 	if IsSQLNotFoundError(err) {
-		return NotFound(msg).WithCause(err)
+		return NotFound("%s", msg).WithCause(err)
 	}
 	if IsTimeout(err) {
-		return Timeout(msg).WithCause(err)
+		return Timeout("%s", msg).WithCause(err)
 	}
-	return Unexpected(msg).WithCause(err)
+	return Unexpected("%s", msg).WithCause(err)
 }
 
 // WrapWithCtx returns wrapped Error with Context
