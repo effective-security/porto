@@ -58,7 +58,7 @@ func NewFromPb(err error) *Error {
 		}
 	}
 
-	return New(http.StatusInternalServerError, CodeUnexpected, err.Error()).WithCause(err)
+	return New(http.StatusInternalServerError, CodeUnexpected, "%s", err.Error()).WithCause(err)
 }
 
 // GRPCStatus returns gRPC status

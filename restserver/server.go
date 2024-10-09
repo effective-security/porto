@@ -449,7 +449,7 @@ func (server *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
+	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
 }
 
 // GetServerURL returns complete server URL for given relative end-point

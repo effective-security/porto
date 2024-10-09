@@ -523,7 +523,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
+	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
 }
 
 // the proxy is a workaround to disable premature Flush for Grpc-Web

@@ -1,11 +1,9 @@
-run:
-  skip-files:
-    - ".*_test\\.go$"
-
 linters:
   enable:
     - revive
 
 issues:
+  exclude-files:
+    - ".*_test\\.go$"
   exclude:
     - SA1019 # tc.gtc.OverrideServerName is deprecated: use grpc.WithAuthority instead. Will be supported throughout 1.x. (staticcheck)

@@ -346,5 +346,5 @@ func FromOAuth(code, descr string) *Error {
 		status = http.StatusUnauthorized
 	}
 
-	return New(status, code, descr)
+	return New(status, code, "%s", descr)
 }

@@ -461,7 +461,7 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		a.delegate.ServeHTTP(w, r)
 	} else {
-		marshal.WriteJSON(w, r, httperror.Unauthorized(err.Error()))
+		marshal.WriteJSON(w, r, httperror.Unauthorized("%s", err.Error()))
 	}
 }
 
