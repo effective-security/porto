@@ -8,7 +8,7 @@ require (
 	github.com/effective-security/metrics v0.6.66
 	github.com/effective-security/x v0.6.41
 	github.com/effective-security/xlog v0.9.39
-	github.com/effective-security/xpki v0.20.179
+	github.com/effective-security/xpki v0.21.181
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.3
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -18,8 +18,8 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.20.4
-	github.com/redis/go-redis/v9 v9.6.1
+	github.com/prometheus/client_golang v1.20.5
+	github.com/redis/go-redis/v9 v9.7.0
 	github.com/rs/cors v1.11.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.9.0
@@ -113,7 +113,7 @@ require (
 	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241007155032-5fefd90f89a9 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
