@@ -308,7 +308,7 @@ func IsTimeout(err error) bool {
 		slices.StringContainsOneOf(str, timeoutErrors)
 }
 
-var timeoutErrors = []string{"timeout", "deadline"}
+var timeoutErrors = []string{"timeout", "deadline", "canceling", "canceled"}
 
 // Status returns HTTP status from error
 func Status(err error) int {
