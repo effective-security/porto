@@ -443,12 +443,12 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 			wh := w.Header()
 			if grpcWeb {
 				if r.ProtoMajor != 2 {
-					logger.ContextKV(r.Context(), xlog.INFO,
-						"reason", "http2_required",
-						"method", r.Method,
-						"major", r.ProtoMajor,
-						"proto", r.Proto,
-					)
+					// logger.ContextKV(r.Context(), xlog.INFO,
+					// 	"reason", "http2_required",
+					// 	"method", r.Method,
+					// 	"major", r.ProtoMajor,
+					// 	"proto", r.Proto,
+					// )
 					r.ProtoMajor, r.ProtoMinor, r.Proto = 2, 0, "HTTP/2.0"
 				}
 
