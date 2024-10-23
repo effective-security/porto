@@ -159,7 +159,7 @@ func Test_grpcFromContext(t *testing.T) {
 			return nil, errors.New("some error")
 		})
 		require.Error(t, err)
-		assert.Equal(t, "some error", err.Error())
+		assert.Equal(t, "rpc error: code = PermissionDenied desc = invalid identity: invalid request", err.Error())
 	})
 }
 
@@ -243,9 +243,9 @@ func Test_RequestorIdentity(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
-		require.Equal(t, http.StatusOK, w.Code)
+		require.Equal(t, http.StatusUnauthorized, w.Code)
 
-		assert.Equal(t, `{"role":"guest"}`, w.Body.String())
+		assert.Equal(t, `{"code":"unauthorized","message":"invalid identity: missing client certificate"}`, w.Body.String())
 	})
 	t.Run("ForRequest", func(t *testing.T) {
 		r, err := http.NewRequest(http.MethodGet, "/test", nil)

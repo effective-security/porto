@@ -207,14 +207,15 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	var err error
 	var id identity.Identity
 
+	ctx := r.Context()
 	if p.config.AWS.Enabled && strings.EqualFold(typ, awsTokenType) {
-		id, err = p.awsIdentity(r.Context(), token, typ)
-		if err != nil {
-			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-			//return nil, err
-		} else {
+		id, err = p.awsIdentity(ctx, token, typ)
+		if err == nil {
 			return id, nil
+		} else if p.config.Strict {
+			return nil, err
 		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "awsIdentity", "err", err.Error())
 	}
 
 	if p.config.DPoP.Enabled && strings.EqualFold(typ, "DPoP") {
@@ -226,32 +227,33 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			Path:   u.Path,
 		}
 
-		id, err = p.dpopIdentity(r.Context(), phdr, r.Method, coreURL.String(), token, "DPoP")
-		if err != nil {
-			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-			//return nil, err
-		} else {
+		id, err = p.dpopIdentity(ctx, phdr, r.Method, coreURL.String(), token, "DPoP")
+		if err == nil {
 			return id, nil
+		} else if p.config.Strict {
+			return nil, err
 		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 	}
 
 	if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
 		id, err = p.jwtIdentity(r.Context(), token, typ)
-		if err != nil {
-			logger.ContextKV(r.Context(), xlog.TRACE, "token", token, "err", err.Error())
-			//return nil, err
-		} else {
+		if err == nil {
 			return id, nil
+		} else if p.config.Strict {
+			return nil, err
 		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "err", err.Error())
 	}
 
 	if p.config.TLS.Enabled && peers > 0 {
 		id, err = p.tlsIdentity(r.TLS)
-		if err != nil {
-			logger.ContextKV(r.Context(), xlog.TRACE, "reason", "tls", "err", err.Error())
-		} else {
+		if err == nil {
 			return id, nil
+		} else if p.config.Strict {
+			return nil, err
 		}
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "tlsIdentity", "err", err.Error())
 	}
 
 	// if none of mappers are applicable or configured,
@@ -334,9 +336,11 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			if ok && len(si.State.PeerCertificates) > 0 {
 				id, err := p.tlsIdentity(&si.State)
 				if err == nil {
-					logger.ContextKV(ctx, xlog.DEBUG, "type", "TLS", "role", id)
 					return id, nil
+				} else if p.config.Strict {
+					return nil, err
 				}
+				logger.ContextKV(ctx, xlog.DEBUG, "reason", "tlsIdentity", "err", err.Error())
 			}
 		}
 	}
