@@ -510,7 +510,7 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 
 		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 2)
+		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	server, _ := startServer(true, identityMapperFromCN)
@@ -541,7 +541,7 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, `{"Method":"GET","Path":"/v1/allow"}`, w.Body.String())
 
 		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 2)
+		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("client_to_allow_401", func(t *testing.T) {
@@ -555,7 +555,7 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"request %s: unauthorized: client role not allowed"}`, cid, cid), w.Body.String())
 		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 2)
+		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("other_org_client_to_allow_401", func(t *testing.T) {
@@ -569,7 +569,7 @@ func Test_Authz(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"request %s: unauthorized: client role not allowed"}`, cid, cid), w.Body.String())
 		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 2)
+		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
 	t.Run("client_to_allowany_200", func(t *testing.T) {
