@@ -535,6 +535,12 @@ type mockJWT struct {
 	err      error
 }
 
+func (m mockJWT) GetRevocation() jwt.Revocation {
+	return nil
+}
+func (m mockJWT) SetRevocation(jwt.Revocation) {
+}
+
 func (m mockJWT) ParseToken(ctx context.Context, authorization string, cfg *jwt.VerifyConfig) (jwt.MapClaims, error) {
 	claims := m.claims
 	if strings.HasPrefix(authorization, "pat.") {
