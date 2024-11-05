@@ -24,7 +24,7 @@ require (
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go v0.34.0
-	github.com/testcontainers/testcontainers-go/modules/redis v0.33.0
+	github.com/testcontainers/testcontainers-go/modules/redis v0.34.0
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.18.0
 	golang.org/x/crypto v0.28.0
