@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
@@ -32,6 +33,8 @@ type ManyError struct {
 
 	// Cause is the first original error
 	cause error `json:"-"`
+
+	lock sync.Mutex `json:"-"`
 }
 
 // GRPCStatus returns gRPC status
@@ -91,6 +94,10 @@ func (m *ManyError) Add(key string, err error) *ManyError {
 	if m == nil {
 		m = new(ManyError)
 	}
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	if m.Errors == nil {
 		m.Errors = make(map[string]*Error)
 	}
