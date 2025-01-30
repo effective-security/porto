@@ -181,7 +181,7 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 			rc.authTokenMu.Unlock()
 
 			// this is an infrequent operation, so log it
-			logger.ContextKV(ctx, xlog.INFO,
+			logger.ContextKV(ctx, xlog.DEBUG,
 				"status", "GetCallerIdentity",
 				"expires", TimeISO8601(*token.Expires),
 				"expires_in", time.Until(*token.Expires).String(),
