@@ -99,10 +99,14 @@ github.com/effective-security/metrics v0.6.77 h1:mEJ0JssF3+14/tqZY2EkE/WALg726rl
 github.com/effective-security/metrics v0.6.77/go.mod h1:e0Lx1yN7NxwTUPUme46syzF2Vu2vgBby94I9yIVOycw=
 github.com/effective-security/x v0.9.48 h1:jArlYsiIRo4wKyuUNbjgSipZUz2r50H13NGmxMrnpI0=
 github.com/effective-security/x v0.9.48/go.mod h1:qB36EivUvaDdhtSr35/DVRkxV7CBvefw1EI+rMGPBXo=
+github.com/effective-security/x v0.9.49 h1:ylFGNU9Y+NV/CCNsuQkZWHyTX06tdJkhFh+1FARQYzU=
+github.com/effective-security/x v0.9.49/go.mod h1:DEZvE2UNSNDYS8mQzbFP2AOcSCHAuUiQ6c2+fLvVOwI=
 github.com/effective-security/xlog v0.9.39 h1:3pDtPu7eSjd5MxxHJWahls0mqKGId/JG4/pyKXUaLu0=
 github.com/effective-security/xlog v0.9.39/go.mod h1:rtuUkU9TSCr5ocosyzTqNLzwXDkgx3Rqb3zXTsRrzJ4=
 github.com/effective-security/xpki v0.22.199 h1:+o7HDYkCJpNmit8uPTUbturDC81e6/bQR7rQfg0MOFw=
 github.com/effective-security/xpki v0.22.199/go.mod h1:QpnPtBGGuw0+o+kMec7AdXLjsrDabIIWTr2Tyaz4q4M=
+github.com/effective-security/xpki v0.22.200 h1:AzttcYAHQwY93Ha6GUaLsYorD5lLP7trhX15D+PwuLA=
+github.com/effective-security/xpki v0.22.200/go.mod h1:at9EFMrFYIDyNDN2mHHZ56ADjhUUj0vTAxzTxrBoJnY=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
