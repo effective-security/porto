@@ -452,6 +452,11 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					r.ProtoMajor, r.ProtoMinor, r.Proto = 2, 0, "HTTP/2.0"
 				}
 
+				// Remove content-length header since it represents http1.1 payload size, not the sum of the h2
+				// DATA frame payload lengths. https://http2.github.io/http2-spec/#malformed This effectively
+				// switches to chunked encoding which is the default for h2
+				r.Header.Del(header.ContentLength)
+
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
 				if origin != "" {
 					if len(allowedOrigins) > 0 && !slices.ContainsString(allowedOrigins, origin) {
@@ -475,11 +480,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				if exposedHeaders != "" {
 					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
 				}
-				wh.Set(header.ContentType, header.ApplicationGRPC)
 
-				w = &proxyWriter{
-					rw: w,
-				}
+				w = newGrpcWebResponse(w)
 			}
 			if sctx.cfg.DebugLogs {
 				logger.ContextKV(r.Context(), xlog.DEBUG,
@@ -495,10 +497,15 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					"url", r.URL.String())
 			}
 			grpcServer.ServeHTTP(w, r)
-			if grpcWeb && sctx.cfg.DebugLogs {
-				logger.ContextKV(r.Context(), xlog.DEBUG,
-					"method", r.Method,
-					"headers", wh)
+			if grpcWeb {
+				grw := w.(*grpcWebResponse)
+				grw.finishRequest()
+				if sctx.cfg.DebugLogs {
+					logger.ContextKV(r.Context(), xlog.DEBUG,
+						"method", r.Method,
+						"headers", grw.headers,
+					)
+				}
 			}
 		} else {
 			if sctx.cfg.DebugLogs && r.URL.Path != "/healthz" {
@@ -524,32 +531,4 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
-}
-
-// the proxy is a workaround to disable premature Flush for Grpc-Web
-type proxyWriter struct {
-	rw http.ResponseWriter
-}
-
-// Header proxy
-func (p *proxyWriter) Header() http.Header {
-	return p.rw.Header()
-}
-
-// Write proxy
-func (p *proxyWriter) Write(data []byte) (int, error) {
-	return p.rw.Write(data)
-}
-
-// WriteHeader proxy
-func (p *proxyWriter) WriteHeader(statusCode int) {
-	p.rw.WriteHeader(statusCode)
-}
-
-// Flush proxy
-func (p *proxyWriter) Flush() {
-	// do nothing
-	// Looks like a bug in
-	// func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status)
-	logger.KV(xlog.DEBUG, "reason", "not_supported")
 }
