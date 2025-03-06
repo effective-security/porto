@@ -315,7 +315,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 		}
 
-		if p.config.JWT.Enabled && typ != "" {
+		if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
 			id, err := p.jwtIdentity(ctx, token, typ)
 			if err == nil {
 				return id, nil
