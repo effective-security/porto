@@ -2,7 +2,9 @@ package correlation
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"github.com/effective-security/porto/xhttp/header"
@@ -67,7 +69,18 @@ func NewHandler(delegate http.Handler) http.Handler {
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context
 func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req interface{}, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.ContextKV(ctx, xlog.ERROR,
+					"reason", "panic",
+					"action", si.FullMethod,
+					"err", rec,
+					"stack", string(debug.Stack()))
+				err = errors.New("unhandled exception")
+			}
+		}()
+
 		var rctx *RequestContext
 		v := ctx.Value(keyContext)
 		if v == nil {

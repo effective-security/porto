@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/rs/cors"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -375,6 +377,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	}
 
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
+		panicInterceptor(),
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
@@ -415,11 +418,36 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	return grpcServer
 }
 
+func panicInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.ContextKV(ctx, xlog.ERROR,
+					"reason", "panic",
+					"action", si.FullMethod,
+					"err", rec,
+					"stack", string(debug.Stack()))
+				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, "unhandled exception")
+			}
+		}()
+		return handler(ctx, req)
+	}
+}
+
 // grpcHandlerFunc returns an http.Handler that delegates to grpcServer on incoming gRPC
 // connections or otherHandler otherwise. Given in gRPC docs.
 func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
 	if otherHandler == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.ContextKV(r.Context(), xlog.ERROR,
+						"reason", "panic",
+						"err", rec,
+						"stack", string(debug.Stack()))
+					http.Error(w, "unhandled exception", http.StatusInternalServerError)
+				}
+			}()
 			grpcServer.ServeHTTP(w, r)
 		})
 	}
@@ -436,6 +464,15 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.ContextKV(r.Context(), xlog.ERROR,
+					"reason", "panic",
+					"err", rec,
+					"stack", string(debug.Stack()))
+				http.Error(w, "unhandled exception", http.StatusInternalServerError)
+			}
+		}()
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			origin := r.Header.Get("Origin")
