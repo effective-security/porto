@@ -8,7 +8,7 @@ require (
 	github.com/effective-security/metrics v0.7.83
 	github.com/effective-security/x v0.9.49
 	github.com/effective-security/xlog v0.9.41
-	github.com/effective-security/xpki v0.23.212
+	github.com/effective-security/xpki v0.23.214
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.4
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -26,10 +26,10 @@ require (
 	github.com/testcontainers/testcontainers-go v0.35.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.35.0
 	github.com/ugorji/go/codec v1.2.12
-	go.uber.org/dig v1.18.0
-	golang.org/x/crypto v0.35.0
-	golang.org/x/net v0.35.0
-	google.golang.org/grpc v1.70.0
+	go.uber.org/dig v1.18.1
+	golang.org/x/crypto v0.36.0
+	golang.org/x/net v0.37.0
+	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -108,8 +108,8 @@ require (
 	go.uber.org/multierr v1.7.0 // indirect
 	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250227231956-55c901821b1e // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
