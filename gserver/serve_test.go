@@ -1,6 +1,7 @@
 package gserver
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -61,6 +62,26 @@ func TestGrpcHandlerFunc(t *testing.T) {
 	t.Run("gRPC-Web request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Header.Set(header.ContentType, header.ApplicationGRPCWebProto)
+		req.Header.Set("Origin", "http://example.com")
+		req.Proto = "HTTP/2"
+		req.ProtoMajor = 2
+
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		hd := w.Header()
+		assert.Equal(t, "http://example.com", hd.Get("Access-Control-Allow-Origin"))
+		vals := strings.Split(hd.Get("Access-Control-Expose-Headers"), ", ")
+		sort.Strings(vals)
+		assert.Equal(t, []string{"Access-Control-Allow-Origin", "Access-Control-Expose-Headers", "Content-Type", "Date", "Grpc-Message", "Grpc-Status", "grpc-message", "grpc-status"}, vals)
+	})
+
+	t.Run("gRPC-Web-Text request", func(t *testing.T) {
+		payload := base64.StdEncoding.EncodeToString([]byte("test-payload"))
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+		req.Header.Set(header.ContentType, header.ApplicationGRPCWebText)
 		req.Header.Set("Origin", "http://example.com")
 		req.Proto = "HTTP/2"
 		req.ProtoMajor = 2

@@ -2,6 +2,7 @@ package gserver
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"net/http"
 	"strings"
@@ -18,15 +19,16 @@ type grpcWebResponse struct {
 	// Flush must be called on this writer before returning to ensure encoded buffer is flushed
 	wrapped http.ResponseWriter
 
-	// The standard "application/grpc" content-type will be replaced with this.
+	// contentType is the content type of the response.
+	// It can be either "application/grpc-web+proto" or "application/grpc-web-text".
 	contentType string
 }
 
-func newGrpcWebResponse(resp http.ResponseWriter) *grpcWebResponse {
+func newGrpcWebResponse(resp http.ResponseWriter, ct string) *grpcWebResponse {
 	g := &grpcWebResponse{
 		headers:     make(http.Header),
 		wrapped:     resp,
-		contentType: header.ApplicationGRPCWebProto,
+		contentType: ct,
 	}
 	return g
 }
@@ -40,6 +42,12 @@ func (w *grpcWebResponse) Write(b []byte) (int, error) {
 		w.prepareHeaders()
 	}
 	w.wroteBody, w.wroteHeaders = true, true
+	if w.contentType == header.ApplicationGRPCWebText {
+		// For grpc-web-text, we need to base64-encode the payload.
+		encoder := base64.NewEncoder(base64.StdEncoding, w.wrapped)
+		defer encoder.Close()
+		return encoder.Write(b)
+	}
 	return w.wrapped.Write(b)
 }
 
@@ -91,8 +99,15 @@ func (w *grpcWebResponse) copyTrailersToPayload() {
 	trailers.Write(trailerBuffer)
 	trailerGrpcDataHeader := []byte{1 << 7, 0, 0, 0, 0} // MSB=1 indicates this is a trailer data frame.
 	binary.BigEndian.PutUint32(trailerGrpcDataHeader[1:5], uint32(trailerBuffer.Len()))
-	w.wrapped.Write(trailerGrpcDataHeader)
-	w.wrapped.Write(trailerBuffer.Bytes())
+	if w.contentType == header.ApplicationGRPCWebText {
+		encoder := base64.NewEncoder(base64.StdEncoding, w.wrapped)
+		defer encoder.Close()
+		encoder.Write(trailerGrpcDataHeader)
+		encoder.Write(trailerBuffer.Bytes())
+	} else {
+		w.wrapped.Write(trailerGrpcDataHeader)
+		w.wrapped.Write(trailerBuffer.Bytes())
+	}
 	flushWriter(w.wrapped)
 }
 
