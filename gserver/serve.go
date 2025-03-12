@@ -3,6 +3,8 @@ package gserver
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"io"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -476,7 +478,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			origin := r.Header.Get("Origin")
-			grpcWeb := ct == header.ApplicationGRPCWebProto
+			grpcWeb := (ct == header.ApplicationGRPCWebProto || ct == header.ApplicationGRPCWebText)
 			wh := w.Header()
 			if grpcWeb {
 				if r.ProtoMajor != 2 {
@@ -487,6 +489,12 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					// 	"proto", r.Proto,
 					// )
 					r.ProtoMajor, r.ProtoMinor, r.Proto = 2, 0, "HTTP/2.0"
+				}
+				if ct == header.ApplicationGRPCWebText {
+					// For grpc-web-text, the body is base64 encoded.
+					// So we need to decode it before passing it to the gRPC server.
+					decodedReader := base64.NewDecoder(base64.StdEncoding, r.Body)
+					r.Body = io.NopCloser(decodedReader)
 				}
 
 				// Remove content-length header since it represents http1.1 payload size, not the sum of the h2
@@ -518,7 +526,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
 				}
 
-				w = newGrpcWebResponse(w)
+				w = newGrpcWebResponse(w, ct)
 			}
 			if sctx.cfg.DebugLogs {
 				logger.ContextKV(r.Context(), xlog.DEBUG,

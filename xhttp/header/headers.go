@@ -13,6 +13,8 @@ const (
 	ApplicationGRPC = "application/grpc"
 	// ApplicationGRPCWebProto is HTTP header value for "application/grpc-web+proto"
 	ApplicationGRPCWebProto = "application/grpc-web+proto"
+	// ApplicationGRPCWebText is HTTP header value for "application/grpc-web-text"
+	ApplicationGRPCWebText = "application/grpc-web-text"
 	// ApplicationTimestampQuery is HTTP header value for RFC3161 Timestamp request
 	ApplicationTimestampQuery = "application/timestamp-query"
 	// ApplicationTimestampReply is HTTP header value for RFC3161 Timestamp response
