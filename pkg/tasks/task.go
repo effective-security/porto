@@ -289,11 +289,11 @@ func (j *task) Do(taskName string, taskFunc interface{}, params ...interface{}) 
 	return j
 }
 
-func (s *Schedule) at(hour, min int) *Schedule {
+func (s *Schedule) at(hour, minutes int) *Schedule {
 	now := TimeNow()
 	y, m, d := now.Date()
 
-	lastRun := time.Date(y, m, d, hour, min, 0, 0, loc)
+	lastRun := time.Date(y, m, d, hour, minutes, 0, 0, loc)
 
 	if s.Unit == Days {
 		if !now.After(lastRun) {
@@ -377,7 +377,7 @@ func (j *task) Run() bool {
 	return false
 }
 
-func parseTimeFormat(t string) (hour, min int, err error) {
+func parseTimeFormat(t string) (hour, minutes int, err error) {
 	var errTimeFormat = errors.Errorf("time format not valid: %q", t)
 	ts := strings.Split(t, ":")
 	if len(ts) != 2 {
@@ -390,13 +390,13 @@ func parseTimeFormat(t string) (hour, min int, err error) {
 		err = errors.WithStack(err)
 		return
 	}
-	min, err = strconv.Atoi(ts[1])
+	minutes, err = strconv.Atoi(ts[1])
 	if err != nil {
 		err = errors.WithStack(err)
 		return
 	}
 
-	if hour < 0 || hour > 23 || min < 0 || min > 59 {
+	if hour < 0 || hour > 23 || minutes < 0 || minutes > 59 {
 		err = errors.WithStack(errTimeFormat)
 		return
 	}
@@ -478,7 +478,7 @@ func ParseSchedule(format string) (*Schedule, error) {
 			s.StartDay = time.Sunday
 		default:
 			if strings.Contains(t, ":") {
-				hour, min, err := parseTimeFormat(t)
+				hour, minutes, err := parseTimeFormat(t)
 				if err != nil {
 					return nil, errors.WithStack(errTimeFormat)
 				}
@@ -487,7 +487,7 @@ func ParseSchedule(format string) (*Schedule, error) {
 				} else if s.Unit != Days && s.Unit != Weeks {
 					return nil, errors.WithStack(errTimeFormat)
 				}
-				s.at(hour, min)
+				s.at(hour, minutes)
 			} else {
 				if s.Interval > 1 {
 					return nil, errors.WithStack(errTimeFormat)

@@ -212,7 +212,7 @@ func TestNewTLSListener_Revoked(t *testing.T) {
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
-	marshal.WriteJSON(w, r, httperror.NotFound(r.URL.Path))
+	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
 }
 
 type verifier struct {

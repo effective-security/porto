@@ -279,7 +279,7 @@ func TestError_Wrap(t *testing.T) {
 	werr3s := httperror.Wrap(werr2s)
 	assert.EqualError(t, werr3s, "not_found: no rows in result set")
 
-	many := httperror.NewMany(werr1.HTTPStatus, werr1.Code, werr1.Message).WithCause(errors.New("many cause"))
+	many := httperror.NewMany(werr1.HTTPStatus, werr1.Code, "%s", werr1.Message).WithCause(errors.New("many cause"))
 	many.Add("werr1", werr1)
 	assert.EqualError(t, many, "not_found: wrapped")
 	werr4 := httperror.Wrap(many, "wrappedMany")
