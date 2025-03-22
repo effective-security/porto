@@ -703,7 +703,7 @@ func Test_RetriableBody(t *testing.T) {
 	h := func(w http.ResponseWriter, r *http.Request) {
 		q, err := io.ReadAll(r.Body)
 		if err != nil {
-			marshal.WriteJSON(w, r, httperror.Unexpected(err.Error()))
+			marshal.WriteJSON(w, r, httperror.Unexpected("%s", err.Error()))
 			return
 		}
 		// write request back

@@ -96,17 +96,17 @@ func (w *grpcWebResponse) finishRequest() {
 func (w *grpcWebResponse) copyTrailersToPayload() {
 	trailers := extractTrailingHeaders(w.headers, w.wrapped.Header())
 	trailerBuffer := new(bytes.Buffer)
-	trailers.Write(trailerBuffer)
+	_ = trailers.Write(trailerBuffer)
 	trailerGrpcDataHeader := []byte{1 << 7, 0, 0, 0, 0} // MSB=1 indicates this is a trailer data frame.
 	binary.BigEndian.PutUint32(trailerGrpcDataHeader[1:5], uint32(trailerBuffer.Len()))
 	if w.contentType == header.ApplicationGRPCWebText {
 		encoder := base64.NewEncoder(base64.StdEncoding, w.wrapped)
 		defer encoder.Close()
-		encoder.Write(trailerGrpcDataHeader)
-		encoder.Write(trailerBuffer.Bytes())
+		_, _ = encoder.Write(trailerGrpcDataHeader)
+		_, _ = encoder.Write(trailerBuffer.Bytes())
 	} else {
-		w.wrapped.Write(trailerGrpcDataHeader)
-		w.wrapped.Write(trailerBuffer.Bytes())
+		_, _ = w.wrapped.Write(trailerGrpcDataHeader)
+		_, _ = w.wrapped.Write(trailerBuffer.Bytes())
 	}
 	flushWriter(w.wrapped)
 }

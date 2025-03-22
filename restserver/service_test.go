@@ -226,7 +226,7 @@ func testCORS(t *testing.T, server restserver.Server, expected bool) {
 func debugResponse(t *testing.T, w *http.Response, body bool) {
 	b, err := httputil.DumpResponse(w, body)
 	if assert.NoError(t, err) {
-		t.Logf(string(b))
+		t.Log(string(b))
 	}
 }
 

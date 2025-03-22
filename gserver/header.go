@@ -39,7 +39,7 @@ func skipKeys(keys ...string) copyOption {
 // replaceInVals returns an option to replace old substring with new substring
 // in header values keyed with key. Key matching in the header is
 // case-insensitive.
-func replaceInVals(key, old, new string) copyOption {
+func replaceInVals(key, old, newVal string) copyOption {
 	return func(opts *copyOptions) {
 		opts.replacers = append(
 			opts.replacers,
@@ -47,7 +47,7 @@ func replaceInVals(key, old, new string) copyOption {
 				if strings.EqualFold(key, k) {
 					vv2 := make([]string, 0, len(vv))
 					for _, v := range vv {
-						v = values.Select(v == old, new, v)
+						v = values.Select(v == old, newVal, v)
 						vv2 = append(vv2, v)
 					}
 					return k, vv2, true
@@ -60,13 +60,13 @@ func replaceInVals(key, old, new string) copyOption {
 
 // replaceInKeys returns an option to replace an old substring with a new
 // substring in header keys.
-func replaceInKeys(old, new string) copyOption {
+func replaceInKeys(old, newVal string) copyOption {
 	return func(opts *copyOptions) {
 		opts.replacers = append(
 			opts.replacers,
 			func(k string, vv []string) (string, []string, bool) {
 				if strings.Contains(k, old) {
-					return strings.Replace(k, old, new, 1), vv, true
+					return strings.Replace(k, old, newVal, 1), vv, true
 				}
 				return "", nil, false
 			},
