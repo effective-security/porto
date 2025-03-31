@@ -28,7 +28,7 @@ require (
 	github.com/ugorji/go/codec v1.2.12
 	go.uber.org/dig v1.18.1
 	golang.org/x/crypto v0.36.0
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.38.0
 	google.golang.org/grpc v1.71.0
 	google.golang.org/protobuf v1.36.5
 	gopkg.in/yaml.v3 v3.0.1
