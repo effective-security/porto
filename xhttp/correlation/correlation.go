@@ -207,7 +207,9 @@ func WithMetaFromContext(ctx context.Context) context.Context {
 }
 
 // WithMetaFromRequest returns context with Correlation ID
-// for the outgoing gRPC call
+// for the outgoing gRPC call, on wire or in memory.
+// Both Incoming and Outgoing metadata are created out of
+// HTTP request headers with x- and grpc- prefixes.
 func WithMetaFromRequest(req *http.Request) context.Context {
 	cid := correlationID(req)
 	rctx := &RequestContext{
@@ -215,7 +217,27 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 	}
 	ctx := context.WithValue(req.Context(), keyContext, rctx)
 	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
-	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
+	md := metadata.MD{
+		header.XCorrelationID: []string{cid},
+	}
+	kv := []string{header.XCorrelationID, cid}
+	for key, values := range req.Header {
+		// Normalize the header key to lowercase for gRPC metadata
+		grpcKey := strings.ToLower(key)
+		isX := strings.HasPrefix(grpcKey, "x-")
+		isGRPC := strings.HasPrefix(grpcKey, "grpc-")
+		if isX || isGRPC || grpcKey == "authorization" || grpcKey == "date" {
+			for _, value := range values {
+				// Add each value to the metadata
+				kv = append(kv, grpcKey, value)
+				md.Append(grpcKey, value)
+			}
+		}
+	}
+
+	// create both Incoming and Outgoing metadata
+	ctx = metadata.NewIncomingContext(ctx, md)
+	return metadata.AppendToOutgoingContext(ctx, kv...)
 }
 
 // NewFromContext returns new Background context with Correlation ID from incoming context
