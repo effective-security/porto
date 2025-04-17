@@ -136,7 +136,7 @@ func (k *KeypairReloader) Reload() error {
 		if err == nil {
 			break
 		}
-		logger.KV(xlog.WARNING, "reason", "LoadX509KeyPair", "label", k.label, "file", k.certPath, "err", err)
+		logger.KV(xlog.WARNING, "reason", "LoadX509KeyPair", "label", k.label, "file", k.certPath, "err", err.Error())
 	}
 	if err != nil {
 		return errors.WithMessagef(err, "count: %d", k.count)
@@ -149,22 +149,22 @@ func (k *KeypairReloader) Reload() error {
 	if err == nil {
 		k.certModifiedAt = certFileInfo.ModTime()
 	} else {
-		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.certPath, "err", err)
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.certPath, "err", err.Error())
 	}
 
 	keyFileInfo, err := os.Stat(k.keyPath)
 	if err == nil {
 		k.keyModifiedAt = keyFileInfo.ModTime()
 	} else {
-		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.keyPath, "err", err)
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.keyPath, "err", err.Error())
 	}
-
-	logger.KV(xlog.WARNING, "label", k.label, "count", k.count, "cert", k.certPath, "modifiedAt", k.certModifiedAt.Format(time.RFC3339))
 
 	k.keypair = newCert
 	keypair := k.tlsCert()
 
 	if oldModifiedAt != k.certModifiedAt {
+		logger.KV(xlog.DEBUG, "label", k.label, "count", k.count, "cert", k.certPath, "modifiedAt", k.certModifiedAt.Format(time.RFC3339))
+
 		// execute notifications outside of the lock
 		for _, h := range k.handlers {
 			go h(keypair)
@@ -180,7 +180,7 @@ func (k *KeypairReloader) tlsCert() *tls.Certificate {
 	if kp.Leaf == nil && len(kp.Certificate) > 0 {
 		kp.Leaf, err = x509.ParseCertificate(kp.Certificate[0])
 		if err != nil {
-			logger.KV(xlog.WARNING, "reason", "ParseCertificate", "label", k.label, "err", err)
+			logger.KV(xlog.WARNING, "reason", "ParseCertificate", "label", k.label, "err", err.Error())
 		}
 	}
 
@@ -262,7 +262,7 @@ func (k *KeypairReloader) Close() error {
 		return errors.New("already closed")
 	}
 
-	logger.KV(xlog.DEBUG, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
+	//logger.KV(xlog.DEBUG, "label", k.label, "count", k.count, "cert", k.certPath, "key", k.keyPath)
 
 	k.closed = true
 	k.stopChan <- struct{}{}

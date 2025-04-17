@@ -1,11 +1,11 @@
 module github.com/effective-security/porto
 
-go 1.24.1
+go 1.24.2
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.0.4+incompatible
-	github.com/effective-security/metrics v0.8.89
+	github.com/effective-security/metrics v0.8.91
 	github.com/effective-security/x v0.12.53
 	github.com/effective-security/xlog v0.9.41
 	github.com/effective-security/xpki v0.24.219
@@ -89,7 +89,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.63.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.1 // indirect
