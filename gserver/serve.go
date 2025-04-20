@@ -393,7 +393,10 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	}
 
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
-		newStreamInterceptor(s),
+		s.newLogStreamServerInterceptor(),
+		correlation.NewStreamServerInterceptor(),
+		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext),
+		s.authz.NewStreamServerInterceptor(),
 	}
 	if s.cfg.PromGrpc {
 		chainStreamInterceptors = append(chainStreamInterceptors, grpc_prometheus.StreamServerInterceptor)

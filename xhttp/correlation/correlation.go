@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/effective-security/porto/pkg/streamctx"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
@@ -88,12 +89,47 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 				ID: correlationIDFromGRPC(ctx),
 			}
 			ctx = context.WithValue(ctx, keyContext, rctx)
+		} else {
+			rctx = v.(*RequestContext)
 		}
-
 		// add correlationID to logs as "ctx"
 		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
 
 		return handler(ctx, req)
+	}
+}
+
+func NewStreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+		ctx := ss.Context()
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.ContextKV(ctx, xlog.ERROR,
+					"reason", "panic",
+					"action", info.FullMethod,
+					"err", rec,
+					"stack", string(debug.Stack()))
+				err = errors.New("unhandled exception")
+			}
+		}()
+
+		var rctx *RequestContext
+		v := ctx.Value(keyContext)
+		if v == nil {
+			rctx = &RequestContext{
+				ID: correlationIDFromGRPC(ctx),
+			}
+			ctx = context.WithValue(ctx, keyContext, rctx)
+		} else {
+			rctx = v.(*RequestContext)
+		}
+		// add correlationID to logs as "ctx"
+		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
+
+		// Wrap with Context
+		ss = streamctx.WithContext(ctx, ss)
+
+		return handler(srv, ss)
 	}
 }
 
