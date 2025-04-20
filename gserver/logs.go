@@ -41,13 +41,28 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 			if err == nil && telemetry.ShouldSkip(s.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
 				return
 			}
-			logRequest(ctx, info, startTime, req, resp, err)
+			logRequest(ctx, info.FullMethod, startTime, req, err)
 		}()
 		return resp, err
 	}
 }
 
-func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.Time, req interface{}, _ interface{}, err error) {
+func (s *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		startTime := time.Now()
+		err := handler(srv, ss)
+		ctx := ss.Context()
+		defer func() {
+			if err == nil && telemetry.ShouldSkip(s.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+				return
+			}
+			logRequest(ctx, info.FullMethod, startTime, srv, err)
+		}()
+		return err
+	}
+}
+
+func logRequest(ctx context.Context, responseType string, startTime time.Time, req interface{}, err error) {
 	duration := time.Since(startTime)
 	expensiveRequest := duration > WarnUnaryRequestLatency
 
@@ -58,7 +73,6 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	}
 
 	userAgent := headerFromContext(ctx, "user-agent")
-	responseType := info.FullMethod
 	idx := identity.FromContext(ctx)
 	role := idx.Identity().Role()
 
@@ -79,7 +93,7 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 				code = codes.Internal
 			}
 		}
-		logError(ctx, code, info.FullMethod, err, cause)
+		logError(ctx, code, responseType, err, cause)
 	}
 
 	l := xlog.TRACE
@@ -97,15 +111,8 @@ func logRequest(ctx context.Context, info *grpc.UnaryServerInfo, startTime time.
 	)
 
 	codeName := code.String()
-	metricskey.GRPCReqPerf.MeasureSince(startTime, info.FullMethod, codeName)
-	metricskey.GRPCReqByRole.IncrCounter(1, info.FullMethod, codeName, role)
-}
-
-func newStreamInterceptor(_ *Server) grpc.StreamServerInterceptor {
-	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		logger.KV(xlog.DEBUG, "method", info.FullMethod)
-		return handler(srv, ss)
-	}
+	metricskey.GRPCReqPerf.MeasureSince(startTime, responseType, codeName)
+	metricskey.GRPCReqByRole.IncrCounter(1, responseType, codeName, role)
 }
 
 func logError(ctx context.Context, code codes.Code, method string, err, cause error) {

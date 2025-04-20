@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/effective-security/porto/pkg/streamctx"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
@@ -116,52 +117,74 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 
 var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "")
 
+func createIdentityContext(ctx context.Context, methodFullMethod string, identityMapper ProviderFromContext) (context.Context, error) {
+	var id Identity
+	var err error
+	id, err = identityMapper(ctx, methodFullMethod)
+	if err != nil {
+		logger.ContextKV(ctx, xlog.WARNING,
+			"reason", "access_denied",
+			"method", methodFullMethod,
+			"err", err.Error())
+		return nil, status.Errorf(codes.PermissionDenied, "invalid identity: %s", err.Error())
+	}
+	if id == nil {
+		id = guestIdentity
+	}
+	ctx = AddToContext(ctx, NewRequestContext(id))
+	role := id.Role()
+	if role != "guest" {
+		tenant := id.Tenant()
+		subject := id.Subject()
+		entries := []any{"role", role}
+		if tenant != "" {
+			entries = append(entries, "tenant", tenant)
+		}
+		if subject != "" {
+			entries = append(entries, "user", subject)
+		}
+
+		claims := id.Claims()
+		if len(claims) > 0 {
+			claims := id.Claims()
+			email := claims.String("email")
+			if email != "" {
+				entries = append(entries, "email", email)
+			}
+			spiffe := claims.String("spiffe")
+			if spiffe != "" {
+				entries = append(entries, "spiffe", spiffe)
+			}
+		}
+		ctx = xlog.ContextWithKV(ctx, entries...)
+	}
+	return ctx, nil
+}
+
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context
 func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		var id Identity
-		var err error
-		id, err = identityMapper(ctx, info.FullMethod)
+		ctx, err := createIdentityContext(ctx, info.FullMethod, identityMapper)
 		if err != nil {
-			logger.ContextKV(ctx, xlog.WARNING,
-				"reason", "access_denied",
-				"method", info.FullMethod,
-				"err", err.Error())
-			return nil, status.Errorf(codes.PermissionDenied, "invalid identity: %s", err.Error())
-		}
-		if id == nil {
-			id = guestIdentity
-		}
-		ctx = AddToContext(ctx, NewRequestContext(id))
-		role := id.Role()
-		if role != "guest" {
-			tenant := id.Tenant()
-			subject := id.Subject()
-			entries := []any{"role", role}
-			if tenant != "" {
-				entries = append(entries, "tenant", tenant)
-			}
-			if subject != "" {
-				entries = append(entries, "user", subject)
-			}
-
-			claims := id.Claims()
-			if len(claims) > 0 {
-				claims := id.Claims()
-				email := claims.String("email")
-				if email != "" {
-					entries = append(entries, "email", email)
-				}
-				spiffe := claims.String("spiffe")
-				if spiffe != "" {
-					entries = append(entries, "spiffe", spiffe)
-				}
-			}
-			ctx = xlog.ContextWithKV(ctx, entries...)
+			return nil, err
 		}
 
 		return handler(ctx, req)
+	}
+}
+
+func NewStreamServerInterceptor(identityMapper ProviderFromContext) grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx, err := createIdentityContext(ss.Context(), info.FullMethod, identityMapper)
+		if err != nil {
+			return err
+		}
+
+		// Wrap with Context
+		ss = streamctx.WithContext(ctx, ss)
+
+		return handler(srv, ss)
 	}
 }
 

@@ -478,6 +478,20 @@ func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// NewStreamServerInterceptor returns grpc.StreamServerInterceptor to check access
+func (c *Provider) NewStreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx := ss.Context()
+		idn := c.grpcRoleMapper(ctx)
+		userAgent := headerFromContext(ctx, "user-agent")
+		if !c.isAllowed(ctx, info.FullMethod, userAgent, idn) {
+			return httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
+		}
+
+		return handler(srv, ss)
+	}
+}
+
 func headerFromContext(ctx context.Context, name string) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if ok {
