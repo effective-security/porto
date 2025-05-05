@@ -2,7 +2,7 @@ package appinit
 
 import (
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/effective-security/x/guid"
@@ -49,14 +49,14 @@ func TestCPUProfiler(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, closer)
 
-	cpuf := path.Join(os.TempDir(), "proto-test", "profiler")
+	cpuf := filepath.Join(os.TempDir(), "proto-test", "profiler")
 	_ = os.MkdirAll(cpuf, os.ModePerm)
 	defer os.Remove(cpuf)
 
 	_, err = CPUProfiler(cpuf)
 	assert.Error(t, err)
 
-	closer, err = CPUProfiler(path.Join(cpuf, guid.MustCreate()))
+	closer, err = CPUProfiler(filepath.Join(cpuf, guid.MustCreate()))
 	require.NoError(t, err)
 	require.NotNil(t, closer)
 	closer.Close()

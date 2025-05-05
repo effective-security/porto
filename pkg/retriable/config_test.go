@@ -5,7 +5,7 @@ import (
 	"crypto"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -66,7 +66,7 @@ func Test_Load(t *testing.T) {
 }
 
 func TestStorageKeys(t *testing.T) {
-	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
+	storage := OpenStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
 	defer storage.Clean()
 
 	assert.Panics(t, func() {
@@ -112,7 +112,7 @@ func TestWithAuthorization(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	storage := OpenStorage(path.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
+	storage := OpenStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"), "", "")
 	defer storage.Clean()
 
 	fn, err := storage.SaveKey(dk)

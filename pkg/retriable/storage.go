@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,7 +36,7 @@ type Storage struct {
 func OpenStorage(baseFolder, host, envAuthTokenName string) *Storage {
 	folder := ExpandFolder(baseFolder)
 	if host != "" {
-		folder = path.Join(folder, HostFolderName(host))
+		folder = filepath.Join(folder, HostFolderName(host))
 	}
 	return &Storage{folder: folder, envAuthTokenName: envAuthTokenName}
 }
@@ -52,7 +51,7 @@ func (c *Storage) Clean() {
 // access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
 func (c *Storage) SaveAuthToken(token string) (string, error) {
 	_ = os.MkdirAll(c.folder, 0755)
-	location := path.Join(c.folder, authTokenFileName)
+	location := filepath.Join(c.folder, authTokenFileName)
 	err := os.WriteFile(location, []byte(token), 0600)
 	if err != nil {
 		return location, errors.WithMessagef(err, "unable to store token")
@@ -62,7 +61,7 @@ func (c *Storage) SaveAuthToken(token string) (string, error) {
 
 // LoadKey returns *jose.JSONWebKey
 func (c *Storage) LoadKey(label string) (*jose.JSONWebKey, string, error) {
-	path := path.Join(c.folder, label+".jwk")
+	path := filepath.Join(c.folder, label+".jwk")
 	return dpop.LoadKey(path)
 }
 
@@ -84,7 +83,7 @@ func (c *Storage) LoadAuthToken() (*AuthToken, string, error) {
 
 // LoadAuthToken loads .auth_token file
 func LoadAuthToken(dir string) (*AuthToken, string, error) {
-	file := path.Join(dir, ".auth_token")
+	file := filepath.Join(dir, ".auth_token")
 	t, err := os.ReadFile(file)
 	if err != nil {
 		return nil, file, errors.WithMessage(err, "credentials not found")
@@ -145,7 +144,7 @@ func ExpandFolder(dir string) string {
 	if dir == "" {
 		dirname, _ := os.UserHomeDir()
 		// returns default
-		dir = path.Join(dirname, ".config", ".retriable")
+		dir = filepath.Join(dirname, ".config", ".retriable")
 	}
 	dir, _ = homedir.Expand(dir)
 	return dir
