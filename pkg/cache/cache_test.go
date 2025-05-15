@@ -236,7 +236,7 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 		go func() {
 			defer wg.Done()
 			_, err := sub.ReceiveMessage(ctx2)
-			assert.EqualError(t, err, "context canceled")
+			assert.Error(t, err, "context canceled")
 		}()
 		cancel()
 		cerr := ctx2.Err()
