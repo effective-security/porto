@@ -99,8 +99,8 @@ github.com/ebitengine/purego v0.8.2 h1:jPPGWs2sZ1UgOSgD2bClL0MJIqu58nOmIcBuXr62z
 github.com/ebitengine/purego v0.8.2/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/effective-security/metrics v0.8.92 h1:tggZR9VVajGpEeNsVbmKtCcpV8nikUr7nttFCA+K2Yc=
 github.com/effective-security/metrics v0.8.92/go.mod h1:I+3D1XYlRZGBZMLlm5BJiQ+Fpn2sS8t2c271gtry4ho=
-github.com/effective-security/x v0.12.54 h1:wZwSIc6KbSA1glBtMNk7WWViULU73/sAeY1LesK0lGk=
-github.com/effective-security/x v0.12.54/go.mod h1:xf0v5iVrWAk455/TbaGm1MbGkY73TMVWr1zyPNcCoF0=
+github.com/effective-security/x v0.12.57 h1:UNaRBcux2m7oj4v0+w56rJFR4F9ezMYxGcuE/djXq0I=
+github.com/effective-security/x v0.12.57/go.mod h1:xf0v5iVrWAk455/TbaGm1MbGkY73TMVWr1zyPNcCoF0=
 github.com/effective-security/xlog v0.9.41 h1:z+35GBV0BSybcl0rtuqxaqoDHa5ayY1CrjWPDRL9cdc=
 github.com/effective-security/xlog v0.9.41/go.mod h1:bK02QBVCwMTcPDkkzpJRI1cu+Rs0q19XaoFbBowtC64=
 github.com/effective-security/xpki v0.25.221 h1:Px/pnSNgLYcYIdBWvTL2qqp0Nv26KudHeuKOLeYi1x4=
