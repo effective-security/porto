@@ -229,17 +229,21 @@ func WithID(ctx context.Context) context.Context {
 // WithMetaFromContext returns context with Correlation ID
 // for the outgoing gRPC call
 func WithMetaFromContext(ctx context.Context) context.Context {
-	v := ctx.Value(keyContext)
-	if v == nil {
-		rctx := &RequestContext{
-			ID: certutil.RandomString(IDSize),
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok || md == nil || len(md[CorrelationIDgRPCHeaderName]) == 0 {
+		v := ctx.Value(keyContext)
+		if v == nil {
+			rctx := &RequestContext{
+				ID: certutil.RandomString(IDSize),
+			}
+			ctx = context.WithValue(ctx, keyContext, rctx)
+			ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
+			v = rctx
 		}
-		ctx = context.WithValue(ctx, keyContext, rctx)
-		ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
-		v = rctx
+		cid := v.(*RequestContext).ID
+		return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
 	}
-	cid := v.(*RequestContext).ID
-	return metadata.AppendToOutgoingContext(ctx, CorrelationIDgRPCHeaderName, cid)
+	return ctx
 }
 
 // WithMetaFromRequest returns context with Correlation ID
