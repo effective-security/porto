@@ -60,15 +60,15 @@ type Client struct {
 }
 
 // NewFromURL creates a new client from a URL.
-func NewFromURL(url string, ignoreAccessTokenError bool) (*Client, error) {
+func NewFromURL(url string, skipAuth bool) (*Client, error) {
 	return New(&Config{
 		Endpoint: url,
-	}, ignoreAccessTokenError)
+	}, skipAuth)
 }
 
 // New creates a new client from a given configuration.
-func New(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
-	return newClient(cfg, ignoreAccessTokenError)
+func New(cfg *Config, skipAuth bool) (*Client, error) {
+	return newClient(cfg, skipAuth)
 }
 
 // Close shuts down the client's connections.
@@ -90,7 +90,7 @@ func (c *Client) Opts() []grpc.CallOption {
 	return c.callOpts
 }
 
-func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
+func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 	if cfg == nil || len(cfg.Endpoint) == 0 {
 		return nil, errors.Errorf("endpoint is required in client config")
 	}
@@ -127,18 +127,16 @@ func newClient(cfg *Config, ignoreAccessTokenError bool) (*Client, error) {
 
 		if cfg.CallerIdentity != nil {
 			bundle.WithCallerIdentity(cfg.CallerIdentity)
-		} else {
+		} else if !skipAuth {
 			at, location, err := cfg.LoadAuthToken()
 			logger.KV(xlog.DEBUG, "token_location", location)
 
-			if err != nil && !ignoreAccessTokenError {
+			if err != nil {
 				return nil, errors.WithMessage(err, "failed to load access token")
 			}
 			if err == nil {
 				if at.Expired() {
-					if !ignoreAccessTokenError {
-						return nil, errors.Errorf("authorization: token expired")
-					}
+					return nil, errors.Errorf("authorization: token expired")
 				} else {
 					// grpc: the credentials require transport level security
 					token := at.AccessToken
