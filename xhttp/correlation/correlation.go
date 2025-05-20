@@ -262,7 +262,7 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 		grpcKey := strings.ToLower(key)
 		isX := strings.HasPrefix(grpcKey, "x-")
 		isGRPC := strings.HasPrefix(grpcKey, "grpc-")
-		if isX || isGRPC || grpcKey == "authorization" || grpcKey == "date" {
+		if isX || isGRPC || grpcKey == "authorization" || grpcKey == "date" || grpcKey == "timestamp" {
 			for _, value := range values {
 				// Add each value to the metadata
 				kv = append(kv, grpcKey, value)

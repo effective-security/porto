@@ -861,7 +861,7 @@ func (c *Client) consumeResponseBody(r *http.Response) {
 
 func debugRequest(r *http.Request, body bool) {
 	if logger.LevelAt(xlog.DEBUG) {
-		b, err := httputil.DumpRequestOut(r, body)
+		b, err := DumpRequestOut(r, body)
 		if err != nil {
 			logger.ContextKV(r.Context(), xlog.ERROR, "err", err.Error())
 		} else {
