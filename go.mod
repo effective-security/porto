@@ -26,10 +26,10 @@ require (
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.37.0
 	github.com/ugorji/go/codec v1.2.12
-	go.uber.org/dig v1.18.2
+	go.uber.org/dig v1.19.0
 	golang.org/x/crypto v0.38.0
 	golang.org/x/net v0.40.0
-	google.golang.org/grpc v1.72.0
+	google.golang.org/grpc v1.72.1
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v3 v3.0.1
 )
