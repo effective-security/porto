@@ -5,8 +5,8 @@ go 1.24.2
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.1.1+incompatible
-	github.com/effective-security/metrics v0.8.92
-	github.com/effective-security/x v0.12.57
+	github.com/effective-security/metrics v0.8.94
+	github.com/effective-security/x v0.13.59
 	github.com/effective-security/xlog v0.9.41
 	github.com/effective-security/xpki v0.25.221
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
@@ -93,7 +93,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.63.0 // indirect
+	github.com/prometheus/common v0.64.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
