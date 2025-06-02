@@ -25,7 +25,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.37.0
-	github.com/ugorji/go/codec v1.2.12
+	github.com/ugorji/go/codec v1.2.14
 	go.uber.org/dig v1.19.0
 	golang.org/x/crypto v0.38.0
 	golang.org/x/net v0.40.0
