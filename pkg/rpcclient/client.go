@@ -134,33 +134,31 @@ func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 			if err != nil {
 				return nil, errors.WithMessage(err, "failed to load access token")
 			}
-			if err == nil {
-				if at.Expired() {
-					return nil, errors.Errorf("authorization: token expired")
-				} else {
-					// grpc: the credentials require transport level security
-					token := at.AccessToken
-					typ := values.StringsCoalesce(at.TokenType, "Bearer")
-					if at.DpopJkt != "" {
-						k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
-						if err != nil {
-							return nil, errors.WithMessage(err, "unable to load key for DPoP")
-						}
-						typ = "DPoP"
-						signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
-						if err != nil {
-							return nil, errors.WithMessage(err, "unable to create DPoP signer")
-						}
-						bundle.WithDPoP(signer)
-					}
-					tok := tcredentials.Token{
-						TokenType:   typ,
-						AccessToken: token,
-						Expires:     at.Expires,
-					}
-					bundle.UpdateAuthToken(tok)
-				}
+
+			if at.Expired() {
+				return nil, errors.Errorf("authorization: token expired")
 			}
+			// grpc: the credentials require transport level security
+			token := at.AccessToken
+			typ := values.StringsCoalesce(at.TokenType, "Bearer")
+			if at.DpopJkt != "" {
+				k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
+				if err != nil {
+					return nil, errors.WithMessage(err, "unable to load key for DPoP")
+				}
+				typ = "DPoP"
+				signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
+				if err != nil {
+					return nil, errors.WithMessage(err, "unable to create DPoP signer")
+				}
+				bundle.WithDPoP(signer)
+			}
+			tok := tcredentials.Token{
+				TokenType:   typ,
+				AccessToken: token,
+				Expires:     at.Expires,
+			}
+			bundle.UpdateAuthToken(tok)
 		}
 		dopts = append(dopts, grpc.WithPerRPCCredentials(bundle.PerRPCCredentials()))
 	}

@@ -39,7 +39,6 @@ import (
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
-	"github.com/effective-security/x/math"
 	"github.com/effective-security/xlog"
 	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
@@ -217,7 +216,7 @@ func (c *Provider) treeAsText() string {
 		if len(n.children) > 0 {
 			slash = "/"
 		}
-		rolePad := strings.Repeat(" ", math.Max(1, 32-len(pad)-len(slash)-len(n.value)))
+		rolePad := strings.Repeat(" ", max(1, 32-len(pad)-len(slash)-len(n.value)))
 		fmt.Fprintf(o, "%s  %s%s %s", pad, n.value, slash, rolePad)
 		roles(o, n)
 		fmt.Fprintln(o)

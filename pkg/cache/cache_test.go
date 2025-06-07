@@ -19,8 +19,7 @@ import (
 
 func TestProvider(t *testing.T) {
 	ctx := context.Background()
-	redisContainer, err := rediscon.RunContainer(ctx,
-		testcontainers.WithImage("docker.io/bitnami/redis:7.2"),
+	redisContainer, err := rediscon.Run(ctx, "docker.io/bitnami/redis:7.2",
 		testcontainers.WithConfigModifier(func(config *container.Config) {
 			config.Env = []string{
 				"ALLOW_EMPTY_PASSWORD=yes",
