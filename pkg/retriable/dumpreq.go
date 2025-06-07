@@ -58,7 +58,7 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 	dr := &delegateReader{c: make(chan io.Reader)}
 
 	t := &http.Transport{
-		Dial: func(net, addr string) (net.Conn, error) {
+		Dial: func(_, _ string) (net.Conn, error) {
 			return &dumpConn{io.MultiWriter(&buf, pw), dr}, nil
 		},
 	}
@@ -74,8 +74,8 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 		if err == nil {
 			// Ensure all the body is read; otherwise
 			// we'll get a partial dump.
-			io.Copy(io.Discard, req.Body)
-			req.Body.Close()
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
 		}
 		select {
 		case dr.c <- strings.NewReader("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"):
@@ -174,9 +174,9 @@ type dumpConn struct {
 	io.Reader
 }
 
-func (c *dumpConn) Close() error                       { return nil }
-func (c *dumpConn) LocalAddr() net.Addr                { return nil }
-func (c *dumpConn) RemoteAddr() net.Addr               { return nil }
-func (c *dumpConn) SetDeadline(t time.Time) error      { return nil }
-func (c *dumpConn) SetReadDeadline(t time.Time) error  { return nil }
-func (c *dumpConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *dumpConn) Close() error                     { return nil }
+func (c *dumpConn) LocalAddr() net.Addr              { return nil }
+func (c *dumpConn) RemoteAddr() net.Addr             { return nil }
+func (c *dumpConn) SetDeadline(time.Time) error      { return nil }
+func (c *dumpConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *dumpConn) SetWriteDeadline(time.Time) error { return nil }
