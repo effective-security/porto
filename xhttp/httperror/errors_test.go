@@ -11,6 +11,7 @@ import (
 
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/effective-security/xdb"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -261,10 +262,10 @@ func TestError_Is(t *testing.T) {
 }
 
 func TestError_Wrap(t *testing.T) {
-	werr1 := httperror.Wrap(errors.New("no rows"), "wrapped")
+	werr1 := httperror.Wrap(errors.New("no rows in result set"), "wrapped")
 	assert.EqualError(t, werr1, "not_found: wrapped")
-	werr1s := httperror.Wrap(errors.New("no rows"))
-	assert.EqualError(t, werr1s, "not_found: no rows")
+	werr1s := httperror.Wrap(errors.New("no rows in result set"))
+	assert.EqualError(t, werr1s, "not_found: no rows in result set")
 
 	err := status.New(codes.NotFound, "no rows in result set").Err()
 	werr2 := httperror.Wrap(err, "wrapped")
@@ -345,9 +346,9 @@ func TestGRPCError(t *testing.T) {
 }
 
 func TestIsNotFoundError(t *testing.T) {
-	assert.True(t, httperror.IsSQLNotFoundError(sql.ErrNoRows))
-	assert.True(t, httperror.IsSQLNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
-	assert.False(t, httperror.IsSQLNotFoundError(nil))
+	assert.True(t, xdb.IsNotFoundError(sql.ErrNoRows))
+	assert.True(t, xdb.IsNotFoundError(errors.WithMessage(errors.New("sql: no rows in result set"), "failed")))
+	assert.False(t, xdb.IsNotFoundError(nil))
 	assert.False(t, httperror.IsInvalidModel(nil))
 }
 

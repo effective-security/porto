@@ -2,7 +2,6 @@ package httperror
 
 import (
 	"context"
-	"database/sql"
 	goerrors "errors"
 	"fmt"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/x/slices"
+	"github.com/effective-security/xdb"
 	"github.com/ugorji/go/codec"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -250,7 +250,7 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 	if IsInvalidRequestError(err) {
 		return InvalidRequest("%s", msg).WithCause(err)
 	}
-	if IsSQLNotFoundError(err) {
+	if xdb.IsNotFoundError(err) {
 		return NotFound("%s", msg).WithCause(err)
 	}
 	if IsTimeout(err) {
@@ -279,12 +279,6 @@ func errMsg(err string, msgAndArgs ...any) string {
 		return fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
 	}
 	return err
-}
-
-// IsSQLNotFoundError returns true, if error is NotFound
-func IsSQLNotFoundError(err error) bool {
-	return err != nil &&
-		(err == sql.ErrNoRows || strings.Contains(err.Error(), "no rows"))
 }
 
 // IsInvalidModel returns true, if error is InvalidModel
