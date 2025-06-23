@@ -257,7 +257,7 @@ func Test_AccessLogs(t *testing.T) {
 		return date
 	}
 
-	c, err := New(&Config{LogAllowed: true, LogDenied: true, LogAllowedAny: true})
+	c, err := New(&Config{LogAllowed: true, LogDenied: true, LogAllowedAny: true, LogLevel: "N"})
 	require.NoError(t, err)
 	c.AllowAny("/")
 	c.Allow("/foo/alice", "svc_alice", "svc_bob")
