@@ -109,6 +109,10 @@ type Config struct {
 	// LogDenied specifies to log denied access
 	LogDenied bool `json:"log_denied" yaml:"log_denied"`
 
+	// LogLevel specifies the log level to use for logging.
+	// If not specified, the DEBUG log level will be set.
+	LogLevel string `json:"log_level" yaml:"log_level"`
+
 	// SkipLogPaths if set, specifies a list of paths to not log.
 	// this can be used for /v1/status/node or /metrics
 	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
@@ -394,18 +398,22 @@ func (c *Provider) isAllowed(ctx context.Context, path, userAgent string, idn id
 	res := allowAny || allowRole
 
 	if !telemetry.ShouldSkip(c.cfg.SkipLogPaths, path, userAgent) {
+		logLevel := xlog.DEBUG
+		if c.cfg.LogLevel != "" {
+			logLevel, _ = xlog.ParseLevel(c.cfg.LogLevel)
+		}
 		if res {
 			if allowRole && c.cfg.LogAllowed {
-				logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed",
+				logger.ContextKV(ctx, logLevel, "status", "allowed",
 					"path", path,
 					"node", node.value)
 			} else if c.cfg.LogAllowedAny {
-				logger.ContextKV(ctx, xlog.NOTICE, "status", "allowed_any",
+				logger.ContextKV(ctx, logLevel, "status", "allowed_any",
 					"path", path,
 					"node", node.value)
 			}
 		} else if c.cfg.LogDenied {
-			logger.ContextKV(ctx, xlog.NOTICE, "status", "denied",
+			logger.ContextKV(ctx, logLevel, "status", "denied",
 				"path", path,
 				"node", node.value)
 		}
