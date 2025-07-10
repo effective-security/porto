@@ -408,6 +408,17 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	opts = append(opts, grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(chainUnaryInterceptors...)))
 	opts = append(opts, grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(chainStreamInterceptors...)))
 
+	if s.opts.maxRecvMsgSize > 0 {
+		opts = append(opts, grpc.MaxRecvMsgSize(s.opts.maxRecvMsgSize))
+	} else if s.cfg.MaxRecvMsgSize > 0 {
+		opts = append(opts, grpc.MaxRecvMsgSize(s.cfg.MaxRecvMsgSize))
+	}
+	if s.opts.maxSendMsgSize > 0 {
+		opts = append(opts, grpc.MaxSendMsgSize(s.opts.maxSendMsgSize))
+	} else if s.cfg.MaxSendMsgSize > 0 {
+		opts = append(opts, grpc.MaxSendMsgSize(s.cfg.MaxSendMsgSize))
+	}
+
 	grpcServer := grpc.NewServer(append(opts, gopts...)...)
 
 	for name, svc := range s.services {

@@ -61,6 +61,12 @@ type Config struct {
 
 	// KeepAlive settings
 	KeepAlive KeepAliveCfg `json:"keep_alive" yaml:"keep_alive"`
+
+	// MaxRecvMsgSize sets the maximum message size that a client can send to the server.
+	MaxRecvMsgSize int `json:"max_recv_msg_size,omitempty" yaml:"max_recv_msg_size,omitempty"`
+
+	// MaxSendMsgSize sets the maximum message size that a server can send to the client.
+	MaxSendMsgSize int `json:"max_send_msg_size,omitempty" yaml:"max_send_msg_size,omitempty"`
 }
 
 // KeepAliveCfg settings
