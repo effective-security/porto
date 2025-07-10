@@ -36,10 +36,26 @@ func WithStreamServerInterceptor(other grpc.StreamServerInterceptor) Option {
 	})
 }
 
+// MaxRecvMsgSize sets the maximum message size that a client can send to the server.
+func MaxRecvMsgSize(size int) Option {
+	return newFuncOption(func(o *options) {
+		o.maxRecvMsgSize = size
+	})
+}
+
+// MaxSendMsgSize sets the maximum message size that a server can send to the client.
+func MaxSendMsgSize(size int) Option {
+	return newFuncOption(func(o *options) {
+		o.maxSendMsgSize = size
+	})
+}
+
 type options struct {
-	handlers []Middleware
-	unary    []grpc.UnaryServerInterceptor
-	stream   []grpc.StreamServerInterceptor
+	handlers       []Middleware
+	unary          []grpc.UnaryServerInterceptor
+	stream         []grpc.StreamServerInterceptor
+	maxRecvMsgSize int
+	maxSendMsgSize int
 }
 
 type funcOption struct {
