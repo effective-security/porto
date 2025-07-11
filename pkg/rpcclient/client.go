@@ -103,11 +103,16 @@ func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 
 	ctx, cancel := context.WithCancel(baseCtx)
 	client := &Client{
-		conn:     nil,
-		cfg:      *cfg,
-		ctx:      ctx,
-		cancel:   cancel,
-		callOpts: defaultCallOpts,
+		conn:   nil,
+		cfg:    *cfg,
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	if len(cfg.CallOptions) > 0 {
+		client.callOpts = cfg.CallOptions
+	} else {
+		client.callOpts = defaultCallOpts
 	}
 
 	dialEndpoint := cfg.Endpoint

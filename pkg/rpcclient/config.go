@@ -34,6 +34,9 @@ type Config struct {
 	// Without this, Dial returns immediately and connecting the server happens in background.
 	DialOptions []grpc.DialOption
 
+	// CallOptions is a list of call options for the grpc client.
+	CallOptions []grpc.CallOption
+
 	// Context is the default client context; it can be used to cancel grpc dial out and
 	// other operations that do not have an explicit context.
 	Context context.Context
