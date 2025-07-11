@@ -34,9 +34,18 @@ type Config struct {
 	// Without this, Dial returns immediately and connecting the server happens in background.
 	DialOptions []grpc.DialOption
 
+	// CallOptions is a list of call options for the grpc client (e.g., for interceptors).
+	CallOptions []grpc.CallOption
+
 	// Context is the default client context; it can be used to cancel grpc dial out and
 	// other operations that do not have an explicit context.
 	Context context.Context
+
+	// MaxRecvMsgSize sets the maximum message size that a client can send to the server.
+	MaxRecvMsgSize int
+
+	// MaxSendMsgSize sets the maximum message size that a server can send to the client.
+	MaxSendMsgSize int
 
 	StorageFolder    string
 	EnvAuthTokenName string
