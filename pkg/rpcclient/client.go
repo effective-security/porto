@@ -29,7 +29,7 @@ var (
 	// client-side request send limit, gRPC default is math.MaxInt32
 	// Make sure that "client-side send limit < server-side default send/recv limit"
 	// Same value as "embed.DefaultMaxRequestBytes" plus gRPC overhead bytes
-	defaultMaxCallSendMsgSize = grpc.MaxCallSendMsgSize(2 * 1024 * 1024)
+	defaultMaxCallSendMsgSize = grpc.MaxCallSendMsgSize(10 * 1024 * 1024)
 
 	// client-side response receive limit, gRPC default is 4MB
 	// Make sure that "client-side receive limit >= server-side default send/recv limit"
