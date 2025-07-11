@@ -29,23 +29,14 @@ var (
 	// client-side request send limit, gRPC default is math.MaxInt32
 	// Make sure that "client-side send limit < server-side default send/recv limit"
 	// Same value as "embed.DefaultMaxRequestBytes" plus gRPC overhead bytes
-	defaultMaxCallSendMsgSize = grpc.MaxCallSendMsgSize(2 * 1024 * 1024)
+	defaultMaxCallSendMsgSize = 10 * 1024 * 1024
 
 	// client-side response receive limit, gRPC default is 4MB
 	// Make sure that "client-side receive limit >= server-side default send/recv limit"
 	// because range response can easily exceed request send limits
 	// Default to math.MaxInt32; writes exceeding server-side send limit fails anyway
-	defaultMaxCallRecvMsgSize = grpc.MaxCallRecvMsgSize(math.MaxInt32)
+	defaultMaxCallRecvMsgSize = math.MaxInt32
 )
-
-// defaultCallOpts defines a list of default "gRPC.CallOption".
-// Some options are exposed to "client.Config".
-// Defaults will be overridden by the settings in "client.Config".
-var defaultCallOpts = []grpc.CallOption{
-	defaultWaitForReady,
-	defaultMaxCallSendMsgSize,
-	defaultMaxCallRecvMsgSize,
-}
 
 // Client provides and manages v1 client session.
 type Client struct {
@@ -101,6 +92,15 @@ func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 		baseCtx = cfg.Context
 	}
 
+	// defaultCallOpts defines a list of default "gRPC.CallOption".
+	// Some options are exposed to "client.Config".
+	// Defaults will be overridden by the settings in "client.Config".
+	defaultCallOpts := []grpc.CallOption{
+		defaultWaitForReady,
+		grpc.MaxCallSendMsgSize(values.NumbersCoalesce(cfg.MaxSendMsgSize, defaultMaxCallSendMsgSize)),
+		grpc.MaxCallRecvMsgSize(values.NumbersCoalesce(cfg.MaxRecvMsgSize, defaultMaxCallRecvMsgSize)),
+	}
+
 	ctx, cancel := context.WithCancel(baseCtx)
 	client := &Client{
 		conn:     nil,
@@ -108,6 +108,11 @@ func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 		ctx:      ctx,
 		cancel:   cancel,
 		callOpts: defaultCallOpts,
+	}
+
+	if len(cfg.CallOptions) > 0 {
+		// override default call options
+		client.callOpts = cfg.CallOptions
 	}
 
 	dialEndpoint := cfg.Endpoint
