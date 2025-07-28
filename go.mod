@@ -6,9 +6,9 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.3.2+incompatible
 	github.com/effective-security/metrics v0.8.99
-	github.com/effective-security/x v0.14.64
+	github.com/effective-security/x v0.14.68
 	github.com/effective-security/xdb v0.23.109
-	github.com/effective-security/xlog v0.10.42
+	github.com/effective-security/xlog v0.10.43
 	github.com/effective-security/xpki v0.26.227
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.4
