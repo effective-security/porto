@@ -32,6 +32,7 @@ import (
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -540,7 +541,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
 				}
 
-				w = newGrpcWebResponse(w, ct)
+				w = newGrpcWebResponse(w, ct, r.Header.Get(header.AcceptEncoding))
 			}
 			if sctx.cfg.DebugLogs {
 				logger.ContextKV(r.Context(), xlog.DEBUG,
