@@ -30,7 +30,7 @@ require (
 	go.uber.org/dig v1.19.0
 	golang.org/x/crypto v0.40.0
 	golang.org/x/net v0.42.0
-	google.golang.org/grpc v1.73.0
+	google.golang.org/grpc v1.74.2
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -78,7 +78,7 @@ require (
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-pkgz/expirable-cache/v3 v3.0.0 // indirect
