@@ -63,9 +63,11 @@ func (w *grpcWebResponse) Write(b []byte) (int, error) {
 	w.wroteBody, w.wroteHeaders = true, true
 
 	// Select the final sink – either a gzip writer or the raw http.ResponseWriter.
-	dest := io.Writer(w.wrapped)
+	var dest io.Writer
 	if w.compress && w.gz != nil {
 		dest = w.gz
+	} else {
+		dest = io.Writer(w.wrapped)
 	}
 
 	// grpc-web-text requires base64 encoding of the message body.
@@ -114,7 +116,7 @@ func (w *grpcWebResponse) Flush() {
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_flush_gzip",
-				"err", err)
+				"err", err.Error())
 		}
 	}
 	if w.wroteHeaders || w.wroteBody {
@@ -130,7 +132,7 @@ func (w *grpcWebResponse) Close() {
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_close_gzip",
-				"err", err)
+				"err", err.Error())
 		}
 	}
 }
@@ -166,8 +168,8 @@ func (w *grpcWebResponse) finishRequest() {
 		err := w.gz.Close()
 		if err != nil {
 			logger.KV(xlog.ERROR,
-				"reason", "failed_to_close_gzip",
-				"err", err)
+				"reason", "failed_to_flush_gzip",
+				"err", err.Error())
 		}
 	}
 
@@ -192,13 +194,13 @@ func (w *grpcWebResponse) copyTrailersToPayload() {
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_write_base64_frame",
-				"err", err)
+				"err", err.Error())
 		}
 		err = enc.Close()
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_close_base64_encoder",
-				"err", err)
+				"err", err.Error())
 		}
 		return
 	}
@@ -208,7 +210,7 @@ func (w *grpcWebResponse) copyTrailersToPayload() {
 	if err != nil {
 		logger.KV(xlog.ERROR,
 			"reason", "failed_to_write_frame",
-			"err", err)
+			"err", err.Error())
 	}
 }
 
@@ -220,7 +222,7 @@ func buildTrailerFrame(trailers http.Header) []byte {
 	if err != nil {
 		logger.KV(xlog.ERROR,
 			"reason", "failed_to_write_trailers",
-			"err", err)
+			"err", err.Error())
 	}
 
 	// As per gRPC-Web, set MSB of the first byte to 1 to mark a trailer frame.
