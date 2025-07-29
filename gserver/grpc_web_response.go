@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/xlog"
 	"golang.org/x/net/http2"
 )
 
@@ -89,7 +90,10 @@ func (w *grpcWebResponse) writeTextPayload(dest io.Writer, b []byte) (int, error
 		if _, err := enc.Write(b); err != nil {
 			return 0, err
 		}
-		_ = enc.Close()
+		err := enc.Close()
+		if err != nil {
+			return 0, err
+		}
 		return dest.Write(buf.Bytes())
 	}
 
@@ -106,12 +110,28 @@ func (w *grpcWebResponse) WriteHeader(code int) {
 
 func (w *grpcWebResponse) Flush() {
 	if w.compress && w.gz != nil {
-		_ = w.gz.Flush()
+		err := w.gz.Flush()
+		if err != nil {
+			logger.KV(xlog.ERROR,
+				"reason", "failed_to_flush_gzip",
+				"err", err)
+		}
 	}
 	if w.wroteHeaders || w.wroteBody {
 		// Work around the fact that WriteHeader and a call to Flush would have caused a 200 response.
 		// This is the case when there is no payload.
 		flushWriter(w.wrapped)
+	}
+}
+
+func (w *grpcWebResponse) Close() {
+	if w.compress && w.gz != nil {
+		err := w.gz.Close()
+		if err != nil {
+			logger.KV(xlog.ERROR,
+				"reason", "failed_to_close_gzip",
+				"err", err)
+		}
 	}
 }
 
@@ -143,7 +163,12 @@ func (w *grpcWebResponse) finishRequest() {
 
 	// Finalize gzip writer (if any) to flush remaining bytes and write the footer.
 	if w.compress && w.gz != nil {
-		_ = w.gz.Close()
+		err := w.gz.Close()
+		if err != nil {
+			logger.KV(xlog.ERROR,
+				"reason", "failed_to_close_gzip",
+				"err", err)
+		}
 	}
 
 	// Ensure the underlying writer is flushed to the client.
@@ -163,20 +188,40 @@ func (w *grpcWebResponse) copyTrailersToPayload() {
 	// For text mode we must base64-encode the frame before sending it (and *then* optionally gzip it).
 	if w.contentType == header.ApplicationGRPCWebText {
 		enc := base64.NewEncoder(base64.StdEncoding, dest)
-		_, _ = enc.Write(frame)
-		_ = enc.Close()
+		_, err := enc.Write(frame)
+		if err != nil {
+			logger.KV(xlog.ERROR,
+				"reason", "failed_to_write_base64_frame",
+				"err", err)
+		}
+		err = enc.Close()
+		if err != nil {
+			logger.KV(xlog.ERROR,
+				"reason", "failed_to_close_base64_encoder",
+				"err", err)
+		}
 		return
 	}
 
 	// Binary mode – write frame directly.
-	_, _ = dest.Write(frame)
+	_, err := dest.Write(frame)
+	if err != nil {
+		logger.KV(xlog.ERROR,
+			"reason", "failed_to_write_frame",
+			"err", err)
+	}
 }
 
 // buildTrailerFrame turns HTTP trailers into a single gRPC-Web data frame as per the spec.
 // The returned slice layout is: [flags(1)][length(4)][payload].
 func buildTrailerFrame(trailers http.Header) []byte {
 	var payload bytes.Buffer
-	_ = trailers.Write(&payload)
+	err := trailers.Write(&payload)
+	if err != nil {
+		logger.KV(xlog.ERROR,
+			"reason", "failed_to_write_trailers",
+			"err", err)
+	}
 
 	// As per gRPC-Web, set MSB of the first byte to 1 to mark a trailer frame.
 	frame := make([]byte, 5+payload.Len())

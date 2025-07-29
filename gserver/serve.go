@@ -542,6 +542,10 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				}
 
 				w = newGrpcWebResponse(w, ct, r.Header.Get(header.AcceptEncoding))
+				defer func() {
+					grw := w.(*grpcWebResponse)
+					grw.Close()
+				}()
 			}
 			if sctx.cfg.DebugLogs {
 				logger.ContextKV(r.Context(), xlog.DEBUG,
