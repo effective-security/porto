@@ -111,18 +111,19 @@ func (w *grpcWebResponse) WriteHeader(code int) {
 }
 
 func (w *grpcWebResponse) Flush() {
-	if w.compress && w.gz != nil {
-		err := w.gz.Flush()
-		if err != nil {
-			logger.KV(xlog.ERROR,
-				"reason", "failed_to_flush_gzip",
-				"err", err.Error())
-		}
-	}
 	if w.wroteHeaders || w.wroteBody {
 		// Work around the fact that WriteHeader and a call to Flush would have caused a 200 response.
 		// This is the case when there is no payload.
-		flushWriter(w.wrapped)
+		if w.compress && w.gz != nil {
+			err := w.gz.Flush()
+			if err != nil {
+				logger.KV(xlog.ERROR,
+					"reason", "failed_to_flush_gzip",
+					"err", err.Error())
+			}
+		} else {
+			flushWriter(w.wrapped)
+		}
 	}
 }
 
@@ -171,10 +172,9 @@ func (w *grpcWebResponse) finishRequest() {
 				"reason", "failed_to_flush_gzip",
 				"err", err.Error())
 		}
+	} else {
+		flushWriter(w.wrapped)
 	}
-
-	// Ensure the underlying writer is flushed to the client.
-	flushWriter(w.wrapped)
 }
 
 func (w *grpcWebResponse) copyTrailersToPayload() {

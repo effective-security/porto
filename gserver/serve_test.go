@@ -134,4 +134,24 @@ func TestGrpcHandlerFunc(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
+
+	t.Run("gRPC-Web failure", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set(header.ContentType, header.ApplicationGRPCWebProto)
+		req.Header.Set(header.AcceptEncoding, header.Gzip)
+		req.Header.Set("Origin", "http://example.com")
+		req.Proto = "HTTP/2"
+		req.ProtoMajor = 2
+
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		hd := w.Header()
+		// content-type should be sent even if there is an error
+		assert.Equal(t, header.ApplicationGRPCWebProto, hd.Get("Content-Type"))
+		assert.Equal(t, "12", hd.Get("Grpc-Status"))
+		assert.Equal(t, "malformed method name: \"/\"", hd.Get("Grpc-Message"))
+	})
 }
