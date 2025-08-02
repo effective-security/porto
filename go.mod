@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/docker/docker v28.3.2+incompatible
+	github.com/docker/docker v28.3.3+incompatible
 	github.com/effective-security/metrics v0.8.99
 	github.com/effective-security/x v0.14.68
 	github.com/effective-security/xdb v0.23.109
