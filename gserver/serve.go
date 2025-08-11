@@ -354,16 +354,16 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	return handler
 }
 
-func restRouter(s *Server) restserver.Router {
+func restRouter(e *Server) restserver.Router {
 	router := restserver.NewRouter(notFoundHandler)
 
-	for name, svc := range s.services {
+	for name, svc := range e.services {
 		if registrator, ok := svc.(RouteRegistrator); ok {
-			logger.KV(xlog.INFO, "status", "RouteRegistrator", "server", s.Name(), "service", name)
+			logger.KV(xlog.INFO, "status", "RouteRegistrator", "server", e.Name(), "service", name)
 
 			registrator.RegisterRoute(router)
 		} else {
-			logger.KV(xlog.INFO, "status", "not_supported_RouteRegistrator", "server", s.Name(), "service", name)
+			logger.KV(xlog.INFO, "status", "not_supported_RouteRegistrator", "server", e.Name(), "service", name)
 		}
 	}
 

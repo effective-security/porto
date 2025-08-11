@@ -59,7 +59,7 @@ func NewRequest(method, url string, rawBody io.ReadSeeker) (*Request, error) {
 // WithHeaders adds additional headers to the request
 func (r *Request) WithHeaders(headers map[string]string) *Request {
 	for header, val := range headers {
-		r.Request.Header.Add(header, val)
+		r.Header.Add(header, val)
 	}
 
 	return r
@@ -67,6 +67,6 @@ func (r *Request) WithHeaders(headers map[string]string) *Request {
 
 // AddHeader adds additional header to the request
 func (r *Request) AddHeader(header, value string) *Request {
-	r.Request.Header.Add(header, value)
+	r.Header.Add(header, value)
 	return r
 }

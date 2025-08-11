@@ -28,17 +28,16 @@ const (
 
 // Storage provides Client storage
 type Storage struct {
-	folder           string
-	envAuthTokenName string
+	folder string
 }
 
 // OpenStorage returns Storage
-func OpenStorage(baseFolder, host, envAuthTokenName string) *Storage {
+func OpenStorage(baseFolder, host string) *Storage {
 	folder := ExpandFolder(baseFolder)
 	if host != "" {
 		folder = filepath.Join(folder, HostFolderName(host))
 	}
-	return &Storage{folder: folder, envAuthTokenName: envAuthTokenName}
+	return &Storage{folder: folder}
 }
 
 // Clean removes all stored files
@@ -72,12 +71,6 @@ func (c *Storage) SaveKey(k *jose.JSONWebKey) (string, error) {
 
 // LoadAuthToken returns LoadAuthToken
 func (c *Storage) LoadAuthToken() (*AuthToken, string, error) {
-	if c.envAuthTokenName != "" {
-		val := os.Getenv(c.envAuthTokenName)
-		if val != "" {
-			return ParseAuthToken(val, "env://"+c.envAuthTokenName)
-		}
-	}
 	return LoadAuthToken(c.folder)
 }
 

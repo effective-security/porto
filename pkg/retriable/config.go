@@ -22,10 +22,7 @@ type Config struct {
 
 // ClientConfig of the client, per specific host
 type ClientConfig struct {
-	Host string `json:"host,omitempty" yaml:"host,omitempty"`
-
-	// LegacyHosts are for compat with previous config
-	LegacyHosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
+	Host string `json:"host" yaml:"host"`
 
 	// TLS provides TLS config for the client
 	TLS *TLSInfo `json:"tls,omitempty" yaml:"tls,omitempty"`
@@ -35,14 +32,10 @@ type ClientConfig struct {
 
 	// StorageFolder specifies the root folder for keys and token.
 	StorageFolder string `json:"storage_folder,omitempty" yaml:"storage_folder,omitempty"`
-
-	// EnvNameAuthToken specifies os.Env name for the Authorization token.
-	// if the token is DPoP, then a correponding JWK must be found in StorageFolder
-	EnvAuthTokenName string `json:"auth_token_env_name,omitempty" yaml:"auth_token_env_name,omitempty"`
 }
 
 func (c *ClientConfig) Storage() *Storage {
-	return OpenStorage(c.StorageFolder, c.Host, c.EnvAuthTokenName)
+	return OpenStorage(c.StorageFolder, c.Host)
 }
 
 // RequestPolicy contains configuration info for Request policy
@@ -72,16 +65,11 @@ type Factory struct {
 // NewFactory returns new Factory
 func NewFactory(cfg Config) (*Factory, error) {
 	perHost := map[string]*ClientConfig{}
-	for _, c := range cfg.Clients {
-		for _, host := range c.LegacyHosts {
-			if perHost[host] != nil {
-				return nil, errors.Errorf("multiple entries for host: %s", host)
-			}
-			perHost[host] = c
+	for name, c := range cfg.Clients {
+		if c.Host == "" {
+			return nil, errors.Errorf("invalid configuration: missing host: %s", name)
 		}
-		if c.Host != "" {
-			perHost[c.Host] = c
-		}
+		perHost[c.Host] = c
 	}
 
 	return &Factory{

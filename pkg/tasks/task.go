@@ -295,12 +295,13 @@ func (s *Schedule) at(hour, minutes int) *Schedule {
 
 	lastRun := time.Date(y, m, d, hour, minutes, 0, 0, loc)
 
-	if s.Unit == Days {
+	switch s.Unit {
+	case Days:
 		if !now.After(lastRun) {
 			// remove 1 day
 			lastRun = lastRun.UTC().AddDate(0, 0, -1).Local()
 		}
-	} else if s.Unit == Weeks {
+	case Weeks:
 		if s.StartDay != now.Weekday() || (now.After(lastRun) && s.StartDay == now.Weekday()) {
 			i := int(lastRun.Weekday() - s.StartDay)
 			if i < 0 {

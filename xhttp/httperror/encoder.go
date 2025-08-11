@@ -17,7 +17,7 @@ var (
 )
 
 func init() {
-	jsonEncPPHandle.BasicHandle.EncodeOptions.Canonical = true
+	jsonEncPPHandle.Canonical = true
 	jsonEncPPHandle.Indent = -1
 }
 

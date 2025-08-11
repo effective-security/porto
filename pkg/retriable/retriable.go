@@ -302,10 +302,9 @@ func WithCallerIdentity(ci credentials.CallerIdentity) ClientOption {
 
 // Client is custom implementation of http.Client
 type Client struct {
-	Name             string
-	Policy           Policy // Rery policy for http requests
-	EnvAuthTokenName string
-	nonceProvider    NonceProvider
+	Name          string
+	Policy        Policy // Rery policy for http requests
+	nonceProvider NonceProvider
 
 	Config ClientConfig
 
@@ -327,13 +326,8 @@ func Default(host string) (*Client, error) {
 
 // New creates a new Client
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
-	dopts := []ClientOption{}
-
-	if cfg.Host != "" {
-		dopts = append(dopts, WithHost(cfg.Host))
-	} else if len(cfg.LegacyHosts) > 0 {
-		// use legacy hosts if host is not specified
-		dopts = append(dopts, WithHost(cfg.LegacyHosts[0]))
+	dopts := []ClientOption{
+		WithHost(cfg.Host),
 	}
 
 	if cfg.TLS != nil {
@@ -779,7 +773,7 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 	r.Request = r.WithContext(ctx)
 	for header, vals := range req.Header {
 		for _, val := range vals {
-			r.Request.Header.Add(header, val)
+			r.Header.Add(header, val)
 		}
 	}
 
@@ -805,9 +799,9 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 				return resp, err
 			}
 			if c, ok := body.(io.ReadCloser); ok {
-				req.Request.Body = c
+				req.Body = c
 			} else {
-				req.Request.Body = io.NopCloser(body)
+				req.Body = io.NopCloser(body)
 			}
 		}
 
@@ -828,7 +822,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			break
 		}
 
-		desc := fmt.Sprintf("%s %s", req.Request.Method, req.Request.URL)
+		desc := fmt.Sprintf("%s %s", req.Method, req.URL)
 		if resp != nil {
 			if resp.Status != "" {
 				desc += " "
@@ -954,9 +948,10 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		select {
 		case <-ctx.Done():
 			err := ctx.Err()
-			if err == context.Canceled {
+			switch err {
+			case context.Canceled:
 				return false, 0, Cancelled
-			} else if err == context.DeadlineExceeded {
+			case context.DeadlineExceeded:
 				return false, 0, DeadlineExceeded
 			}
 		default:

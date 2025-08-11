@@ -33,12 +33,12 @@ func headerFromContext(ctx context.Context, name string) string {
 	return ""
 }
 
-func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
+func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		defer func() {
-			if err == nil && telemetry.ShouldSkip(s.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
 				return
 			}
 			logRequest(ctx, info.FullMethod, startTime, req, err)
@@ -47,13 +47,13 @@ func (s *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-func (s *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
+func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		startTime := time.Now()
 		err := handler(srv, ss)
 		ctx := ss.Context()
 		defer func() {
-			if err == nil && telemetry.ShouldSkip(s.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
 				return
 			}
 			logRequest(ctx, info.FullMethod, startTime, srv, err)
