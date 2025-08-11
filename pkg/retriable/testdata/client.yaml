@@ -1,5 +1,4 @@
-hosts:
-- https://localhost:4000
+host: https://localhost:4000
 request:
   retry_limit: 3
   timeout: 2s

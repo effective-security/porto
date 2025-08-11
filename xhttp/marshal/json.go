@@ -39,10 +39,10 @@ const (
 
 func init() {
 
-	jsonDecHandle.BasicHandle.DecodeOptions.ErrorIfNoField = true
+	jsonDecHandle.ErrorIfNoField = true
 	jsonDecHandle.MapType = reflect.TypeOf(map[string]interface{}{})
 
-	jsonEncPPHandle.BasicHandle.EncodeOptions.Canonical = true
+	jsonEncPPHandle.Canonical = true
 	jsonEncPPHandle.Indent = -1
 }
 

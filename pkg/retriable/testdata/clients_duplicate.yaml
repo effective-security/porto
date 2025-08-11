@@ -1,15 +1,14 @@
 clients:
   1:
     hosts:
-    - https://localhost:4000
+      - https://localhost:4000
     request:
       retry_limit: 3
       timeout: 2s
     storage_folder: ~/.config/demo
     auth_token_env_name: DEMO_BEARER_AUTH_KEY
   2:
-    hosts:
-    - https://localhost:4000
+    host: https://localhost:4000
     request:
       retry_limit: 3
       timeout: 2s

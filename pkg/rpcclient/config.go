@@ -47,9 +47,8 @@ type Config struct {
 	// MaxSendMsgSize sets the maximum message size that a server can send to the client.
 	MaxSendMsgSize int
 
-	StorageFolder    string
-	EnvAuthTokenName string
-	UserAgent        string
+	StorageFolder string
+	UserAgent     string
 
 	CallerIdentity credentials.CallerIdentity
 }
@@ -61,5 +60,5 @@ func (c *Config) LoadAuthToken() (*retriable.AuthToken, string, error) {
 
 // Storage returns the current storage
 func (c *Config) Storage() *retriable.Storage {
-	return retriable.OpenStorage(c.StorageFolder, c.Endpoint, c.EnvAuthTokenName)
+	return retriable.OpenStorage(c.StorageFolder, c.Endpoint)
 }
