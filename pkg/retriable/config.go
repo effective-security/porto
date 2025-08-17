@@ -49,6 +49,34 @@ func (c *ClientConfig) Storage() *Storage {
 	return c.storage
 }
 
+func (c *ClientConfig) CheckAuthTokenFromEnv(env string) (bool, error) {
+	val := os.Getenv(env)
+	if val == "" {
+		return false, nil
+	}
+	at, _, err := ParseAuthToken(val, "env://"+env)
+	if err != nil {
+		return true, errors.WithMessage(err, "invalid auth token")
+	}
+	if at.Expired() {
+		return true, errors.New("auth token expired")
+	}
+	c.AuthToken = at
+	c.TokenLocation = "env://" + env
+	return true, nil
+}
+
+func (c *ClientConfig) LoadAuthTokenOrFromEnv(env string) error {
+	ok, err := c.CheckAuthTokenFromEnv(env)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return c.LoadAuthToken()
+}
+
 // LoadAuthToken returns AuthToken
 // returns AuthToken, location, error
 func (c *ClientConfig) LoadAuthToken() error {

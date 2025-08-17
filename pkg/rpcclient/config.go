@@ -3,10 +3,12 @@ package rpcclient
 import (
 	"context"
 	"crypto/tls"
+	"os"
 	"time"
 
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/retriable"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 
@@ -53,6 +55,34 @@ type Config struct {
 	CallerIdentity credentials.CallerIdentity
 	AuthToken      *retriable.AuthToken
 	TokenLocation  string
+}
+
+func (c *Config) CheckAuthTokenFromEnv(env string) (bool, error) {
+	val := os.Getenv(env)
+	if val == "" {
+		return false, nil
+	}
+	at, _, err := retriable.ParseAuthToken(val, "env://"+env)
+	if err != nil {
+		return true, errors.WithMessage(err, "invalid auth token")
+	}
+	if at.Expired() {
+		return true, errors.New("auth token expired")
+	}
+	c.AuthToken = at
+	c.TokenLocation = "env://" + env
+	return true, nil
+}
+
+func (c *Config) LoadAuthTokenOrFromEnv(env string) error {
+	ok, err := c.CheckAuthTokenFromEnv(env)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	return c.LoadAuthToken()
 }
 
 // LoadAuthToken returns AuthToken
