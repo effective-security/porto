@@ -51,11 +51,20 @@ type Config struct {
 	UserAgent     string
 
 	CallerIdentity credentials.CallerIdentity
+	AuthToken      *retriable.AuthToken
+	TokenLocation  string
 }
 
 // LoadAuthToken returns AuthToken
-func (c *Config) LoadAuthToken() (*retriable.AuthToken, string, error) {
-	return c.Storage().LoadAuthToken()
+// returns AuthToken, location, error
+func (c *Config) LoadAuthToken() error {
+	at, location, err := c.Storage().LoadAuthToken()
+	if err != nil {
+		return err
+	}
+	c.AuthToken = at
+	c.TokenLocation = location
+	return nil
 }
 
 // Storage returns the current storage

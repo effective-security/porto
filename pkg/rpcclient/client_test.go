@@ -10,7 +10,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	_, err := rpcclient.New(&rpcclient.Config{}, true)
+	_, err := rpcclient.New(&rpcclient.Config{})
 	assert.EqualError(t, err, "endpoint is required in client config")
 
 	//serv := grpc.NewServer()
@@ -19,7 +19,7 @@ func TestNew(t *testing.T) {
 	require.NoError(t, err)
 	defer lis.Close()
 
-	client, err := rpcclient.NewFromURL(lis.Addr().String(), true)
+	client, err := rpcclient.NewFromURL(lis.Addr().String())
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, client.Opts())

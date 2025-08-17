@@ -51,15 +51,15 @@ type Client struct {
 }
 
 // NewFromURL creates a new client from a URL.
-func NewFromURL(url string, skipAuth bool) (*Client, error) {
+func NewFromURL(url string) (*Client, error) {
 	return New(&Config{
 		Endpoint: url,
-	}, skipAuth)
+	})
 }
 
 // New creates a new client from a given configuration.
-func New(cfg *Config, skipAuth bool) (*Client, error) {
-	return newClient(cfg, skipAuth)
+func New(cfg *Config) (*Client, error) {
+	return newClient(cfg)
 }
 
 // Close shuts down the client's connections.
@@ -81,7 +81,7 @@ func (c *Client) Opts() []grpc.CallOption {
 	return c.callOpts
 }
 
-func newClient(cfg *Config, skipAuth bool) (*Client, error) {
+func newClient(cfg *Config) (*Client, error) {
 	if cfg == nil || len(cfg.Endpoint) == 0 {
 		return nil, errors.Errorf("endpoint is required in client config")
 	}
@@ -132,14 +132,11 @@ func newClient(cfg *Config, skipAuth bool) (*Client, error) {
 
 		if cfg.CallerIdentity != nil {
 			bundle.WithCallerIdentity(cfg.CallerIdentity)
-		} else if !skipAuth {
-			at, location, err := cfg.LoadAuthToken()
-			logger.KV(xlog.DEBUG, "token_location", location)
-
-			if err != nil {
-				return nil, errors.WithMessage(err, "failed to load access token")
-			}
-
+		} else if cfg.AuthToken != nil {
+			at := cfg.AuthToken
+			logger.KV(xlog.DEBUG,
+				"token_location", cfg.TokenLocation,
+				"expires", at.Expires)
 			if at.Expired() {
 				return nil, errors.Errorf("authorization: token expired")
 			}
