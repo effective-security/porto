@@ -32,10 +32,37 @@ type ClientConfig struct {
 
 	// StorageFolder specifies the root folder for keys and token.
 	StorageFolder string `json:"storage_folder,omitempty" yaml:"storage_folder,omitempty"`
+
+	// AuthToken specifies the access token
+	AuthToken *AuthToken `json:"-" yaml:"-"`
+
+	// TokenLocation specifies the location of the token
+	TokenLocation string `json:"-" yaml:"-"`
+
+	storage *Storage `json:"-" yaml:"-"`
 }
 
 func (c *ClientConfig) Storage() *Storage {
-	return OpenStorage(c.StorageFolder, c.Host)
+	if c.storage == nil {
+		c.storage = OpenStorage(c.StorageFolder, c.Host)
+	}
+	return c.storage
+}
+
+// LoadAuthToken returns AuthToken
+// returns AuthToken, location, error
+func (c *ClientConfig) LoadAuthToken() error {
+	storage := c.Storage()
+	if storage == nil {
+		return errors.Errorf("authorization: storage not found")
+	}
+	at, location, err := storage.LoadAuthToken()
+	if err != nil {
+		return err
+	}
+	c.AuthToken = at
+	c.TokenLocation = location
+	return nil
 }
 
 // RequestPolicy contains configuration info for Request policy
@@ -156,8 +183,13 @@ func LoadClient(file string) (*Client, error) {
 	return New(cfg)
 }
 
-// WithAuthorization sets Authorization token
-func (c *Client) WithAuthorization(storage *Storage) error {
+func (c *Client) WithStorage(storage *Storage) *Client {
+	c.Config.storage = storage
+	return c
+}
+
+// SetAuthorization sets Authorization token
+func (c *Client) SetAuthorization() error {
 	host := c.CurrentHost()
 	// Allow to use Bearer only over TLS connection
 	if !strings.HasPrefix(host, "https") &&
@@ -166,37 +198,43 @@ func (c *Client) WithAuthorization(storage *Storage) error {
 		return nil
 	}
 
-	if storage == nil {
-		storage = c.Config.Storage()
+	if c.Config.AuthToken == nil {
+		err := c.Config.LoadAuthToken()
+		if err != nil {
+			return err
+		}
+	}
+	at := c.Config.AuthToken
+	if at.Expired() {
+		return errors.Errorf("authorization: token expired")
 	}
 
-	at, location, err := storage.LoadAuthToken()
-	if err != nil {
-		return err
-	}
 	logger.KV(xlog.DEBUG,
-		"token_location", location,
+		"token_location", c.Config.TokenLocation,
 		"expires", at.Expires)
 
 	if at.Expired() {
 		return errors.Errorf("authorization: token expired")
 	}
 
-	tktype := at.TokenType
 	if at.DpopJkt != "" {
+		storage := c.Config.Storage()
+		if storage == nil {
+			return errors.Errorf("authorization: storage not found")
+		}
 		k, _, err := storage.LoadKey(at.DpopJkt)
 		if err != nil {
 			return errors.WithMessagef(err, "unable to load key for DPoP: %s", at.DpopJkt)
 		}
-		tktype = "DPoP"
+		at.TokenType = "DPoP"
 		c.dpopSigner, err = dpop.NewSigner(k.Key.(crypto.Signer))
 		if err != nil {
 			return errors.WithMessage(err, "unable to create DPoP signer")
 		}
 	}
 	authHeader := at.AccessToken
-	if tktype != "" {
-		authHeader = tktype + " " + authHeader
+	if at.TokenType != "" {
+		authHeader = at.TokenType + " " + authHeader
 	}
 	c.AddHeader(header.Authorization, authHeader)
 

@@ -107,11 +107,6 @@ func TestWithAuthorization(t *testing.T) {
 	tk, err := js.Sign(context.Background(), jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
 	require.NoError(t, err)
 
-	client, err := New(ClientConfig{
-		Host: "https://notused",
-	})
-	require.NoError(t, err)
-
 	storage := OpenStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"), "")
 	defer storage.Clean()
 
@@ -124,7 +119,10 @@ func TestWithAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, fn)
 
-		err = client.WithAuthorization(storage)
+		client, err := New(ClientConfig{
+			Host: "https://notused",
+		})
+		err = client.WithStorage(storage).SetAuthorization()
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "Bearer")
 		assert.Contains(t, client.headers[header.Authorization], tk)
@@ -140,7 +138,10 @@ func TestWithAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, fn)
 
-		err = client.WithAuthorization(storage)
+		client, err := New(ClientConfig{
+			Host: "https://notused",
+		})
+		err = client.WithStorage(storage).SetAuthorization()
 		require.NoError(t, err)
 		assert.Contains(t, client.headers[header.Authorization], "DPoP")
 		assert.Contains(t, client.headers[header.Authorization], tk)
@@ -156,7 +157,11 @@ func TestWithAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, fn)
 
-		err = client.WithAuthorization(storage)
+		client, err := New(ClientConfig{
+			Host: "https://notused",
+		})
+		require.NoError(t, err)
+		err = client.WithStorage(storage).SetAuthorization()
 		assert.EqualError(t, err, "authorization: token expired")
 	})
 }

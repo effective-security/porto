@@ -101,6 +101,7 @@ func (t *AuthToken) Expired() bool {
 }
 
 // ParseAuthToken parses stored token and validates expiration
+// returns AuthToken, location, error
 func ParseAuthToken(rawToken, location string) (*AuthToken, string, error) {
 	t := &AuthToken{
 		Raw:         rawToken,
