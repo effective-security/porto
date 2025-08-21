@@ -55,6 +55,8 @@ type Config struct {
 	CallerIdentity credentials.CallerIdentity
 	AuthToken      *retriable.AuthToken
 	TokenLocation  string
+
+	storage *retriable.Storage `json:"-" yaml:"-"`
 }
 
 func (c *Config) CheckAuthTokenFromEnv(env string) (bool, error) {
@@ -99,5 +101,12 @@ func (c *Config) LoadAuthToken() error {
 
 // Storage returns the current storage
 func (c *Config) Storage() *retriable.Storage {
-	return retriable.OpenStorage(c.StorageFolder, c.Endpoint)
+	if c.storage == nil {
+		c.storage = retriable.OpenStorage(c.StorageFolder, c.Endpoint)
+	}
+	return c.storage
+}
+
+func (c *Config) SetStorage(storage *retriable.Storage) {
+	c.storage = storage
 }
