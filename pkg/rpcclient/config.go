@@ -102,7 +102,7 @@ func (c *Config) LoadAuthToken() error {
 // Storage returns the current storage
 func (c *Config) Storage() *retriable.Storage {
 	if c.storage == nil {
-		c.storage = retriable.OpenStorage(c.StorageFolder, c.Endpoint)
+		c.storage = retriable.NewStorage(c.StorageFolder)
 	}
 	return c.storage
 }
