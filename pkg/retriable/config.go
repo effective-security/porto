@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ type ClientConfig struct {
 
 func (c *ClientConfig) Storage() *Storage {
 	if c.storage == nil {
-		c.storage = OpenStorage(c.StorageFolder, c.Host)
+		c.storage = NewStorage(c.StorageFolder)
 	}
 	return c.storage
 }
@@ -145,6 +146,13 @@ func LoadFactory(file string) (*Factory, error) {
 	err = yaml.Unmarshal(f, &cfg)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "failed to parse config: %s", file)
+	}
+
+	for _, c := range cfg.Clients {
+		hf := HostFolderName(c.Host)
+		if !strings.HasSuffix(c.StorageFolder, hf) {
+			c.StorageFolder = filepath.Join(c.StorageFolder, hf)
+		}
 	}
 
 	return NewFactory(cfg)

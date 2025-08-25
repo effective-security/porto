@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/effective-security/x/configloader"
 	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
@@ -31,11 +32,13 @@ type Storage struct {
 	folder string
 }
 
-// OpenStorage returns Storage
-func OpenStorage(baseFolder, host string) *Storage {
-	folder := ExpandFolder(baseFolder)
-	if host != "" {
-		folder = filepath.Join(folder, HostFolderName(host))
+// NewStorage returns Storage
+func NewStorage(baseFolder string) *Storage {
+	folder, err := homedir.Expand(baseFolder)
+	if err != nil {
+		logger.KV(xlog.ERROR, "baseFolder", baseFolder, "err", err.Error())
+		// fallback
+		folder = baseFolder
 	}
 	return &Storage{folder: folder}
 }
@@ -43,6 +46,21 @@ func OpenStorage(baseFolder, host string) *Storage {
 // Clean removes all stored files
 func (c *Storage) Clean() {
 	os.RemoveAll(c.folder)
+}
+
+// Folder returns the storage folder
+func (c *Storage) Folder() string {
+	return c.folder
+}
+
+// Unmarshal JSON or YAML file to an interface
+func (c *Storage) Unmarshal(file string, v any) error {
+	return configloader.Unmarshal(filepath.Join(c.folder, file), v)
+}
+
+// Marshal saves the interface to a JSON or YAML file
+func (c *Storage) Marshal(file string, v any) error {
+	return configloader.Marshal(filepath.Join(c.folder, file), v)
 }
 
 // SaveAuthToken persists auth token
@@ -131,17 +149,6 @@ func ParseAuthToken(rawToken, location string) (*AuthToken, string, error) {
 	}
 
 	return t, location, nil
-}
-
-// ExpandFolder returns expanded StorageFolder
-func ExpandFolder(dir string) string {
-	if dir == "" {
-		dirname, _ := os.UserHomeDir()
-		// returns default
-		dir = filepath.Join(dirname, ".config", ".retriable")
-	}
-	dir, _ = homedir.Expand(dir)
-	return dir
 }
 
 // ListKeys returns list of DPoP keys in the storage

@@ -66,7 +66,7 @@ func Test_Load(t *testing.T) {
 }
 
 func TestStorageKeys(t *testing.T) {
-	storage := OpenStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	storage := NewStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"))
 	defer storage.Clean()
 
 	assert.Panics(t, func() {
@@ -107,7 +107,7 @@ func TestWithAuthorization(t *testing.T) {
 	tk, err := js.Sign(context.Background(), jwt.CreateClaims("", "subj", js.Issuer(), []string{"test"}, time.Hour, extra))
 	require.NoError(t, err)
 
-	storage := OpenStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"), "")
+	storage := NewStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"))
 	defer storage.Clean()
 
 	fn, err := storage.SaveKey(dk)
