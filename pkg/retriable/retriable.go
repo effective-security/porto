@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/xhttp/correlation"
@@ -25,7 +26,6 @@ import (
 	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
-	"github.com/pkg/errors"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "retriable")

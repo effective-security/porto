@@ -3,7 +3,7 @@ package credentials
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/credentials"
 )
 

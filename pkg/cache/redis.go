@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/pkg/errors"
 	"github.com/redis/go-redis/v9"
 )
 

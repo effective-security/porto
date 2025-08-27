@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
@@ -22,7 +23,6 @@ import (
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/gigawattio/awsarn"
 	"github.com/hashicorp/golang-lru/v2/expirable"
-	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"

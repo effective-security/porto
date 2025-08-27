@@ -17,7 +17,7 @@ package tlsconfig
 import (
 	"crypto/tls"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // cipher suites implemented by Go

@@ -12,10 +12,10 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/xlog"
-	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 	"google.golang.org/grpc/status"
 )

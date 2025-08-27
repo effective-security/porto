@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/configloader"
 	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	jose "github.com/go-jose/go-jose/v3"
 	"github.com/mitchellh/go-homedir"
-	"github.com/pkg/errors"
 )
 
 const (

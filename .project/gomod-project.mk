@@ -188,7 +188,12 @@ generate:
 
 fmt:
 	echo "Running Fmt"
-	go fmt ./...
+	gofmt -s -l -w -r 'interface{} -> any' -r 'github.com/alecthomas/assert -> github.com/stretchr/testify/assert' -r 'fmt.Errorf -> errors.Errorf' -r 'github.com/pkg/errors -> github.com/cockroachdb/errors' .
+
+fmt-check:
+	echo "Running Fmt check"
+	gofmt -d -l -r 'interface{} -> any' -r 'github.com/alecthomas/assert -> github.com/stretchr/testify/assert' -r 'github.com/pkg/errors -> github.com/cockroachdb/errors' .
+	@test -z "$(shell gofmt -l -r 'interface{} -> any' -r 'github.com/alecthomas/assert -> github.com/stretchr/testify/assert' -r 'fmt.Errorf -> errors.Errorf' -r 'github.com/pkg/errors -> github.com/cockroachdb/errors' . | tee /dev/stderr)"
 
 vet:
 	echo "Running vet"

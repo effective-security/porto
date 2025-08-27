@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/guid"
-	"github.com/pkg/errors"
 )
 
 type memProv struct {

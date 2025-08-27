@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/porto/restserver"
@@ -15,7 +16,6 @@ import (
 	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
-	"github.com/pkg/errors"
 	"go.uber.org/dig"
 	"google.golang.org/grpc"
 )

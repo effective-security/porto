@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/retriable"
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 

@@ -3,8 +3,8 @@ package discovery_test
 import (
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/discovery"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +43,7 @@ func TestDiscovery(t *testing.T) {
 	require.EqualError(t, err, "a pointer to interface is required, invalid type: <invalid reflect.Value>")
 
 	err = d.Find(srv, err)
-	require.EqualError(t, err, "non interface type: *errors.fundamental")
+	require.EqualError(t, err, "non interface type: *withstack.withStack")
 
 	err = d.Find(srv, &err)
 	require.EqualError(t, err, "not implemented: <error Value>")
@@ -56,7 +56,7 @@ func TestDiscovery(t *testing.T) {
 	err = d.ForEach(err, func(key string) error {
 		return nil
 	})
-	require.EqualError(t, err, "non interface type: *errors.fundamental")
+	require.EqualError(t, err, "non interface type: *withstack.withStack")
 
 	err = d.ForEach(&nonPointer, func(key string) error {
 		return errors.Errorf("callback failed")

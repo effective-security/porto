@@ -3,7 +3,7 @@ package appinit
 import (
 	"runtime/pprof"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 type cpuProfileCloser struct {
