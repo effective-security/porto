@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/crlcache"
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/pkg/errors"
 )
 
 // TLSInfo provides TLS configuration

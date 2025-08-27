@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -365,7 +365,7 @@ func TestConfig_HandlerNotValid(t *testing.T) {
 
 	c.SetRoleMapper(roleMapper("bob"))
 	_, err = c.NewHandler(delegate)
-	assert.Equal(t, ErrNoPathsConfigured, errors.Cause(err), "Got wrong error when trying to create a Handler with no allowed paths")
+	assert.Equal(t, ErrNoPathsConfigured, errors.Unwrap(err), "Got wrong error when trying to create a Handler with no allowed paths")
 
 	c.AllowAny("/")
 	h, err := c.NewHandler(delegate)
@@ -374,7 +374,7 @@ func TestConfig_HandlerNotValid(t *testing.T) {
 
 	c.SetRoleMapper(nil)
 	_, err = c.NewHandler(delegate)
-	assert.Equal(t, ErrNoRoleMapperSpecified, errors.Cause(err), "Got wrong error when trying to create a Handler with no RoleMapper configured")
+	assert.Equal(t, ErrNoRoleMapperSpecified, errors.Unwrap(err), "Got wrong error when trying to create a Handler with no RoleMapper configured")
 }
 
 func TestConfig_Handler(t *testing.T) {

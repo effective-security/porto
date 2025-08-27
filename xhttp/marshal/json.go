@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/pkg/errors"
 	"github.com/ugorji/go/codec"
 )
 

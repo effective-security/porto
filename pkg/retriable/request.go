@@ -4,7 +4,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pkg/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // lenReader is an interface implemented by many in-memory io.Reader's. Used

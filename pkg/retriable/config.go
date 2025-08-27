@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/mitchellh/go-homedir"
-	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 

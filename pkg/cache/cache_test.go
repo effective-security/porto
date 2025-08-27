@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/docker/docker/api/types/container"
 	"github.com/effective-security/porto/pkg/cache"
 	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/xpki/certutil"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"

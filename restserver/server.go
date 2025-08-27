@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
@@ -19,7 +20,6 @@ import (
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
-	"github.com/pkg/errors"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "rest")

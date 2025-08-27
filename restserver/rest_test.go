@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/x/guid"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/certutil"
 	"github.com/effective-security/xpki/testca"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/suite"
 )
 

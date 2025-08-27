@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/xlog"
-	"github.com/pkg/errors"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "discovery")

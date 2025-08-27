@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/guid"
 	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
-	"github.com/pkg/errors"
 )
 
 // TimeUnit specifies the time unit: 'minutes', 'hours'...

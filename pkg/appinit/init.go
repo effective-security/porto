@@ -6,11 +6,11 @@ import (
 	"os"
 	"runtime/pprof"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/ctl"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xlog/logrotate"
 	"github.com/effective-security/xlog/stackdriver"
-	"github.com/pkg/errors"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "appinit")

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver"
-	"github.com/pkg/errors"
 )
 
 // DefaultTTL specifies default TTL
