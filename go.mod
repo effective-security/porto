@@ -7,8 +7,8 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.3.3+incompatible
 	github.com/effective-security/metrics v0.8.107
-	github.com/effective-security/x v0.15.70
-	github.com/effective-security/xdb v0.23.112
+	github.com/effective-security/x v0.15.71
+	github.com/effective-security/xdb v0.23.116
 	github.com/effective-security/xlog v0.10.45
 	github.com/effective-security/xpki v0.26.235
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
@@ -135,7 +135,7 @@ require (
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
-	golang.org/x/tools v0.35.0 // indirect
+	golang.org/x/tools v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250818200422-3122310a409c // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
