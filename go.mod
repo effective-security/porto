@@ -5,7 +5,7 @@ go 1.24.4
 require (
 	github.com/cockroachdb/errors v1.12.0
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/docker/docker v28.4.0+incompatible
+	github.com/docker/docker v28.5.0+incompatible
 	github.com/effective-security/metrics v0.8.108
 	github.com/effective-security/x v0.15.72
 	github.com/effective-security/xdb v0.24.120
