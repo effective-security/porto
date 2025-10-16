@@ -42,7 +42,12 @@ func (rm *requestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	role := identity.FromRequest(r).Identity().Role()
 	sc := rc.StatusCode()
 
-	status := rm.statusCode(sc)
-	metricskey.HTTPReqPerf.MeasureSince(start, r.Method, status, r.URL.Path)
-	metricskey.HTTPReqByRole.IncrCounter(1, r.Method, status, r.URL.Path, role)
+	// Do not record metrics for 404 errors due to large number of DDoS requests
+	if sc != 404 {
+		status := rm.statusCode(sc)
+		metricskey.HTTPReqPerf.MeasureSince(start, r.Method, status, r.URL.Path)
+		metricskey.HTTPReqByRole.IncrCounter(1, r.Method, status, r.URL.Path, role)
+	} else {
+		metricskey.HTTPReqByRole.IncrCounter(1, r.Method, "404", "unknown", role)
+	}
 }
