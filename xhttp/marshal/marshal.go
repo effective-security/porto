@@ -114,6 +114,9 @@ func httpError(bv interface{}, r *http.Request) {
 }
 
 func logError(r *http.Request, status int, code, message string, cause error) {
+	if status == http.StatusNotFound {
+		return
+	}
 	// notice that we're using 2, so it will actually log where
 	// the error happened, 0 = this function, we don't want that.
 	_, fn, line, _ := runtime.Caller(3)
