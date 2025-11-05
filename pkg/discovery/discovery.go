@@ -12,15 +12,15 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "d
 
 type serviceInfo struct {
 	ServerName string
-	Service    interface{}
+	Service    any
 	Type       reflect.Type
 }
 
 // Discovery provides service discovery interface
 type Discovery interface {
-	Register(server string, service interface{}) error
-	Find(server string, v interface{}) error
-	ForEach(v interface{}, f func(typ string) error) error
+	Register(server string, service any) error
+	Find(server string, v any) error
+	ForEach(v any, f func(typ string) error) error
 }
 
 type disco struct {
@@ -35,7 +35,7 @@ func New() Discovery {
 }
 
 // Register interface
-func (d *disco) Register(server string, service interface{}) error {
+func (d *disco) Register(server string, service any) error {
 	typ := reflect.TypeOf(service)
 
 	logger.KV(xlog.INFO, "server", server, "type", typ)
@@ -55,7 +55,7 @@ func (d *disco) Register(server string, service interface{}) error {
 }
 
 // Find interface
-func (d *disco) Find(server string, v interface{}) error {
+func (d *disco) Find(server string, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return errors.Errorf("a pointer to interface is required, invalid type: %v", rv)
@@ -80,7 +80,7 @@ func (d *disco) Find(server string, v interface{}) error {
 }
 
 // ForEach interface
-func (d *disco) ForEach(v interface{}, f func(typ string) error) error {
+func (d *disco) ForEach(v any, f func(typ string) error) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return errors.Errorf("a pointer to interface is required, invalid type: %v", rv)

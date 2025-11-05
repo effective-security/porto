@@ -36,9 +36,9 @@ func (s *serverStream) SendHeader(md metadata.MD) error {
 func (s *serverStream) SetTrailer(md metadata.MD) {
 	s.ServerStream.SetTrailer(md)
 }
-func (s *serverStream) SendMsg(m interface{}) error {
+func (s *serverStream) SendMsg(m any) error {
 	return s.ServerStream.SendMsg(m)
 }
-func (s *serverStream) RecvMsg(m interface{}) error {
+func (s *serverStream) RecvMsg(m any) error {
 	return s.ServerStream.RecvMsg(m)
 }

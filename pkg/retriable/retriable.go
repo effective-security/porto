@@ -67,10 +67,10 @@ type GenericHTTP interface {
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// requestBody can be io.Reader, []byte, or an object to be JSON encoded
 	// responseBody can be io.Writer, or a struct to decode JSON into.
-	Request(ctx context.Context, method string, host string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	Request(ctx context.Context, method string, host string, path string, requestBody any, responseBody any) (http.Header, int, error)
 
 	// RequestURL is similar to Request but uses raw URL to one host
-	RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error)
 
 	// HeadTo makes HEAD request against the specified hosts.
 	// The supplied hosts are tried in order until one succeeds.
@@ -95,7 +95,7 @@ type GetRequester interface {
 	// the resulting HTTP body will be decoded into the supplied body parameter, and the
 	// http status code returned.
 	// The client must be configured with the hosts list.
-	Get(ctx context.Context, path string, body interface{}) (http.Header, int, error)
+	Get(ctx context.Context, path string, body any) (http.Header, int, error)
 }
 
 // PostRequester defines HTTP Post interface
@@ -106,7 +106,7 @@ type PostRequester interface {
 	// into a go error, waits & retries for rate limiting errors will be applied based on the
 	// client config.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	Post(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error)
 }
 
 // PutRequester defines HTTP Put interface
@@ -117,7 +117,7 @@ type PutRequester interface {
 	// into a go error, waits & retries for rate limiting errors will be applied based on the
 	// client config.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error)
+	Put(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error)
 }
 
 // DeleteRequester defines HTTP Delete interface
@@ -126,7 +126,7 @@ type DeleteRequester interface {
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	// the resulting HTTP body will be decoded into the supplied body parameter, and the
 	// http status code returned.
-	Delete(ctx context.Context, path string, body interface{}) (http.Header, int, error)
+	Delete(ctx context.Context, path string, body any) (http.Header, int, error)
 }
 
 // HTTPClient defines a number of generalized HTTP request handling wrappers
@@ -575,7 +575,7 @@ func DefaultPolicy() Policy {
 }
 
 // RequestURL is similar to Request but uses raw URL to one host
-func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, 0, errors.WithStack(err)
@@ -597,7 +597,7 @@ func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestB
 // path should be an absolute URI path, i.e. /foo/bar/baz
 // requestBody can be io.Reader, []byte, or an object to be JSON encoded
 // responseBody can be io.Writer, or a struct to decode JSON into.
-func (c *Client) Request(ctx context.Context, method string, host string, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+func (c *Client) Request(ctx context.Context, method string, host string, path string, requestBody any, responseBody any) (http.Header, int, error) {
 	var body io.ReadSeeker
 
 	if requestBody != nil {
@@ -878,7 +878,7 @@ func debugResponse(w *http.Response, body bool) {
 // DecodeResponse will look at the http response, and map it back to either
 // the body parameters, or to an error
 // [retrying rate limit errors should be done before this]
-func (c *Client) DecodeResponse(resp *http.Response, body interface{}) (http.Header, int, error) {
+func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int, error) {
 	debugResponse(resp, resp.StatusCode >= 300)
 	if resp.StatusCode == http.StatusNoContent {
 		return resp.Header, resp.StatusCode, nil

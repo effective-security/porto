@@ -42,8 +42,8 @@ type WriteHTTPResponse interface {
 //		x, err := doSomething()
 //		WriteJSON(logger,w,r,err,x)
 //	and if there was an error, that's what'll get returned
-func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
-	var body interface{}
+func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
+	var body any
 	for i := range bodies {
 		if bodies[i] != nil {
 			body = bodies[i]
@@ -93,7 +93,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...interface{}) {
 	}
 }
 
-func httpError(bv interface{}, r *http.Request) {
+func httpError(bv any, r *http.Request) {
 	if e, ok := bv.(*httperror.Error); ok {
 		logError(r, e.HTTPStatus, e.Code, e.Message, e.Cause())
 	} else if e, ok := bv.(*httperror.ManyError); ok {
@@ -154,7 +154,7 @@ func logError(r *http.Request, status int, code, message string, cause error) {
 }
 
 // WritePlainJSON will serialize the supplied body parameter as a http response.
-func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, printSetting PrettyPrintSetting) {
+func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSetting PrettyPrintSetting) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(statusCode)
 
@@ -163,7 +163,7 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body interface{}, pri
 }
 
 // NewRequest returns http.Request
-func NewRequest(method string, url string, req interface{}) (*http.Request, error) {
+func NewRequest(method string, url string, req any) (*http.Request, error) {
 	var body io.Reader
 
 	switch val := req.(type) {

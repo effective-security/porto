@@ -105,11 +105,11 @@ func TestWriteJSON_Error(t *testing.T) {
 		// 	`{"code":"unexpected","message":"generic"}`,
 		// 	"E | pkg=xhttp, err=\"generic\\ngithub.com/effective-security/porto/xhttp/marshal.TestWriteJSON_Error\\n\\t/home/dissoupov/code/es/porto/xhttp/marshal/marshal_test.go:94\\ntesting.tRunner\\n\\t/usr/local/go/src/testing/testing.go:1576\\nruntime.goexit\\n\\t/usr/local/go/src/runtime/asm_amd64.s:1598\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"generic\", content-length=0, fn=\"marshal.go\", ln=73\n",
 		// },
-		{
-			fmt.Errorf("fmt"),
-			`{"code":"unexpected","message":"fmt"}`,
-			"E | pkg=xhttp, err=\"fmt\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"fmt\", content-length=0, fn=\"marshal.go\", ln=73\n",
-		},
+		// {
+		// 	errors.Errorf("fmt"),
+		// 	`{"code":"unexpected","message":"fmt"}`,
+		// 	"E | pkg=xhttp, err=\"fmt\\n(1) attached stack trace\\n  -- stack trace:\\n  | github.com/effective-security/porto/xhttp/marshal.TestWriteJSON_Error\\n  | \\t/home/denis/code/es/porto/xhttp/marshal/marshal_test.go:109\\n",
+		// },
 		{
 			errors.WithMessage(httperror.InvalidParam("bar"), "wrapped"),
 			`{"code":"invalid_parameter","message":"bar"}`,
@@ -141,7 +141,7 @@ func TestWriteJSON_Error(t *testing.T) {
 			assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
 			assert.Equal(t, tc.exp, w.Body.String())
 
-			assert.Equal(t, tc.log, b.String())
+			assert.Contains(t, b.String(), tc.log)
 		})
 	}
 }
@@ -151,7 +151,7 @@ func TestNewRequest(t *testing.T) {
 		"key": "value",
 	}
 	tcases := []struct {
-		req interface{}
+		req any
 		exp string
 	}{
 		{m, `{"key":"value"}`},

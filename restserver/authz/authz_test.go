@@ -428,7 +428,7 @@ func TestNewUnaryInterceptor(t *testing.T) {
 	require.NoError(t, err)
 
 	unary := c.NewUnaryInterceptor()
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+	handler := func(ctx context.Context, req any) (any, error) {
 		return nil, nil
 	}
 

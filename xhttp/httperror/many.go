@@ -79,7 +79,7 @@ func (m *ManyError) WithCause(err error) *ManyError {
 }
 
 // NewMany builds new ManyError instance, build message string along the way
-func NewMany(status int, code string, msgFormat string, vals ...interface{}) *ManyError {
+func NewMany(status int, code string, msgFormat string, vals ...any) *ManyError {
 	return &ManyError{
 		HTTPStatus: status,
 		RPCStatus:  statusCode[code],

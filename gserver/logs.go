@@ -34,7 +34,7 @@ func headerFromContext(ctx context.Context, name string) string {
 }
 
 func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		defer func() {
@@ -62,7 +62,7 @@ func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
 	}
 }
 
-func logRequest(ctx context.Context, responseType string, startTime time.Time, req interface{}, err error) {
+func logRequest(ctx context.Context, responseType string, startTime time.Time, req any, err error) {
 	duration := time.Since(startTime)
 	expensiveRequest := duration > WarnUnaryRequestLatency
 

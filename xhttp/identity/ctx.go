@@ -4,7 +4,9 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"runtime/debug"
 
 	"github.com/effective-security/porto/pkg/streamctx"
 	"github.com/effective-security/porto/xhttp/httperror"
@@ -164,8 +166,18 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 // NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
 // identity to the context
 func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		ctx, err := createIdentityContext(ctx, info.FullMethod, identityMapper)
+	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.ContextKV(ctx, xlog.ERROR,
+					"reason", "panic",
+					"action", si.FullMethod,
+					"err", rec,
+					"stack", string(debug.Stack()))
+				err = errors.New("unhandled exception")
+			}
+		}()
+		ctx, err = createIdentityContext(ctx, si.FullMethod, identityMapper)
 		if err != nil {
 			return nil, err
 		}

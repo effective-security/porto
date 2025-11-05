@@ -59,7 +59,7 @@ func Test_ClientIP(t *testing.T) {
 func Test_AddToContext(t *testing.T) {
 	ctx := AddToContext(
 		context.Background(),
-		NewRequestContext(NewIdentity("r", "n", "", map[string]interface{}{"email": "test"}, "", "")),
+		NewRequestContext(NewIdentity("r", "n", "", map[string]any{"email": "test"}, "", "")),
 	)
 
 	rqCtx := FromContext(ctx)
@@ -126,7 +126,7 @@ func Test_grpcFromContext(t *testing.T) {
 
 	t.Run("default_guest", func(t *testing.T) {
 		unary := NewAuthUnaryInterceptor(GuestIdentityForContext)
-		_, _ = unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, _ = unary(context.Background(), nil, info, func(ctx context.Context, req any) (any, error) {
 			rt := FromContext(ctx)
 			require.NotNil(t, rt)
 			require.NotNil(t, rt.Identity())
@@ -140,7 +140,7 @@ func Test_grpcFromContext(t *testing.T) {
 			return NewIdentity("test", "", "", nil, "", ""), nil
 		}
 		unary := NewAuthUnaryInterceptor(def)
-		handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handler := func(ctx context.Context, req any) (any, error) {
 			rt := FromContext(ctx)
 			require.NotNil(t, rt)
 			require.NotNil(t, rt.Identity())
@@ -155,7 +155,7 @@ func Test_grpcFromContext(t *testing.T) {
 			return nil, errors.New("invalid request")
 		}
 		unary := NewAuthUnaryInterceptor(def)
-		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req any) (any, error) {
 			return nil, errors.New("some error")
 		})
 		require.Error(t, err)

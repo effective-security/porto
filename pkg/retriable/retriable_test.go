@@ -37,8 +37,8 @@ var (
 )
 
 // ensure compiles
-var _ = interface{}(&retriable.Client{}).(retriable.HTTPClient)
-var _ = interface{}(&retriable.Client{}).(retriable.GenericHTTP)
+var _ = any(&retriable.Client{}).(retriable.HTTPClient)
+var _ = any(&retriable.Client{}).(retriable.GenericHTTP)
 
 func TestMain(m *testing.M) {
 	//xlog.SetGlobalLogLevel(xlog.DEBUG)
@@ -726,8 +726,8 @@ func Test_RetriableBody(t *testing.T) {
 
 	tcases := []struct {
 		name string
-		req  interface{}
-		res  interface{}
+		req  any
+		res  any
 	}{
 		{
 			name: "bytes",

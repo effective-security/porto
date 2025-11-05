@@ -188,7 +188,10 @@ generate:
 
 fmt:
 	echo "Running Fmt"
-	gofmt -s -l -w -r 'interface{} -> any' -r 'github.com/alecthomas/assert -> github.com/stretchr/testify/assert' -r 'fmt.Errorf -> errors.Errorf' -r 'github.com/pkg/errors -> github.com/cockroachdb/errors' .
+	gofmt -s -l -w -r 'interface{} -> any' ./
+	gofmt -s -l -w -r 'github.com/alecthomas/assert -> github.com/stretchr/testify/assert' ./
+	gofmt -s -l -w -r 'fmt.Errorf -> errors.Errorf' ./
+	gofmt -s -l -w -r '"github.com/pkg/errors" -> "github.com/cockroachdb/errors"' ./
 
 fmt-check:
 	echo "Running Fmt check"

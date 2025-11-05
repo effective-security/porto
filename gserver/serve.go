@@ -436,7 +436,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 }
 
 func panicInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				logger.ContextKV(ctx, xlog.ERROR,

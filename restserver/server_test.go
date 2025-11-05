@@ -122,7 +122,7 @@ func Test_NewServer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, server)
 
-	if _, ok := interface{}(server).(rest.Server); !ok {
+	if _, ok := any(server).(rest.Server); !ok {
 		require.Fail(t, "ensure interface")
 	}
 
@@ -177,7 +177,7 @@ func Test_NewServerWithGracefulShutdownSet(t *testing.T) {
 
 	server.WithShutdownTimeout(time.Second * 5)
 
-	if _, ok := interface{}(server).(rest.Server); !ok {
+	if _, ok := any(server).(rest.Server); !ok {
 		require.Fail(t, "ensure interface")
 	}
 

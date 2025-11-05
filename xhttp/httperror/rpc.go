@@ -12,7 +12,7 @@ import (
 )
 
 // NewGrpcFromCtx returns new GRPC error
-func NewGrpcFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals ...interface{}) *Error {
+func NewGrpcFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals ...any) *Error {
 	hs := codeStatus[code]
 	e := &Error{
 		HTTPStatus: hs,
@@ -29,7 +29,7 @@ func NewGrpcFromCtx(ctx context.Context, code codes.Code, msgFormat string, vals
 }
 
 // NewGrpc returns new GRPC error
-func NewGrpc(code codes.Code, msgFormat string, vals ...interface{}) *Error {
+func NewGrpc(code codes.Code, msgFormat string, vals ...any) *Error {
 	hs := codeStatus[code]
 	e := &Error{
 		HTTPStatus: hs,

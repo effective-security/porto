@@ -566,7 +566,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 	if len(peer.URIs) == 1 && peer.URIs[0].Scheme == "spiffe" {
 		spiffe := peer.URIs[0].String()
 		role := values.StringsCoalesce(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
-		claims := map[string]interface{}{
+		claims := map[string]any{
 			"role":   role,
 			"sub":    peer.Subject.String(),
 			"iss":    peer.Issuer.String(),
