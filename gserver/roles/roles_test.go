@@ -41,7 +41,7 @@ func Test_All(t *testing.T) {
 		"sub":    "12234",
 		"email":  "denis@trusty.com",
 		"tenant": "t12341234",
-		"cnf": map[string]interface{}{
+		"cnf": map[string]any{
 			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
 	}
@@ -163,7 +163,7 @@ func TestInvalidIssuer(t *testing.T) {
 		"sub":   "12234",
 		"iss":   "issuer",
 		"email": "denis@trusty.com",
-		"cnf": map[string]interface{}{
+		"cnf": map[string]any{
 			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
 	}
@@ -247,7 +247,7 @@ func TestInvalidAudience(t *testing.T) {
 		"iss":   "expected_issuer",
 		"aud":   []string{"aud"},
 		"email": "denis@trusty.com",
-		"cnf": map[string]interface{}{
+		"cnf": map[string]any{
 			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
 		},
 	}
@@ -368,7 +368,7 @@ func Test_DPoPInvalid(t *testing.T) {
 		mock := mockJWT{
 			claims: jwt.MapClaims{
 				"sub": "denis@trusty.com",
-				"cnf": map[string]interface{}{
+				"cnf": map[string]any{
 					dpop.CnfThumbprint: "mismatch",
 				},
 			},

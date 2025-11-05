@@ -40,7 +40,7 @@ const (
 func init() {
 
 	jsonDecHandle.ErrorIfNoField = true
-	jsonDecHandle.MapType = reflect.TypeOf(map[string]interface{}{})
+	jsonDecHandle.MapType = reflect.TypeOf(map[string]any{})
 
 	jsonEncPPHandle.Canonical = true
 	jsonEncPPHandle.Indent = -1
@@ -81,7 +81,7 @@ func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder {
 
 // EncodeBytes is a helper that takes the supplied go value, and encoded it to json
 // and returned the byte slice containing the encoded value.
-func EncodeBytes(printSetting PrettyPrintSetting, value interface{}) ([]byte, error) {
+func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error) {
 	var b []byte
 	err := codec.NewEncoderBytes(&b, encoderHandle(printSetting)).Encode(value)
 	if err != nil {
@@ -92,7 +92,7 @@ func EncodeBytes(printSetting PrettyPrintSetting, value interface{}) ([]byte, er
 
 // DecodeBytes is a helper that takes the supplied json and decodes it into
 // the supplied result instance.
-func DecodeBytes(data []byte, result interface{}) error {
+func DecodeBytes(data []byte, result any) error {
 	err := codec.NewDecoderBytes(data, DecoderHandle()).Decode(result)
 	if err != nil {
 		return errors.Wrap(err, "failed to decode")
@@ -102,7 +102,7 @@ func DecodeBytes(data []byte, result interface{}) error {
 
 // Decode will read the json from the supplied reader,
 // and decode it into the supplied result instance.
-func Decode(r io.Reader, result interface{}) error {
+func Decode(r io.Reader, result any) error {
 	// codec can make many little reads from the reader, so wrap it in a buffered reader
 	// to keep perf lively
 	err := codec.NewDecoder(bufio.NewReader(r), DecoderHandle()).Decode(result)
@@ -115,7 +115,7 @@ func Decode(r io.Reader, result interface{}) error {
 // DecodeBody will read the json from the HTTP request body,
 // and decode it into the supplied result instance.
 // If error occured, then it will write to the response
-func DecodeBody(w http.ResponseWriter, r *http.Request, result interface{}) error {
+func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error {
 	err := Decode(r.Body, result)
 	if err != nil {
 		WriteJSON(

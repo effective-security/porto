@@ -34,7 +34,7 @@ func Test_Nonce(t *testing.T) {
 
 	ctx := context.Background()
 
-	var res map[string]interface{}
+	var res map[string]any
 	_, _, err = client.Get(ctx, "/test", &res)
 	require.NoError(t, err)
 	assert.Len(t, np.nonces, 1)

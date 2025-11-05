@@ -32,7 +32,7 @@ func (c *Client) Head(ctx context.Context, path string) (http.Header, int, error
 // into a go error, waits & retries for rate limiting errors will be applied based on the
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Post(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+func (c *Client) Post(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error) {
 	return c.Request(ctx, "POST", c.host, path, requestBody, responseBody)
 }
 
@@ -42,7 +42,7 @@ func (c *Client) Post(ctx context.Context, path string, requestBody interface{},
 // into a go error, waits & retries for rate limiting errors will be applied based on the
 // client config.
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, responseBody interface{}) (http.Header, int, error) {
+func (c *Client) Put(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error) {
 	return c.Request(ctx, "PUT", c.host, path, requestBody, responseBody)
 }
 
@@ -53,7 +53,7 @@ func (c *Client) Put(ctx context.Context, path string, requestBody interface{}, 
 // into an go error.
 // If configured, this call will wait & retry on rate limit and leader election errors
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Get(ctx context.Context, path string, body interface{}) (http.Header, int, error) {
+func (c *Client) Get(ctx context.Context, path string, body any) (http.Header, int, error) {
 	return c.Request(ctx, "GET", c.host, path, nil, body)
 }
 
@@ -64,6 +64,6 @@ func (c *Client) Get(ctx context.Context, path string, body interface{}) (http.H
 // into an go error.
 // If configured, this call will wait & retry on rate limit and leader election errors
 // path should be an absolute URI path, i.e. /foo/bar/baz
-func (c *Client) Delete(ctx context.Context, path string, body interface{}) (http.Header, int, error) {
+func (c *Client) Delete(ctx context.Context, path string, body any) (http.Header, int, error) {
 	return c.Request(ctx, "DELETE", c.host, path, nil, body)
 }

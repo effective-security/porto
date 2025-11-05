@@ -474,7 +474,7 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // NewUnaryInterceptor returns grpc.UnaryServerInterceptor to check access
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		idn := c.grpcRoleMapper(ctx)
 		userAgent := headerFromContext(ctx, "user-agent")
 		if !c.isAllowed(ctx, info.FullMethod, userAgent, idn) {

@@ -32,7 +32,7 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
-func NewIdentity(role, subject, tenant string, claims map[string]interface{}, accessToken, tokenType string) Identity {
+func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string) Identity {
 	id := identity{
 		role:        role,
 		subject:     subject,

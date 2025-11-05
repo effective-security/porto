@@ -58,7 +58,7 @@ type Task interface {
 	// SetNextRun updates next schedule time
 	SetNextRun(time.Duration) Task
 	// Do accepts a function that should be called every time the task runs
-	Do(taskName string, task interface{}, params ...interface{}) Task
+	Do(taskName string, task any, params ...any) Task
 	// IsRunning return the status
 	IsRunning() bool
 	// SetPublisher sets a publisher for the task, when the status changes
@@ -267,7 +267,7 @@ func (j *task) IsRunning() bool {
 }
 
 // Do accepts a function that should be called every time the task runs
-func (j *task) Do(taskName string, taskFunc interface{}, params ...interface{}) Task {
+func (j *task) Do(taskName string, taskFunc any, params ...any) Task {
 	typ := reflect.TypeOf(taskFunc)
 	if typ.Kind() != reflect.Func {
 		logger.Panic("only function can be scheduled into the task queue")
@@ -318,7 +318,7 @@ func (s *Schedule) at(hour, minutes int) *Schedule {
 }
 
 // for given function fn, get the name of function.
-func getFunctionName(fn interface{}) string {
+func getFunctionName(fn any) string {
 	return runtime.FuncForPC(reflect.ValueOf((fn)).Pointer()).Name()
 }
 
