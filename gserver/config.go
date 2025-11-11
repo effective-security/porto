@@ -67,6 +67,9 @@ type Config struct {
 
 	// MaxSendMsgSize sets the maximum message size that a server can send to the client.
 	MaxSendMsgSize int `json:"max_send_msg_size,omitempty" yaml:"max_send_msg_size,omitempty"`
+
+	// HTTPHeaders sets the HTTP headers to be sent to the client.
+	HTTPHeaders map[string]string `json:"http_headers,omitempty" yaml:"http_headers,omitempty"`
 }
 
 // KeepAliveCfg settings

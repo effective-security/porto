@@ -490,6 +490,14 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				http.Error(w, "unhandled exception", http.StatusInternalServerError)
 			}
 		}()
+
+		if len(sctx.cfg.HTTPHeaders) > 0 {
+			wh := w.Header()
+			for k, v := range sctx.cfg.HTTPHeaders {
+				wh.Set(k, v)
+			}
+		}
+
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
 			origin := r.Header.Get("Origin")
