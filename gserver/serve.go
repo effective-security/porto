@@ -381,6 +381,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		panicInterceptor(),
+		NewRequestValidationUnaryInterceptor(),
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
@@ -603,4 +604,21 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
+}
+
+type Validator interface {
+	Validate(ctx context.Context) error
+}
+
+// NewRequestValidationUnaryInterceptor returns grpc.UnaryServerInterceptor that
+// validates the request
+func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+		if validator, ok := req.(Validator); ok {
+			if err := validator.Validate(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return handler(ctx, req)
+	}
 }
