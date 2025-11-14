@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/maintnotifications"
 )
 
 type redisProv struct {
@@ -40,6 +41,10 @@ func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 	if cfg.Password != "" {
 		options.Username = cfg.User
 		options.Password = cfg.Password
+	}
+
+	options.MaintNotificationsConfig = &maintnotifications.Config{
+		Mode: maintnotifications.ModeDisabled,
 	}
 
 	if cfg.TTL == 0 {
