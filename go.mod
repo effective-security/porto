@@ -20,7 +20,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/redis/go-redis/v9 v9.16.0
+	github.com/redis/go-redis/v9 v9.17.0
 	github.com/rs/cors v1.11.1
 	github.com/soheilhy/cmux v0.1.5
 	github.com/stretchr/testify v1.11.1
