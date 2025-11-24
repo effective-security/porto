@@ -93,7 +93,8 @@ func logRequest(ctx context.Context, responseType string, startTime time.Time, r
 				code = codes.Internal
 			}
 		}
-		if code != codes.NotFound {
+		// Do not log client errors
+		if code != codes.NotFound && code != codes.InvalidArgument && code != codes.Canceled && code != codes.PermissionDenied && code != codes.Unauthenticated {
 			logError(ctx, code, responseType, err, cause)
 		}
 	}
@@ -104,7 +105,10 @@ func logRequest(ctx context.Context, responseType string, startTime time.Time, r
 	}
 
 	// Do not record metrics for 404 errors due to large number of DDoS requests
-	if code != codes.NotFound {
+	switch code {
+	case codes.NotFound:
+		metricskey.GRPCReqByRole.IncrCounter(1, "unknown", "404", role)
+	default:
 		logger.ContextKV(ctx, l,
 			"req", reflect.TypeOf(req),
 			"res", responseType,
@@ -116,8 +120,6 @@ func logRequest(ctx context.Context, responseType string, startTime time.Time, r
 		codeName := code.String()
 		metricskey.GRPCReqPerf.MeasureSince(startTime, responseType, codeName)
 		metricskey.GRPCReqByRole.IncrCounter(1, responseType, codeName, role)
-	} else {
-		metricskey.GRPCReqByRole.IncrCounter(1, "unknown", "404", role)
 	}
 }
 
