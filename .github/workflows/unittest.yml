@@ -72,7 +72,7 @@ jobs:
           GIT_USER: ${{ github.actor }}
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Fetch History
         run: git fetch --prune --unshallow
