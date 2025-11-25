@@ -99,24 +99,31 @@ func logRequest(ctx context.Context, responseType string, startTime time.Time, r
 		}
 	}
 
-	l := xlog.TRACE
-	if expensiveRequest {
-		l = xlog.WARNING
-	}
-
 	// Do not record metrics for 404 errors due to large number of DDoS requests
 	switch code {
 	case codes.NotFound:
 		metricskey.GRPCReqByRole.IncrCounter(1, "unknown", "404", role)
 	default:
-		logger.ContextKV(ctx, l,
-			"req", reflect.TypeOf(req),
-			"res", responseType,
-			"remote", remote,
-			"ua", userAgent,
-			"duration", duration.Milliseconds(),
-			"code", code,
-		)
+		if expensiveRequest {
+			logger.ContextKV(ctx, xlog.WARNING,
+				"req", reflect.TypeOf(req),
+				"res", responseType,
+				"remote", remote,
+				"ua", userAgent,
+				"duration", duration.Milliseconds(),
+				"code", code,
+				"reason", "slow_request",
+			)
+		} else {
+			logger.ContextKV(ctx, xlog.TRACE,
+				"req", reflect.TypeOf(req),
+				"res", responseType,
+				"remote", remote,
+				"ua", userAgent,
+				"duration", duration.Milliseconds(),
+				"code", code,
+			)
+		}
 		codeName := code.String()
 		metricskey.GRPCReqPerf.MeasureSince(startTime, responseType, codeName)
 		metricskey.GRPCReqByRole.IncrCounter(1, responseType, codeName, role)

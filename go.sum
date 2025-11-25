@@ -141,8 +141,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/ebitengine/purego v0.8.4 h1:CF7LEKg5FFOsASUj0+QwaXf8Ht6TlFxg09+S9wz0omw=
 github.com/ebitengine/purego v0.8.4/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/effective-security/metrics v0.8.119 h1:QT/9HL2ixDsktgXpczjtnufKGK3v2DlGt7Ov1eXtACM=
-github.com/effective-security/metrics v0.8.119/go.mod h1:CPLBhjCNQEw+c1IhMXiToPC6VtoVQ71HKi1ldmezEic=
+github.com/effective-security/metrics v0.8.121 h1:rf3tathRjGYNGr2lY5MWIzR26Lz1Vi7tGVVMc33AmWU=
+github.com/effective-security/metrics v0.8.121/go.mod h1:XwshTFN1KIdY3bsrkVlESi1SsISut1BNmuLNf0+kQ28=
 github.com/effective-security/x v0.15.77 h1:WRbnVX3BbUWuJ2q2aEE1XHm/szXydGtTNF5pXRarGCc=
 github.com/effective-security/x v0.15.77/go.mod h1:L8ivEXMokd31NpMJSHWKNtH4tkVOI2nnHmotkOe3pNE=
 github.com/effective-security/xdb v0.24.128 h1:5SLJJzpGmZWZwApCCNuQMMtfWYuhZJKD2uDCPhZoyEs=
@@ -522,8 +522,8 @@ google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba h1:Ze6qXW0j37YCqZd
 google.golang.org/genproto v0.0.0-20251111163417-95abcf5c77ba/go.mod h1:4FLPzLA8eGAktPOTemJGDgDYRpLYwrNu4u2JtWINhnI=
 google.golang.org/genproto/googleapis/api v0.0.0-20251111163417-95abcf5c77ba h1:B14OtaXuMaCQsl2deSvNkyPKIzq3BjfxQp8d00QyWx4=
 google.golang.org/genproto/googleapis/api v0.0.0-20251111163417-95abcf5c77ba/go.mod h1:G5IanEx8/PgI9w6CFcYQf7jMtHQhZruvfM1i3qOqk5U=
-google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba h1:UKgtfRM7Yh93Sya0Fo8ZzhDP4qBckrrxEr2oF5UIVb8=
-google.golang.org/genproto/googleapis/rpc v0.0.0-20251111163417-95abcf5c77ba/go.mod h1:7i2o+ce6H/6BluujYR+kqX3GKH+dChPTQU19wjRPiGk=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20251124214823-79d6a2a48846 h1:Wgl1rcDNThT+Zn47YyCXOXyX/COgMTIdhJ717F0l4xk=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20251124214823-79d6a2a48846/go.mod h1:7i2o+ce6H/6BluujYR+kqX3GKH+dChPTQU19wjRPiGk=
 google.golang.org/grpc v1.19.0/go.mod h1:mqu4LbDTu4XGKhr4mRzUsmM4RtVoemTSY81AxZiDr8c=
 google.golang.org/grpc v1.23.0/go.mod h1:Y5yQAOtifL1yxbo5wqy6BxZv8vAUGQwXBOALyacEbxg=
 google.golang.org/grpc v1.25.1/go.mod h1:c3i+UQWmh7LiEpx4sFZnkU36qjEYZ0imhYfXVyQciAY=
