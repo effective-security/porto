@@ -20,7 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var ctx = identity.AddToContext(context.Background(), identity.NewRequestContext(nil))
+var ctx = identity.AddToContext(context.Background(), identity.NewRequestContext(nil, "/test"))
 
 func Test_NewConfig(t *testing.T) {
 	_, err := New(&Config{Allow: []string{"/a"}})

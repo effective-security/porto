@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 )
 
@@ -105,11 +106,8 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"path", r.URL.Path,
 		"status", rw.statusCode,
 		"bytes", rw.bodySize,
-		"time", dur.Nanoseconds()/l.cfg.granularity,
-		"remote", r.RemoteAddr,
+		"duration", dur.Nanoseconds()/l.cfg.granularity,
+		"remote", identity.ClientIPFromRequest(r),
 		"agent", agent,
-		// use and role added to ctx
-		//"role", idn.Role(),
-		//"user", idn.Subject(),
 	)
 }

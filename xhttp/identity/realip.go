@@ -1,11 +1,14 @@
 package identity
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
 
 	"github.com/effective-security/x/netutil"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 // ClientIPFromRequest return client's real public IP address from http request headers.
@@ -43,4 +46,24 @@ func ClientIPFromRequest(r *http.Request) string {
 
 	// If nothing succeed, return X-Real-IP
 	return xRealIP
+}
+
+func ClientIPFromGRPC(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		vals := md.Get("x-forwarded-for")
+		if len(vals) > 0 {
+			return vals[0]
+		}
+		vals = md.Get("x-real-ip")
+		if len(vals) > 0 {
+			return vals[0]
+		}
+	}
+
+	peerInfo, ok := peer.FromContext(ctx)
+	if ok {
+		return peerInfo.Addr.String()
+	}
+	return ""
 }
