@@ -9,11 +9,14 @@ import (
 	"runtime/debug"
 
 	"github.com/effective-security/porto/pkg/streamctx"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -31,12 +34,16 @@ const (
 type RequestContext struct {
 	identity Identity
 	clientIP string
+	// target of the request, e.g. HTTP path or gRPC method
+	target    string
+	userAgent string
 }
 
 // NewRequestContext creates a request context with a specific identity.
-func NewRequestContext(id Identity) *RequestContext {
+func NewRequestContext(id Identity, target string) *RequestContext {
 	return &RequestContext{
 		identity: id,
+		target:   target,
 	}
 }
 
@@ -45,6 +52,9 @@ func NewRequestContext(id Identity) *RequestContext {
 type Context interface {
 	Identity() Identity
 	ClientIP() string
+	// Target of the request, e.g. HTTP path or gRPC method
+	Target() string
+	UserAgent() string
 }
 
 // FromContext extracts the RequestContext stored inside a go context. Returns null if no such value exists.
@@ -63,9 +73,19 @@ func AddToContext(ctx context.Context, rq *RequestContext) context.Context {
 	return context.WithValue(ctx, keyContext, rq)
 }
 
-// FromRequest returns the full context ascocicated with this http request.
+// FromRequest returns the full context associated with this http request.
 func FromRequest(r *http.Request) *RequestContext {
-	return FromContext(r.Context())
+	c := FromContext(r.Context())
+	if c.target == "" {
+		c.target = r.URL.Path
+	}
+	if c.clientIP == "" {
+		c.clientIP = ClientIPFromRequest(r)
+	}
+	if c.userAgent == "" {
+		c.userAgent = r.Header.Get(header.UserAgent)
+	}
+	return c
 }
 
 // NewContextHandler returns a handler that will extact the role & contextID from the request
@@ -76,12 +96,14 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 		var rctx *RequestContext
 		v := r.Context().Value(keyContext)
 		if v == nil {
+			target := r.URL.Path
 			clientIP := ClientIPFromRequest(r)
 			idn, err := identityMapper(r)
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.WARNING,
 					"reason", "identityMapper",
 					"ip", clientIP,
+					"target", target,
 					"err", err.Error())
 
 				marshal.WriteJSON(w, r, httperror.Unauthorized("invalid identity: %s", err.Error()))
@@ -92,8 +114,10 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			}
 
 			rctx = &RequestContext{
-				identity: idn,
-				clientIP: clientIP,
+				identity:  idn,
+				clientIP:  clientIP,
+				target:    target,
+				userAgent: r.Header.Get(header.UserAgent),
 			}
 
 			var email string
@@ -119,6 +143,14 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 
 var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "")
 
+func getMdHeader(md metadata.MD, name string) string {
+	vals := md.Get(name)
+	if len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
+
 func createIdentityContext(ctx context.Context, methodFullMethod string, identityMapper ProviderFromContext) (context.Context, error) {
 	var id Identity
 	var err error
@@ -133,7 +165,28 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 	if id == nil {
 		id = guestIdentity
 	}
-	ctx = AddToContext(ctx, NewRequestContext(id))
+	rc := NewRequestContext(id, methodFullMethod)
+
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		rc.userAgent = getMdHeader(md, "user-agent")
+		if rc.userAgent == "" {
+			rc.userAgent = getMdHeader(md, "x-user-agent")
+		}
+
+		rc.clientIP = getMdHeader(md, "x-forwarded-for")
+		if rc.clientIP == "" {
+			rc.clientIP = getMdHeader(md, "x-real-ip")
+		}
+		if rc.clientIP == "" {
+			peerInfo, ok := peer.FromContext(ctx)
+			if ok {
+				rc.clientIP = peerInfo.Addr.String()
+			}
+		}
+	}
+
+	ctx = AddToContext(ctx, rc)
 	role := id.Role()
 	if role != "guest" {
 		tenant := id.Tenant()
@@ -208,4 +261,14 @@ func (c *RequestContext) Identity() Identity {
 // ClientIP returns request's IP
 func (c *RequestContext) ClientIP() string {
 	return c.clientIP
+}
+
+// Target returns request's target
+func (c *RequestContext) Target() string {
+	return c.target
+}
+
+// UserAgent returns request's user agent
+func (c *RequestContext) UserAgent() string {
+	return c.userAgent
 }

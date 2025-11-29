@@ -107,7 +107,7 @@ func TestHttp_RequestLogger(t *testing.T) {
 
 	logLine := tw.String()
 	// cid is random
-	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=400 bytes=11 time=0 remote=\"127.0.0.1:51500\" agent=\"no-agent\"\n", logLine)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=400 bytes=11 duration=0 remote=\"127.0.0.1\" agent=\"no-agent\"\n", logLine)
 }
 
 func TestHttp_RequestLoggerDef(t *testing.T) {
@@ -120,6 +120,12 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	w := httptest.NewRecorder()
 	r, _ := http.NewRequest("GET", "/foo", nil)
 
+	testRemoteIP := "127.0.0.1"
+	testRemotePort := "51500"
+	r.RemoteAddr = fmt.Sprintf("%v:%v", testRemoteIP, testRemotePort)
+	r.ProtoMajor = 1
+	r.ProtoMinor = 1
+
 	tw := bytes.Buffer{}
 	writer := bufio.NewWriter(&tw)
 	xlog.SetFormatter(xlog.NewStringFormatter(writer))
@@ -127,7 +133,7 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	lg.ServeHTTP(w, r)
 	logLine := tw.String()
 	// cid is random
-	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=200 bytes=11 time=0 agent=\"no-agent\"\n", logLine)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=\"GET\" path=\"/foo\" status=200 bytes=11 duration=0 remote=\"127.0.0.1\" agent=\"no-agent\"\n", logLine)
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {

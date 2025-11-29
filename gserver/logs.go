@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -38,10 +37,11 @@ func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 		startTime := time.Now()
 		resp, err := handler(ctx, req)
 		defer func() {
-			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+			userAgent := headerFromContext(ctx, "user-agent")
+			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, userAgent) {
 				return
 			}
-			logRequest(ctx, info.FullMethod, startTime, req, err)
+			logRequest(ctx, info.FullMethod, userAgent, startTime, req, err)
 		}()
 		return resp, err
 	}
@@ -53,28 +53,23 @@ func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
 		err := handler(srv, ss)
 		ctx := ss.Context()
 		defer func() {
-			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, headerFromContext(ctx, "user-agent")) {
+			userAgent := headerFromContext(ctx, "user-agent")
+			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, userAgent) {
 				return
 			}
-			logRequest(ctx, info.FullMethod, startTime, srv, err)
+			logRequest(ctx, info.FullMethod, userAgent, startTime, srv, err)
 		}()
 		return err
 	}
 }
 
-func logRequest(ctx context.Context, responseType string, startTime time.Time, req any, err error) {
+func logRequest(ctx context.Context, responseType, userAgent string, startTime time.Time, req any, err error) {
 	duration := time.Since(startTime)
 	expensiveRequest := duration > WarnUnaryRequestLatency
 
-	var remote string
-	peerInfo, ok := peer.FromContext(ctx)
-	if ok {
-		remote = peerInfo.Addr.String()
-	}
-
-	userAgent := headerFromContext(ctx, "user-agent")
 	idx := identity.FromContext(ctx)
 	role := idx.Identity().Role()
+	remote := idx.ClientIP()
 
 	var code codes.Code
 	var cause error

@@ -1,10 +1,12 @@
 package identity
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestRealIP(t *testing.T) {
@@ -60,4 +62,24 @@ func TestRealIP(t *testing.T) {
 			assert.Equal(t, v.expected, actual)
 		})
 	}
+}
+
+func TestClientIPFromGRPC(t *testing.T) {
+	ctx := context.Background()
+	actual := ClientIPFromGRPC(ctx)
+	assert.Equal(t, "", actual)
+
+	publicAddr1 := "144.12.54.87"
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-forwarded-for", publicAddr1))
+	actual = ClientIPFromGRPC(ctx)
+	assert.Equal(t, publicAddr1, actual)
+
+	publicAddr2 := "119.14.55.11"
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-real-ip", publicAddr2))
+	actual = ClientIPFromGRPC(ctx)
+	assert.Equal(t, publicAddr2, actual)
+
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-forwarded-for", publicAddr1, "x-real-ip", publicAddr2))
+	actual = ClientIPFromGRPC(ctx)
+	assert.Equal(t, publicAddr1, actual)
 }

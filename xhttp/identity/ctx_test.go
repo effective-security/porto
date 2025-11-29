@@ -45,13 +45,18 @@ func Test_ForRequest(t *testing.T) {
 func Test_ClientIP(t *testing.T) {
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := FromRequest(r)
-		assert.Equal(t, "10.0.0.1", caller.ClientIP())
+		assert.Equal(t, "10.0.0.3", caller.ClientIP())
+		assert.Equal(t, "test", caller.UserAgent())
+		assert.Equal(t, "/test", caller.Target())
 	})
 	rw := httptest.NewRecorder()
 	handler := NewContextHandler(d, GuestIdentityMapper)
 	r, err := http.NewRequest("GET", "/test", nil)
 	require.NoError(t, err)
 	r.RemoteAddr = "10.0.0.1"
+	r.Header.Set("User-Agent", "test")
+	r.Header.Set("X-Forwarded-For", "10.0.0.2")
+	r.Header.Set("X-Real-Ip", "10.0.0.3")
 
 	handler.ServeHTTP(rw, r)
 }
@@ -59,7 +64,7 @@ func Test_ClientIP(t *testing.T) {
 func Test_AddToContext(t *testing.T) {
 	ctx := AddToContext(
 		context.Background(),
-		NewRequestContext(NewIdentity("r", "n", "", map[string]any{"email": "test"}, "", "")),
+		NewRequestContext(NewIdentity("r", "n", "", map[string]any{"email": "test"}, "", ""), "/test"),
 	)
 
 	rqCtx := FromContext(ctx)
