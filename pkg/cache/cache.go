@@ -53,7 +53,7 @@ type Provider interface {
 	// Get data
 	Get(ctx context.Context, key string, v any) error
 	// Delete data
-	Delete(ctx context.Context, key string) error
+	Delete(ctx context.Context, keys ...string) error
 	// CleanExpired data
 	CleanExpired(ctx context.Context)
 	// Close closes the client, releasing any open resources.
