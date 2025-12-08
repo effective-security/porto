@@ -142,11 +142,17 @@ func (p *redisProv) Get(ctx context.Context, key string, v any) error {
 }
 
 // Delete data
-func (p *redisProv) Delete(ctx context.Context, key string) error {
-	k := path.Join(p.prefix, key)
-	err := p.client.Del(ctx, k).Err()
+func (p *redisProv) Delete(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	pkeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pkeys = append(pkeys, path.Join(p.prefix, key))
+	}
+	err := p.client.Del(ctx, pkeys...).Err()
 	if err != nil {
-		return errors.Wrapf(err, "failed to delete key: %s", k)
+		return errors.Wrapf(err, "failed to delete key")
 	}
 	return nil
 }

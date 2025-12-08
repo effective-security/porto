@@ -48,8 +48,15 @@ func (p *proxyProv) Get(ctx context.Context, key string, v any) error {
 }
 
 // Delete data
-func (p *proxyProv) Delete(ctx context.Context, key string) error {
-	return p.prov.Delete(ctx, p.keyName(key))
+func (p *proxyProv) Delete(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	pkeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		pkeys = append(pkeys, p.keyName(key))
+	}
+	return p.prov.Delete(ctx, pkeys...)
 }
 
 // CleanExpired data

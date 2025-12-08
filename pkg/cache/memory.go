@@ -87,9 +87,14 @@ func (p *memProv) Get(_ context.Context, key string, v any) error {
 }
 
 // Delete data
-func (p *memProv) Delete(_ context.Context, key string) error {
-	k := path.Join(p.prefix, key)
-	p.cache.Delete(k)
+func (p *memProv) Delete(_ context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	for _, key := range keys {
+		k := path.Join(p.prefix, key)
+		p.cache.Delete(k)
+	}
 	return nil
 }
 
