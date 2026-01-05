@@ -7,7 +7,7 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/effective-security/metrics v0.8.125
-	github.com/effective-security/x v0.15.82
+	github.com/effective-security/x v0.15.83
 	github.com/effective-security/xdb v0.24.133
 	github.com/effective-security/xlog v0.10.49
 	github.com/effective-security/xpki v0.26.252
