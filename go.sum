@@ -144,8 +144,8 @@ github.com/ebitengine/purego v0.8.4 h1:CF7LEKg5FFOsASUj0+QwaXf8Ht6TlFxg09+S9wz0o
 github.com/ebitengine/purego v0.8.4/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/effective-security/metrics v0.8.125 h1:cWL4admOYF9X+EI2niSBLLkoxpDw/Fk6foqpzE0yN3w=
 github.com/effective-security/metrics v0.8.125/go.mod h1:ypTjkTgoBub9q+zL2KMc+A4RpQ3XedgoF4u60bRR2+8=
-github.com/effective-security/x v0.15.82 h1:oS4rJwlnKNSpN3KQKnKHsjQrjOFPwWa6+HzcaO0JAHw=
-github.com/effective-security/x v0.15.82/go.mod h1:18QptWxorv4E/OPjhmHPan6rbdcpjs/mE4fvGA6D5Os=
+github.com/effective-security/x v0.15.83 h1:M4AogFJqXnmIcO3hHws3IUzN9H5mCkC2LuaCxc5kuaw=
+github.com/effective-security/x v0.15.83/go.mod h1:4G7/+M6EyWxgAxpH7VlX5eTzeuxTAaDdMILLlRkIsFA=
 github.com/effective-security/xdb v0.24.133 h1:V1Dzf/pxfNscLcI4jvTYbszNnHn2SVtXEg9AwEja8ic=
 github.com/effective-security/xdb v0.24.133/go.mod h1:Pb0FU+Ok7G08KIQlD2ZAL9KinMyp5bcIUeduGmd1XMs=
 github.com/effective-security/xlog v0.10.49 h1:Aao/M9gdSKhB4QG3n8hGM0zlx9XM3xLpgaCJUcJLQ2A=
@@ -299,8 +299,8 @@ github.com/prometheus/client_golang v1.23.2/go.mod h1:Tb1a6LWHB3/SPIzCoaDXI4I8UH
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
 github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=
 github.com/prometheus/client_model v0.6.2/go.mod h1:y3m2F6Gdpfy6Ut/GBsUqTWZqCUvMVzSfMLjcu6wAwpE=
-github.com/prometheus/common v0.67.4 h1:yR3NqWO1/UyO1w2PhUvXlGQs/PtFmoveVO0KZ4+Lvsc=
-github.com/prometheus/common v0.67.4/go.mod h1:gP0fq6YjjNCLssJCQp0yk4M8W6ikLURwkdd/YKtTbyI=
+github.com/prometheus/common v0.67.5 h1:pIgK94WWlQt1WLwAC5j2ynLaBRDiinoAb86HZHTUGI4=
+github.com/prometheus/common v0.67.5/go.mod h1:SjE/0MzDEEAyrdr5Gqc6G+sXI67maCxzaT3A2+HqjUw=
 github.com/prometheus/procfs v0.19.2 h1:zUMhqEW66Ex7OXIiDkll3tl9a1ZdilUOd/F6ZXw4Vws=
 github.com/prometheus/procfs v0.19.2/go.mod h1:M0aotyiemPhBCM0z5w87kL22CxfcH05ZpYlu+b4J7mw=
 github.com/redis/go-redis/v9 v9.17.2 h1:P2EGsA4qVIM3Pp+aPocCJ7DguDHhqrXNhVcEp4ViluI=

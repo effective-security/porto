@@ -221,11 +221,26 @@ func TestError_WriteHTTPResponse(t *testing.T) {
 
 func TestError_IsInvalidRequestError(t *testing.T) {
 	assert.True(t, httperror.IsInvalidRequestError(errors.Errorf("invalid ID")))
+	assert.True(t, httperror.IsInvalidRequestError(errors.Errorf("Invalid ID")))
+	assert.True(t, httperror.IsInvalidRequestError(errors.Errorf("bad request")))
+	assert.True(t, httperror.IsInvalidRequestError(errors.Errorf("400: invalid")))
+}
+
+func TestError_IsNotFound(t *testing.T) {
+	assert.True(t, httperror.IsNotFound(errors.Errorf("not found")))
+	assert.True(t, httperror.IsNotFound(errors.Errorf("Not Found")))
+	assert.True(t, httperror.IsNotFound(errors.Errorf("404: not found")))
+	assert.True(t, httperror.IsNotFound(errors.Wrap(sql.ErrNoRows, "failed")))
+	assert.True(t, httperror.IsNotFound(errors.Wrap(errors.New("sql: no rows in result set"), "failed")))
+	assert.True(t, httperror.IsNotFound(errors.Wrap(&xdb.ErrorNotFound{}, "failed")))
 }
 
 func TestError_IsTimeout(t *testing.T) {
 	assert.True(t, httperror.IsTimeout(errors.Errorf("context deadline exceeded")))
 	assert.True(t, httperror.IsTimeout(errors.Errorf("request timeout")))
+	assert.True(t, httperror.IsTimeout(errors.Errorf("Request Timeout")))
+	assert.True(t, httperror.IsTimeout(errors.Wrap(context.DeadlineExceeded, "failed")))
+	assert.True(t, httperror.IsTimeout(errors.Wrap(context.Canceled, "failed")))
 }
 
 func TestError_NewFromPb(t *testing.T) {
@@ -259,6 +274,25 @@ func TestError_Is(t *testing.T) {
 	assert.True(t, err1.Is(err3))
 
 	assert.EqualError(t, err3.Cause(), "rpc error: code = NotFound desc = test")
+}
+
+func TestError_WrapMsg(t *testing.T) {
+	tcases := []struct {
+		err      error
+		expected string
+	}{
+		{err: errors.New("not found"), expected: "not_found: other message"},
+		{err: errors.Errorf("invalid ID"), expected: "invalid_request: other message"},
+		{err: errors.Errorf("bad request"), expected: "invalid_request: other message"},
+		{err: errors.Errorf("400: invalid"), expected: "invalid_request: other message"},
+		{err: errors.Errorf("context deadline exceeded"), expected: "timeout: other message"},
+		{err: errors.Errorf("request timeout"), expected: "timeout: other message"},
+		{err: errors.Wrap(context.DeadlineExceeded, "failed"), expected: "timeout: other message"},
+		{err: errors.Wrap(context.Canceled, "failed"), expected: "timeout: other message"},
+	}
+	for _, tc := range tcases {
+		assert.Equal(t, tc.expected, httperror.Wrap(tc.err, "other message").Error())
+	}
 }
 
 func TestError_Wrap(t *testing.T) {

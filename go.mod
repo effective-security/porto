@@ -7,7 +7,7 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/effective-security/metrics v0.8.125
-	github.com/effective-security/x v0.15.82
+	github.com/effective-security/x v0.15.83
 	github.com/effective-security/xdb v0.24.133
 	github.com/effective-security/xlog v0.10.49
 	github.com/effective-security/xpki v0.26.252
@@ -113,7 +113,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.4 // indirect
+	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.25.6 // indirect
