@@ -247,13 +247,13 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 		errstr = err.Error()
 	}
 	msg := errMsg(errstr, msgAndArgs...)
-	if IsInvalidRequestError(err) {
+	if IsInvalidRequestError(err, errstr) {
 		return InvalidRequest("%s", msg).WithCause(err)
 	}
-	if xdb.IsNotFoundError(err) {
+	if IsNotFound(err, errstr) {
 		return NotFound("%s", msg).WithCause(err)
 	}
-	if IsTimeout(err) {
+	if IsTimeout(err, errstr) {
 		return Timeout("%s", msg).WithCause(err)
 	}
 	return Unexpected("%s", msg).WithCause(err)
@@ -287,22 +287,60 @@ func IsInvalidModel(err error) bool {
 }
 
 // IsInvalidRequestError returns true for Invalid request error
-func IsInvalidRequestError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "invalid")
-}
-
-// IsTimeout returns true for timeout error
-func IsTimeout(err error) bool {
+func IsInvalidRequestError(err error, errStrings ...string) bool {
 	if err == nil {
 		return false
 	}
-	str := err.Error()
-	return goerrors.Is(err, context.DeadlineExceeded) ||
-		goerrors.Is(err, context.Canceled) ||
-		slices.StringContainsOneOf(str, timeoutErrors)
+	for _, errString := range errStrings {
+		if slices.StringContainsOneOf(errString, invalidErrors) {
+			return true
+		}
+	}
+	return slices.StringContainsOneOf(err.Error(), invalidErrors)
 }
 
-var timeoutErrors = []string{"timeout", "deadline", "canceling", "canceled"}
+var invalidErrors = []string{"invalid", "Invalid", "bad", "400"}
+
+// IsTimeout returns true for timeout error
+func IsTimeout(err error, errStrings ...string) bool {
+	if err == nil {
+		return false
+	}
+	if goerrors.Is(err, context.DeadlineExceeded) ||
+		goerrors.Is(err, context.Canceled) {
+		return true
+	}
+	for _, errString := range errStrings {
+		if slices.StringContainsOneOf(errString, timeoutErrors) {
+			return true
+		}
+	}
+
+	str := err.Error()
+	return slices.StringContainsOneOf(str, timeoutErrors)
+}
+
+var timeoutErrors = []string{"timeout", "deadline", "canceling", "canceled", "Timeout"}
+
+// IsNotFound returns true for NotFound error
+func IsNotFound(err error, errStrings ...string) bool {
+	if err == nil {
+		return false
+	}
+	if xdb.IsNotFoundError(err) {
+		return true
+	}
+	for _, errString := range errStrings {
+		if slices.StringContainsOneOf(errString, notFoundErrors) {
+			return true
+		}
+	}
+
+	str := err.Error()
+	return slices.StringContainsOneOf(str, notFoundErrors)
+}
+
+var notFoundErrors = []string{"not found", "Not Found", "404"}
 
 // Status returns HTTP status from error
 func Status(err error) int {
