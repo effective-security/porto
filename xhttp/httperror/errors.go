@@ -247,11 +247,11 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 		errstr = err.Error()
 	}
 	msg := errMsg(errstr, msgAndArgs...)
-	if IsInvalidRequestError(err, errstr) {
-		return InvalidRequest("%s", msg).WithCause(err)
-	}
 	if IsNotFound(err, errstr) {
 		return NotFound("%s", msg).WithCause(err)
+	}
+	if IsInvalidRequestError(err, errstr) {
+		return InvalidRequest("%s", msg).WithCause(err)
 	}
 	if IsTimeout(err, errstr) {
 		return Timeout("%s", msg).WithCause(err)
