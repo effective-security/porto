@@ -8,7 +8,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/effective-security/metrics v0.8.126
 	github.com/effective-security/x v0.16.87
-	github.com/effective-security/xdb v0.24.133
+	github.com/effective-security/xdb v0.24.134
 	github.com/effective-security/xlog v0.10.51
 	github.com/effective-security/xpki v0.26.255
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
