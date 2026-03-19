@@ -85,9 +85,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
 		}
 		bw := bufio.NewWriter(out)
 		if err := NewEncoder(bw, r).Encode(body); err != nil {
-
 			logger.ContextKV(r.Context(), xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
-
 		}
 		bw.Flush()
 	}
@@ -132,25 +130,50 @@ func logError(r *http.Request, status int, code, message string, cause error) {
 	if cause != nil {
 		if sv == xlog.ERROR {
 			// for ERROR log with stack
-			logger.ContextKV(ctx, sv, "err", cause)
+			logger.ContextKV(ctx, sv,
+				"type", typ,
+				"path", r.URL.Path,
+				"status", status,
+				"code", code,
+				"msg", message,
+				"agent", r.UserAgent(),
+				"content-type", r.Header.Get(header.ContentType),
+				"accept", r.Header.Get(header.Accept),
+				"content-length", r.ContentLength,
+				"fn", path.Base(fn),
+				"ln", line,
+				"err", cause,
+			)
 		} else {
-			logger.ContextKV(ctx, sv, "err", cause.Error())
+			logger.ContextKV(ctx, sv,
+				"type", typ,
+				"path", r.URL.Path,
+				"status", status,
+				"code", code,
+				"msg", message,
+				"agent", r.UserAgent(),
+				"content-type", r.Header.Get(header.ContentType),
+				"accept", r.Header.Get(header.Accept),
+				"content-length", r.ContentLength,
+				"fn", path.Base(fn),
+				"ln", line,
+				"err", cause.Error())
 		}
+	} else {
+		logger.ContextKV(ctx, sv,
+			"type", typ,
+			"path", r.URL.Path,
+			"status", status,
+			"code", code,
+			"msg", message,
+			"agent", r.UserAgent(),
+			"content-type", r.Header.Get(header.ContentType),
+			"accept", r.Header.Get(header.Accept),
+			"content-length", r.ContentLength,
+			"fn", path.Base(fn),
+			"ln", line,
+		)
 	}
-
-	logger.ContextKV(ctx, sv,
-		"type", typ,
-		"path", r.URL.Path,
-		"status", status,
-		"code", code,
-		"msg", message,
-		"agent", r.UserAgent(),
-		"content-type", r.Header.Get(header.ContentType),
-		"accept", r.Header.Get(header.Accept),
-		"content-length", r.ContentLength,
-		"fn", path.Base(fn),
-		"ln", line,
-	)
 }
 
 // WritePlainJSON will serialize the supplied body parameter as a http response.
