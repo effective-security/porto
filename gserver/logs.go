@@ -89,7 +89,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 			}
 		}
 		// Do not log client errors
-		if code != codes.NotFound && code != codes.InvalidArgument && code != codes.Canceled && code != codes.PermissionDenied && code != codes.Unauthenticated {
+		if code != codes.NotFound && code != codes.Canceled && code != codes.PermissionDenied && code != codes.Unauthenticated {
 			logError(ctx, code, responseType, err, cause)
 		}
 	}
@@ -140,20 +140,23 @@ func logError(ctx context.Context, code codes.Code, method string, err, cause er
 				"type", typ,
 				"method", method,
 				"code", code.String(),
-				"err", cause)
+				"err", err.Error(),
+				"cause", cause)
 		} else {
 			logger.ContextKV(ctx, sv,
 				"type", typ,
 				"method", method,
 				"code", code.String(),
-				"err", cause.Error())
+				"err", err.Error(),
+				"cause", cause.Error(),
+			)
 		}
+	} else {
+		logger.ContextKV(ctx, sv,
+			"type", typ,
+			"method", method,
+			"code", code.String(),
+			"err", err.Error(),
+		)
 	}
-
-	logger.ContextKV(ctx, sv,
-		"type", typ,
-		"method", method,
-		"code", code.String(),
-		"err", err.Error(),
-	)
 }
