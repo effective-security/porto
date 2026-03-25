@@ -6,11 +6,11 @@ require (
 	github.com/cockroachdb/errors v1.12.0
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/effective-security/metrics v0.8.126
+	github.com/effective-security/metrics v0.8.128
 	github.com/effective-security/x v0.16.87
-	github.com/effective-security/xdb v0.24.134
+	github.com/effective-security/xdb v0.24.135
 	github.com/effective-security/xlog v0.10.51
-	github.com/effective-security/xpki v0.26.255
+	github.com/effective-security/xpki v0.26.256
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.4
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -77,7 +77,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/getsentry/sentry-go v0.43.0 // indirect
+	github.com/getsentry/sentry-go v0.44.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -137,7 +137,7 @@ require (
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
