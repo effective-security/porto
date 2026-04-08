@@ -547,6 +547,10 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (ide
 		return nil, errors.WithMessage(err, "unable to parse JWT token")
 	}
 
+	if claims.String("cnf") != "" {
+		return nil, errors.New("DPoP token is not supported for Bearer authentication")
+	}
+
 	email := claims.String("email")
 	subj := claims.String(p.config.JWT.SubjectClaim)
 	tenant := claims.String(p.config.JWT.TenantClaim)

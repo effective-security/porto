@@ -34,16 +34,13 @@ func Test_Empty(t *testing.T) {
 	assert.Equal(t, identity.GuestRoleName, id.Role())
 }
 
-func Test_All(t *testing.T) {
+func Test_JWT(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 
 	claims := jwt.MapClaims{
 		"sub":    "12234",
 		"email":  "denis@trusty.com",
 		"tenant": "t12341234",
-		"cnf": map[string]any{
-			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
-		},
 	}
 	mock := mockJWT{
 		claims:   claims,
@@ -113,8 +110,8 @@ func Test_All(t *testing.T) {
 		}
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
-		assert.Equal(t, "trusty-admin", id.Role())
-		assert.Equal(t, "12234", id.Subject())
+		assert.Equal(t, "guest", id.Role()) // no DPoP accepted
+		assert.Equal(t, "unknown", id.Subject())
 	})
 
 	t.Run("default role grpc", func(t *testing.T) {
@@ -153,6 +150,78 @@ func Test_All(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+	})
+}
+
+func Test_DPoP(t *testing.T) {
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+
+	claims := jwt.MapClaims{
+		"sub":    "12234",
+		"email":  "denis@trusty.com",
+		"tenant": "t12341234",
+		"cnf": map[string]any{
+			dpop.CnfThumbprint: "C8kBamVR4FbaWBy4nsR6yRMWsf1dSoUqvRp5i-ixux4",
+		},
+	}
+	mock := mockJWT{
+		claims:   claims,
+		atClaims: claims,
+		err:      nil,
+	}
+
+	p, err := roles.New(&roles.IdentityMap{
+		TLS: roles.GenericIdentityMap{
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "tls_authenticated",
+			Roles: map[string][]string{
+				"trusty-client": {"spiffe://trusty/client"},
+			},
+		},
+		JWT: roles.JWTIdentityMap{
+			SubjectClaim:             "email",
+			RoleClaim:                "email",
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "jwt_authenticated",
+			Roles: map[string][]string{
+				"trusty-client": {"denis@trusty.ca"},
+			},
+		},
+		DPoP: roles.JWTIdentityMap{
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "dpop_authenticated",
+			RoleClaim:                "sub",
+			Roles: map[string][]string{
+				"trusty-admin": {"12234"},
+			},
+		},
+	}, mock)
+	require.NoError(t, err)
+
+	t.Run("default role http", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodGet, "/", nil)
+		setAuthorizationHeader(r, "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, "guest", id.Role()) // DPoP not accepted
+		assert.Equal(t, "", id.Tenant())
+		assert.Equal(t, "unknown", id.Subject())
+	})
+
+	t.Run("default role dpop", func(t *testing.T) {
+		r, _ := http.NewRequest(http.MethodPost, "https://api.test.proveid.dev/v1/dpop/token", nil)
+		setAuthorizationDPoPHeader(r, "eyJhbGciOiAiRVMyNTYiLCAidHlwIjogImRwb3Arand0IiwgImp3ayI6IHsia3R5IjogIkVDIiwgImNydiI6ICJQLTI1NiIsICJ4IjogIk1wTmlIR1RkXzNYY240NDVVR0FlN09KY1NTekFXU2JSUWFXdWlZcW5kYzQiLCAieSI6ICJlOUMzWVAwMkdHOHVhUE5fZEUzOUNESEs3cDFyQm1HZXVUcXptNEZSMGI4In19.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hcGkudGVzdC5wcm92ZWlkLmRldi92MS9kcG9wL3Rva2VuIiwiaWF0IjoxNjQ1MjA0OTI3LCJqdGkiOiIxQlJNbUZHSkVZX01MN3pLZjEwaWhxVTJuRjk0Wk01clhyUnlET1g0Rk0wIn0.mMUL2A-TE1L7i8J9cbxLAiuDOT0OpnATcaoyQKpq_ji7FO8WsFV_rf2TIFugA9NV4lk-QfBJAse5Ny5pRtHVLg", "AccessToken123")
+		assert.True(t, p.ApplicableForRequest(r))
+
+		dpop.TimeNowFn = func() time.Time {
+			return time.Unix(1645204927, 0)
+		}
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, "trusty-admin", id.Role())
+		assert.Equal(t, "12234", id.Subject())
 	})
 }
 
