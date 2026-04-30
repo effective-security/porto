@@ -385,8 +385,11 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
-		s.authz.NewUnaryInterceptor(),
 	}
+	if len(s.opts.preAuthz) > 0 {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, s.opts.preAuthz...)
+	}
+	chainUnaryInterceptors = append(chainUnaryInterceptors, s.authz.NewUnaryInterceptor())
 	if s.cfg.PromGrpc {
 		chainUnaryInterceptors = append(chainUnaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	}
@@ -472,6 +475,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 	var allowedOrigins []string
 	exposedHeaders := ""
+	allowCredentials := false
 	if sctx.cfg.CORS != nil {
 		if len(sctx.cfg.CORS.AllowedOrigins) > 0 && sctx.cfg.CORS.AllowedOrigins[0] != "*" {
 			allowedOrigins = sctx.cfg.CORS.AllowedOrigins
@@ -479,6 +483,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 		if len(sctx.cfg.CORS.ExposedHeaders) > 0 {
 			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ",")
 		}
+		allowCredentials = sctx.cfg.CORS.GetAllowCredentials()
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -548,6 +553,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				}
 				if exposedHeaders != "" {
 					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
+				}
+				if allowCredentials && len(allowedOrigins) > 0 {
+					wh.Set("Access-Control-Allow-Credentials", "true")
 				}
 
 				w = newGrpcWebResponse(w, ct, r.Header.Get(header.AcceptEncoding))

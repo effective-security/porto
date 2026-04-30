@@ -29,6 +29,13 @@ func WithUnaryServerInterceptor(other grpc.UnaryServerInterceptor) Option {
 	})
 }
 
+// WithPreAuthzUnaryInterceptor option to provide UnaryServerInterceptor after identity and before authz
+func WithPreAuthzUnaryInterceptor(other grpc.UnaryServerInterceptor) Option {
+	return newFuncOption(func(o *options) {
+		o.preAuthz = append(o.preAuthz, other)
+	})
+}
+
 // WithStreamServerInterceptor option to provide RPC StreamServerInterceptor
 func WithStreamServerInterceptor(other grpc.StreamServerInterceptor) Option {
 	return newFuncOption(func(o *options) {
@@ -53,6 +60,7 @@ func MaxSendMsgSize(size int) Option {
 type options struct {
 	handlers       []Middleware
 	unary          []grpc.UnaryServerInterceptor
+	preAuthz       []grpc.UnaryServerInterceptor
 	stream         []grpc.StreamServerInterceptor
 	maxRecvMsgSize int
 	maxSendMsgSize int
