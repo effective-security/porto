@@ -158,7 +158,7 @@ func TestConfig_Allow(t *testing.T) {
 	t.Log(c.treeAsText())
 
 	check := func(path, role string, allowed bool) {
-		idn := identity.NewIdentity(role, "test", "", nil, "", "")
+		idn := identity.NewIdentity(role, "test", "", nil, "", "", identity.MethodNone)
 		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/foo", "bob", true)
@@ -208,7 +208,7 @@ func TestConfig_AllowAny(t *testing.T) {
 	})
 	require.NoError(t, err)
 	check := func(path, role string, allowed bool) {
-		idn := identity.NewIdentity(role, "test", "", nil, "", "")
+		idn := identity.NewIdentity(role, "test", "", nil, "", "", identity.MethodNone)
 		checkAllowed(t, c, path, idn, allowed)
 	}
 	check("/", "alice", false)
@@ -275,7 +275,7 @@ func Test_AccessLogs(t *testing.T) {
 
 	shouldLog := func(path, service, expLog string) {
 		buf.Reset()
-		c.isAllowed(ctx, path, "", identity.NewIdentity(service, "test", "", nil, "", ""))
+		c.isAllowed(ctx, path, "", identity.NewIdentity(service, "test", "", nil, "", "", identity.MethodNone))
 		result := buf.String()
 		assert.Equal(t, expLog, result, "Unexpected log output for isAllowed(%q, %q)", path, service)
 	}
@@ -295,12 +295,12 @@ func Test_AccessLogs(t *testing.T) {
 		c.cfg.LogAllowed = false
 		c.cfg.LogDenied = false
 		buf.Reset()
-		c.isAllowed(ctx, "/", "test", identity.NewIdentity("bobby", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bob", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", ""))
-		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", ""))
+		c.isAllowed(ctx, "/", "test", identity.NewIdentity("bobby", "test", "", nil, "", "", identity.MethodNone))
+		c.isAllowed(ctx, "/bob", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", "", identity.MethodNone))
+		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", "", identity.MethodNone))
+		c.isAllowed(ctx, "/bar", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", "", identity.MethodNone))
+		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_eve", "test", "", nil, "", "", identity.MethodNone))
+		c.isAllowed(ctx, "/foo/eve", "test", identity.NewIdentity("svc_bob", "test", "", nil, "", "", identity.MethodNone))
 		assert.Empty(t, buf.Bytes())
 	})
 }
@@ -326,8 +326,8 @@ func TestConfig_Clone(t *testing.T) {
 	c.Allow("/foo", "alice")
 	require.NotNil(t, clone.requestRoleMapper, "Config.Clone() didn't clone roleMapper")
 	assert.Equal(t, "bob", clone.requestRoleMapper(nil).Role(), "Config.Clone() has a roleMapper set, but it doesn't appear to be ours!")
-	assert.False(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("alise", "test", "", nil, "", "")), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
-	assert.True(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("bob", "test", "", nil, "", "")), "Config.Clone() return a clone that's missing an Allow() from the source")
+	assert.False(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("alise", "test", "", nil, "", "", identity.MethodNone)), "Config.Clone() returns a clone that was mutated by mutating the original instance (should be a deep copy)")
+	assert.True(t, clone.isAllowed(ctx, "/foo", "test", identity.NewIdentity("bob", "test", "", nil, "", "", identity.MethodNone)), "Config.Clone() return a clone that's missing an Allow() from the source")
 }
 
 func TestConfig_checkAccess_defaultMapper(t *testing.T) {
@@ -453,13 +453,13 @@ func testHTTPHandler(w http.ResponseWriter, r *http.Request) {
 
 func roleMapper(role string) func(*http.Request) identity.Identity {
 	return func(*http.Request) identity.Identity {
-		return identity.NewIdentity(role, "test", "", nil, "", "")
+		return identity.NewIdentity(role, "test", "", nil, "", "", identity.MethodNone)
 	}
 }
 
 func gRPCRoleMapper(role string) func(ctx context.Context) identity.Identity {
 	return func(ctx context.Context) identity.Identity {
-		return identity.NewIdentity(role, "test", "", nil, "", "")
+		return identity.NewIdentity(role, "test", "", nil, "", "", identity.MethodNone)
 	}
 }
 

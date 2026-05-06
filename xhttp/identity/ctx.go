@@ -141,7 +141,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 	return http.HandlerFunc(h)
 }
 
-var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "")
+var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "", MethodNone)
 
 func getMdHeader(md metadata.MD, name string) string {
 	vals := md.Get(name)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -86,6 +88,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
+		assert.Equal(t, identity.MethodJWT, id.AuthType())
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -98,6 +101,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
+		assert.Equal(t, identity.MethodJWT, id.AuthType())
 	})
 
 	t.Run("default role dpop", func(t *testing.T) {
@@ -124,6 +128,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
+		assert.Equal(t, identity.MethodJWT, id.AuthType())
 	})
 
 	t.Run("tls:trusty-client", func(t *testing.T) {
@@ -142,6 +147,7 @@ func Test_JWT(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		assert.Equal(t, identity.MethodCertificate, id.AuthType())
 
 		//
 		// gRPC
@@ -150,6 +156,114 @@ func Test_JWT(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		assert.Equal(t, identity.MethodCertificate, id.AuthType())
+	})
+}
+
+func Test_JWT_CookieAuth(t *testing.T) {
+	xlog.SetGlobalLogLevel(xlog.DEBUG)
+
+	claims := jwt.MapClaims{
+		"sub":    "12234",
+		"email":  "denis@trusty.com",
+		"tenant": "t12341234",
+	}
+	mock := mockJWT{
+		claims:   claims,
+		atClaims: claims,
+		err:      nil,
+	}
+
+	p, err := roles.New(&roles.IdentityMap{
+		JWT: roles.JWTIdentityMap{
+			SubjectClaim:             "email",
+			RoleClaim:                "email",
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "jwt_authenticated",
+			AuthCookie:               "auth_token",
+			Roles: map[string][]string{
+				"trusty-client": {"denis@trusty.ca"},
+			},
+		},
+	}, mock)
+	require.NoError(t, err)
+
+	t.Run("GET_cookie_without_authorization", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+		r.AddCookie(&http.Cookie{Name: "auth_token", Value: "AccessToken123"})
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, identity.MethodJWTCookie, id.AuthType())
+	})
+
+	t.Run("POST_cookie_without_csrf_falls_back_to_guest", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "https://example.com/api", nil)
+		r.AddCookie(&http.Cookie{Name: "auth_token", Value: "AccessToken123"})
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, identity.GuestRoleName, id.Role())
+	})
+
+	t.Run("POST_cookie_with_csrf_and_origin", func(t *testing.T) {
+		const csrfTok = "abc"
+		r := httptest.NewRequest(http.MethodPost, "https://example.com/api", nil)
+		r.AddCookie(&http.Cookie{Name: "auth_token", Value: "AccessToken123"})
+		r.Header.Set("X-CSRF-Token", csrfTok)
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: csrfTok})
+		r.Header.Set("Origin", "https://example.com")
+		id, err := p.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, "jwt_authenticated", id.Role())
+		assert.Equal(t, identity.MethodJWTCookie, id.AuthType())
+	})
+
+	t.Run("strict_invalid_jwt_cookie_does_not_fail_request", func(t *testing.T) {
+		badMock := mockJWT{claims: claims, err: errors.New("invalid token")}
+		pStrict, err := roles.New(&roles.IdentityMap{
+			Strict: true,
+			JWT: roles.JWTIdentityMap{
+				SubjectClaim:             "email",
+				RoleClaim:                "email",
+				Enabled:                  true,
+				DefaultAuthenticatedRole: "jwt_authenticated",
+				AuthCookie:               "auth_token",
+				Roles: map[string][]string{
+					"trusty-client": {"denis@trusty.ca"},
+				},
+			},
+		}, badMock)
+		require.NoError(t, err)
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+		r.AddCookie(&http.Cookie{Name: "auth_token", Value: "nope"})
+		id, err := pStrict.IdentityFromRequest(r)
+		require.NoError(t, err)
+		assert.Equal(t, identity.GuestRoleName, id.Role())
+	})
+
+	t.Run("strict_invalid_jwt_header_returns_error", func(t *testing.T) {
+		badMock := mockJWT{claims: claims, err: errors.New("invalid token")}
+		pStrict, err := roles.New(&roles.IdentityMap{
+			Strict: true,
+			JWT: roles.JWTIdentityMap{
+				SubjectClaim:             "email",
+				RoleClaim:                "email",
+				Enabled:                  true,
+				DefaultAuthenticatedRole: "jwt_authenticated",
+				AuthCookie:               "auth_token",
+				Roles: map[string][]string{
+					"trusty-client": {"denis@trusty.ca"},
+				},
+			},
+		}, badMock)
+		require.NoError(t, err)
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+		setAuthorizationHeader(r, "nope")
+		id, err := pStrict.IdentityFromRequest(r)
+		require.Error(t, err)
+		assert.Nil(t, id)
 	})
 }
 
@@ -222,6 +336,7 @@ func Test_DPoP(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-admin", id.Role())
 		assert.Equal(t, "12234", id.Subject())
+		assert.Equal(t, identity.MethodDPoP, id.AuthType())
 	})
 }
 
@@ -528,6 +643,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		assert.Equal(t, identity.MethodCertificate, id.AuthType())
 		claims := id.Claims()
 		assert.Equal(t, "trusty-client", claims["role"])
 		assert.Equal(t, "trusty/client", claims["spiffe"])
@@ -541,6 +657,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
+		assert.Equal(t, identity.MethodCertificate, id.AuthType())
 		claims = id.Claims()
 		assert.Equal(t, "trusty-client", claims["role"])
 		assert.Equal(t, "trusty/client", claims["spiffe"])

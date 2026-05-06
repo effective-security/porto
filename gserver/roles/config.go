@@ -62,4 +62,8 @@ type JWTIdentityMap struct {
 	TenantClaim string `json:"tenant_claim" yaml:"tenant_claim"`
 	// Roles is a map of role to JWT identity
 	Roles map[string][]string `json:"roles" yaml:"roles"`
+	// AuthCookie specifies the name of the cookie to be used for authentication.
+	// If empty, the cookie is not used for authentication.
+	// This option is not used for `jwt_dpop`.
+	AuthCookie string `json:"auth_cookie" yaml:"auth_cookie"`
 }

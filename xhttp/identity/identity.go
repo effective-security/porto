@@ -12,6 +12,34 @@ import (
 // GuestRoleName is default role name for guest
 const GuestRoleName = "guest"
 
+type AuthMethod int
+
+const (
+	MethodNone AuthMethod = iota
+	MethodCertificate
+	MethodAWS
+	MethodDPoP
+	MethodJWT
+	MethodJWTCookie
+)
+
+func (m AuthMethod) String() string {
+	switch m {
+	case MethodCertificate:
+		return "Certificate"
+	case MethodAWS:
+		return "AWS"
+	case MethodDPoP:
+		return "DPoP"
+	case MethodJWT:
+		return "JWT"
+	case MethodJWTCookie:
+		return "JWTCookie"
+	default:
+		return "None"
+	}
+}
+
 // Identity contains information about the identity of an API caller
 type Identity interface {
 	// String returns the identity as a single string value
@@ -23,6 +51,7 @@ type Identity interface {
 	Claims() jwt.MapClaims
 	AccessToken() string
 	TokenType() string
+	AuthType() AuthMethod
 }
 
 // ProviderFromRequest returns Identity from supplied HTTP request
@@ -32,7 +61,7 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
-func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string) Identity {
+func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string, authType AuthMethod) Identity {
 	id := identity{
 		role:        role,
 		subject:     subject,
@@ -40,6 +69,7 @@ func NewIdentity(role, subject, tenant string, claims map[string]any, accessToke
 		claims:      jwt.MapClaims{},
 		accessToken: accessToken,
 		tokenType:   tokenType,
+		authType:    authType,
 	}
 	if claims != nil {
 		_ = id.claims.Add(claims)
@@ -61,6 +91,7 @@ type identity struct {
 
 	accessToken string
 	tokenType   string
+	authType    AuthMethod
 }
 
 // Subject returns the client's subject.
@@ -88,6 +119,11 @@ func (c identity) AccessToken() string {
 // TokenType returns token type for IDentity
 func (c identity) TokenType() string {
 	return c.tokenType
+}
+
+// AuthType returns auth type for Identity
+func (c identity) AuthType() AuthMethod {
+	return c.authType
 }
 
 // Claims returns application specific user info
@@ -119,12 +155,12 @@ func GuestIdentityMapper(r *http.Request) (Identity, error) {
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName
 	}
-	return NewIdentity(GuestRoleName, name, "", nil, "", ""), nil
+	return NewIdentity(GuestRoleName, name, "", nil, "", "", MethodNone), nil
 }
 
 // GuestIdentityForContext always returns "guest" for the role
 func GuestIdentityForContext(_ context.Context, _ string) (Identity, error) {
-	return NewIdentity(GuestRoleName, "", "", nil, "", ""), nil
+	return NewIdentity(GuestRoleName, "", "", nil, "", "", MethodNone), nil
 }
 
 // WithTestIdentity is used in unit tests to set HTTP request identity
