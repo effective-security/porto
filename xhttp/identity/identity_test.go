@@ -51,7 +51,7 @@ func Test_WithTestIdentityDirect(t *testing.T) {
 	r, err := http.NewRequest(http.MethodGet, "/", nil)
 	require.NoError(t, err)
 
-	r = WithTestIdentity(r, NewIdentity("role1", "name1", "org1", nil, "", ""))
+	r = WithTestIdentity(r, NewIdentity("role1", "name1", "org1", nil, "", "", MethodNone))
 	ctx := FromRequest(r)
 
 	assert.Equal(t, "org1/name1:role1", ctx.Identity().String())
@@ -66,7 +66,7 @@ func Test_NewIdentityWithClaims(t *testing.T) {
 		"email":  "denis@ekspand.com",
 		"tenant": "org",
 	}
-	r = WithTestIdentity(r, NewIdentity("role1", "name1", "", u, "", ""))
+	r = WithTestIdentity(r, NewIdentity("role1", "name1", "", u, "", "", MethodNone))
 	ctx := FromRequest(r)
 	assert.Equal(t, "name1:role1", ctx.Identity().String())
 	claims := ctx.Identity().Claims()
@@ -88,13 +88,28 @@ func Test_WithTestIdentityServeHTTP(t *testing.T) {
 		"email":  "denis@ekspand.com",
 		"tenant": "org",
 	}
-	r = WithTestIdentity(r, NewIdentity("role1", "name2", "org", u, "", ""))
+	r = WithTestIdentity(r, NewIdentity("role1", "name2", "org", u, "", "", MethodNone))
 	handler.ServeHTTP(rw, r)
 }
 
 func Test_IdentityString(t *testing.T) {
-	assert.Equal(t, "org/name2:role1", NewIdentity("role1", "name2", "org", nil, "", "").String())
-	assert.Equal(t, "name2:role1", NewIdentity("role1", "name2", "", nil, "", "").String())
-	assert.Equal(t, "test", NewIdentity("test", "test", "", nil, "", "").String())
-	assert.Equal(t, "unknown:test", NewIdentity("test", "", "", nil, "", "").String())
+	assert.Equal(t, "org/name2:role1", NewIdentity("role1", "name2", "org", nil, "", "", MethodNone).String())
+	assert.Equal(t, "name2:role1", NewIdentity("role1", "name2", "", nil, "", "", MethodNone).String())
+	assert.Equal(t, "test", NewIdentity("test", "test", "", nil, "", "", MethodNone).String())
+	assert.Equal(t, "unknown:test", NewIdentity("test", "", "", nil, "", "", MethodNone).String())
+}
+
+func TestAuthMethodString(t *testing.T) {
+	assert.Equal(t, "None", MethodNone.String())
+	assert.Equal(t, "Certificate", MethodCertificate.String())
+	assert.Equal(t, "AWS", MethodAWS.String())
+	assert.Equal(t, "DPoP", MethodDPoP.String())
+	assert.Equal(t, "JWT", MethodJWT.String())
+	assert.Equal(t, "JWTCookie", MethodJWTCookie.String())
+	assert.Equal(t, "None", AuthMethod(99).String())
+}
+
+func TestNewIdentityAuthType(t *testing.T) {
+	id := NewIdentity("r", "s", "t", nil, "at", "Bearer", MethodJWT)
+	assert.Equal(t, MethodJWT, id.AuthType())
 }

@@ -603,14 +603,14 @@ func identityMapperFromCN(r *http.Request) (identity.Identity, error) {
 		}
 
 	}
-	return identity.NewIdentity(role, name, "", nil, "", ""), nil
+	return identity.NewIdentity(role, name, "", nil, "", "", identity.MethodCertificate), nil
 }
 
 func identityMapperFromCNMust(r *http.Request) (identity.Identity, error) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return nil, errors.New("missing client certificate")
 	}
-	return identity.NewIdentity("user", r.TLS.PeerCertificates[0].Subject.CommonName, "", nil, "", ""), nil
+	return identity.NewIdentity("user", r.TLS.PeerCertificates[0].Subject.CommonName, "", nil, "", "", identity.MethodCertificate), nil
 }
 
 type serviceX struct {

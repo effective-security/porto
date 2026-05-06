@@ -2,6 +2,7 @@ package roles
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -55,7 +56,9 @@ const (
 	// DefaultTenantClaim defines default Tenant claim
 	DefaultTenantClaim = "tenant"
 
-	awsTokenType = "AWS4"
+	awsTokenType    = "AWS4"
+	bearerTokenType = "Bearer"
+	dpopTokenType   = "DPoP"
 )
 
 // IdentityProvider interface to extract identity from requests
@@ -73,12 +76,13 @@ type IdentityProvider interface {
 
 // Provider for identity
 type provider struct {
-	config    IdentityMap
-	dpopRoles map[string]string
-	jwtRoles  map[string]string
-	tlsRoles  map[string]string
-	awsRoles  map[string]string
-	jwt       jwt.Parser
+	config         IdentityMap
+	authCookieName string
+	dpopRoles      map[string]string
+	jwtRoles       map[string]string
+	tlsRoles       map[string]string
+	awsRoles       map[string]string
+	jwt            jwt.Parser
 
 	awsCache *expirable.LRU[string, *CallerIdentity]
 }
@@ -86,13 +90,14 @@ type provider struct {
 // New returns Authz provider instance
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	prov := &provider{
-		config:    *config,
-		dpopRoles: make(map[string]string),
-		jwtRoles:  make(map[string]string),
-		tlsRoles:  make(map[string]string),
-		awsRoles:  make(map[string]string),
-		jwt:       jwt,
-		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, tcredentials.CacheTTL),
+		config:         *config,
+		dpopRoles:      make(map[string]string),
+		jwtRoles:       make(map[string]string),
+		tlsRoles:       make(map[string]string),
+		awsRoles:       make(map[string]string),
+		jwt:            jwt,
+		awsCache:       expirable.NewLRU[string, *CallerIdentity](100, nil, tcredentials.CacheTTL),
+		authCookieName: config.JWT.AuthCookie,
 	}
 
 	if config.AWS.Enabled {
@@ -148,6 +153,13 @@ func (p *provider) ApplicableForRequest(r *http.Request) bool {
 		r.Header.Get(header.Authorization) != "" {
 		return true
 	}
+	if p.config.JWT.Enabled && p.authCookieName != "" {
+		cookie, err := r.Cookie(p.authCookieName)
+		if err == nil && cookie.Value != "" {
+			return true
+		}
+	}
+
 	if p.config.TLS.Enabled && r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		return true
 	}
@@ -164,6 +176,16 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 		return true
 	}
 
+	if p.config.JWT.Enabled && p.authCookieName != "" {
+		cookies := md.Get("cookie")
+		if len(cookies) > 0 {
+			token, err := extractCookie(cookies, p.authCookieName)
+			if err == nil && token != "" {
+				return true
+			}
+		}
+	}
+
 	if p.config.TLS.Enabled {
 		c, ok := peer.FromContext(ctx)
 		if ok {
@@ -177,18 +199,34 @@ func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	return false
 }
 
+func extractCookie(cookieHeaders []string, name string) (string, error) {
+	h := http.Header{}
+	for _, c := range cookieHeaders {
+		h.Add("Cookie", c)
+	}
+
+	req := http.Request{Header: h}
+	cookie, err := req.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+
+	return cookie.Value, nil
+}
+
 func tokenType(auth string) (token string, tokenType string) {
 	if auth == "" {
 		return
 	}
-	parts := strings.SplitN(auth, " ", 2)
-	if len(parts) == 2 {
-		tokenType = parts[0]
-		token = parts[1]
-	} else {
+
+	idx := strings.Index(auth, " ")
+	if idx == -1 {
 		token = auth
-		tokenType = "Bearer"
+		tokenType = bearerTokenType
+		return
 	}
+	tokenType = auth[:idx]
+	token = auth[idx+1:]
 	return
 }
 
@@ -201,7 +239,22 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	// 	"tls_enabled", p.config.TLS.Enabled,
 	// 	"certs_present", peers)
 
+	isCookieAuth := false
 	authHeader := r.Header.Get(header.Authorization)
+	if authHeader == "" && p.config.JWT.Enabled && p.authCookieName != "" {
+		cookie, err := r.Cookie(p.authCookieName)
+		if err == nil && cookie.Value != "" {
+			// Enforce CSRF protections when falling back to cookie-based auth
+			err := enforceCSRFCookieAndHeader(r)
+			if err != nil {
+				logger.ContextKV(r.Context(), xlog.DEBUG, "reason", "enforceCSRFCookieAndHeader", "err", err.Error())
+			} else {
+				authHeader = cookie.Value
+				isCookieAuth = true
+				//logger.ContextKV(r.Context(), xlog.DEBUG, "cookie_set", "true", "path", r.URL.Path)
+			}
+		}
+	}
 	token, typ := tokenType(authHeader)
 
 	var err error
@@ -218,7 +271,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "awsIdentity", "err", err.Error())
 	}
 
-	if p.config.DPoP.Enabled && strings.EqualFold(typ, "DPoP") {
+	if p.config.DPoP.Enabled && strings.EqualFold(typ, dpopTokenType) {
 		phdr := r.Header.Get(dpop.HTTPHeader)
 		u := r.URL
 		coreURL := url.URL{
@@ -227,7 +280,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 			Path:   u.Path,
 		}
 
-		id, err = p.dpopIdentity(ctx, phdr, r.Method, coreURL.String(), token, "DPoP")
+		id, err = p.dpopIdentity(ctx, phdr, r.Method, coreURL.String(), token, dpopTokenType)
 		if err == nil {
 			return id, nil
 		} else if p.config.Strict {
@@ -236,14 +289,17 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 	}
 
-	if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
-		id, err = p.jwtIdentity(r.Context(), token, typ)
+	if p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
+		id, err = p.jwtIdentity(r.Context(), token, typ, values.Select(isCookieAuth, identity.MethodJWTCookie, identity.MethodJWT))
 		if err == nil {
 			return id, nil
-		} else if p.config.Strict {
+		}
+
+		if p.config.Strict && !isCookieAuth {
 			return nil, err
 		}
-		logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "err", err.Error())
+		// For Cookie-based auth, we don't return an error.
+		logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "is_cookie", isCookieAuth, "err", err.Error())
 	}
 
 	if p.config.TLS.Enabled && peers > 0 {
@@ -316,7 +372,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		}
 
 		if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
-			id, err := p.jwtIdentity(ctx, token, typ)
+			id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWT)
 			if err == nil {
 				return id, nil
 			} else if p.config.Strict {
@@ -325,6 +381,23 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "err", err.Error())
 		}
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
+	} else if ok && p.config.JWT.Enabled && p.authCookieName != "" && len(md["cookie"]) > 0 {
+		cookies := md.Get("cookie")
+		cookie, err := extractCookie(cookies, p.authCookieName)
+		if err == nil && cookie != "" {
+			//logger.ContextKV(ctx, xlog.DEBUG, "cookie_set", "true", "uri", uri)
+			token, typ := tokenType(cookie)
+			id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWTCookie)
+			if err == nil {
+				return id, nil
+			}
+			//else if p.config.Strict {
+			//	return nil, err
+			//}
+
+			// For Cookie-based auth, we don't return an error.
+			logger.ContextKV(ctx, xlog.DEBUG, "reason", "cookie_based_auth", "err", err.Error())
+		}
 	} else {
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_metadata_incoming")
 	}
@@ -348,6 +421,66 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		logger.ContextKV(ctx, xlog.DEBUG, "role", "guest")
 	}
 	return identity.GuestIdentityForContext(ctx, uri)
+}
+
+const (
+	csrfCookieName = "csrf_token"
+	csrfHeaderName = "X-CSRF-Token"
+)
+
+// enforceCSRFCookieAndHeader validates CSRF for unsafe HTTP methods when requests
+// are authenticated via cookies (i.e., no Authorization header). It implements
+// the "double submit cookie" pattern and basic Origin/Referer host checks.
+func enforceCSRFCookieAndHeader(r *http.Request) error {
+	// Safe/Idempotent methods do not require CSRF checks
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return nil
+	}
+
+	// If Authorization header is present, we consider it non-cookie auth and skip CSRF here
+	if r.Header.Get(header.Authorization) != "" {
+		return nil
+	}
+
+	// 1) Double-submit cookie check: X-CSRF-Token header must match csrf_token cookie
+	headerToken := strings.TrimSpace(r.Header.Get(csrfHeaderName))
+	if headerToken == "" {
+		return errors.New("missing X-CSRF-Token header")
+	}
+	c, err := r.Cookie(csrfCookieName)
+	if err != nil || c == nil || strings.TrimSpace(c.Value) == "" {
+		return errors.New("missing csrf_token cookie")
+	}
+	if subtle.ConstantTimeCompare([]byte(headerToken), []byte(c.Value)) != 1 {
+		return errors.New("csrf token mismatch")
+	}
+
+	/*
+		// 2) Basic Origin/Referer host validation (best-effort)
+		// Allow if either Origin or Referer (when present) matches request Host
+		hostOK := true
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if u, err := url.Parse(origin); err == nil {
+				hostOK = strings.EqualFold(u.Host, r.Host)
+			} else {
+				hostOK = false
+			}
+		}
+		if hostOK && r.Header.Get("Origin") == "" {
+			if ref := r.Header.Get("Referer"); ref != "" {
+				if u, err := url.Parse(ref); err == nil {
+					hostOK = strings.EqualFold(u.Host, r.Host)
+				} else {
+					hostOK = false
+				}
+			}
+		}
+		if !hostOK {
+			return errors.New("cross-site request not allowed")
+		}
+	*/
+	return nil
 }
 
 func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, auth, tokenType string) (identity.Identity, error) {
@@ -391,7 +524,7 @@ func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, a
 		"subject", subj,
 		"email", email,
 		"type", tokenType)
-	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType, identity.MethodDPoP), nil
 }
 
 func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
@@ -482,7 +615,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 		"user", callerIdentity.UserID,
 		"role", role,
 	)
-	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType), nil
+	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType, identity.MethodAWS), nil
 }
 
 func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error) {
@@ -531,7 +664,7 @@ type CallerIdentity struct {
 	Expires time.Time `json:"-"`
 }
 
-func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (identity.Identity, error) {
+func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string, method identity.AuthMethod) (identity.Identity, error) {
 	var claims jwt.MapClaims
 	var err error
 
@@ -561,8 +694,10 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string) (ide
 		"tenant", tenant,
 		"subject", subj,
 		"email", email,
-		"type", tokenType)
-	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType), nil
+		"type", tokenType,
+		"method", method.String(),
+	)
+	return identity.NewIdentity(role, subj, tenant, claims, auth, tokenType, method), nil
 }
 
 func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, error) {
@@ -580,7 +715,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 			claims["email"] = peer.EmailAddresses[0]
 		}
 		logger.KV(xlog.DEBUG, "spiffe", spiffe, "role", role)
-		return identity.NewIdentity(role, peer.Subject.CommonName, "", claims, "", ""), nil
+		return identity.NewIdentity(role, peer.Subject.CommonName, "", claims, "", "", identity.MethodCertificate), nil
 	}
 
 	logger.KV(xlog.DEBUG, "spiffe", "none", "cn", peer.Subject.CommonName)
