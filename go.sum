@@ -140,8 +140,8 @@ github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/effective-security/metrics v0.8.135 h1:2gzJO15H+8W9HyZxd3MSeowqvjoPgRnEET9lsjR2KWQ=
-github.com/effective-security/metrics v0.8.135/go.mod h1:ryTosJ9QBgKs+o/enrREvBQ3CHAom3S5xSFD6E9nBK0=
+github.com/effective-security/metrics v0.8.136 h1:OzwEXQ9yFDqay6yjpUXO1del4RwUXMldvX95jESEMgo=
+github.com/effective-security/metrics v0.8.136/go.mod h1:ryTosJ9QBgKs+o/enrREvBQ3CHAom3S5xSFD6E9nBK0=
 github.com/effective-security/x v0.16.89 h1:9nEXpgQSi8DjEZcaQxFdxa6cfJ+D0kyF6H2fC/11SF8=
 github.com/effective-security/x v0.16.89/go.mod h1:F9OTNwX8OfHGu9vaSxG1UDCD18UK4R/IpUaGe0XrvIk=
 github.com/effective-security/xdb v0.24.139 h1:fmerWL+U3kGVWmfXspy/zXjXrKRVrggmakPX+D4eiXA=

@@ -54,6 +54,7 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 		GlobalPrefix:         cfg.Prefix,
 		AllowedPrefixes:      cfg.AllowedPrefixes,
 		BlockedPrefixes:      cfg.BlockedPrefixes,
+		NumberLabelPrefix:    cfg.PrefixForNumberLabels,
 	}
 
 	for _, tag := range cfg.GlobalTags {
