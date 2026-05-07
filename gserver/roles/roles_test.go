@@ -88,7 +88,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
-		assert.Equal(t, identity.MethodJWT, id.AuthType())
+		assert.Equal(t, identity.MethodJWT, id.AuthMethod())
 	})
 
 	t.Run("AT default role http", func(t *testing.T) {
@@ -101,7 +101,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
-		assert.Equal(t, identity.MethodJWT, id.AuthType())
+		assert.Equal(t, identity.MethodJWT, id.AuthMethod())
 	})
 
 	t.Run("default role dpop", func(t *testing.T) {
@@ -128,7 +128,7 @@ func Test_JWT(t *testing.T) {
 		assert.Equal(t, "jwt_authenticated", id.Role())
 		assert.Equal(t, "t12341234", id.Tenant())
 		assert.Equal(t, "denis@trusty.com", id.Subject())
-		assert.Equal(t, identity.MethodJWT, id.AuthType())
+		assert.Equal(t, identity.MethodJWT, id.AuthMethod())
 	})
 
 	t.Run("tls:trusty-client", func(t *testing.T) {
@@ -147,7 +147,7 @@ func Test_JWT(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
-		assert.Equal(t, identity.MethodCertificate, id.AuthType())
+		assert.Equal(t, identity.MethodCertificate, id.AuthMethod())
 
 		//
 		// gRPC
@@ -156,7 +156,7 @@ func Test_JWT(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
-		assert.Equal(t, identity.MethodCertificate, id.AuthType())
+		assert.Equal(t, identity.MethodCertificate, id.AuthMethod())
 	})
 }
 
@@ -194,7 +194,7 @@ func Test_JWT_CookieAuth(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
-		assert.Equal(t, identity.MethodJWTCookie, id.AuthType())
+		assert.Equal(t, identity.MethodJWTCookie, id.AuthMethod())
 	})
 
 	t.Run("POST_cookie_without_csrf_falls_back_to_guest", func(t *testing.T) {
@@ -215,7 +215,7 @@ func Test_JWT_CookieAuth(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "jwt_authenticated", id.Role())
-		assert.Equal(t, identity.MethodJWTCookie, id.AuthType())
+		assert.Equal(t, identity.MethodJWTCookie, id.AuthMethod())
 	})
 
 	t.Run("strict_invalid_jwt_cookie_does_not_fail_request", func(t *testing.T) {
@@ -336,7 +336,7 @@ func Test_DPoP(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-admin", id.Role())
 		assert.Equal(t, "12234", id.Subject())
-		assert.Equal(t, identity.MethodDPoP, id.AuthType())
+		assert.Equal(t, identity.MethodDPoP, id.AuthMethod())
 	})
 }
 
@@ -643,7 +643,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err := p.IdentityFromRequest(r)
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
-		assert.Equal(t, identity.MethodCertificate, id.AuthType())
+		assert.Equal(t, identity.MethodCertificate, id.AuthMethod())
 		claims := id.Claims()
 		assert.Equal(t, "trusty-client", claims["role"])
 		assert.Equal(t, "trusty/client", claims["spiffe"])
@@ -657,7 +657,7 @@ func TestTLSOnly(t *testing.T) {
 		id, err = p.IdentityFromContext(ctx, "/test")
 		require.NoError(t, err)
 		assert.Equal(t, "trusty-client", id.Role())
-		assert.Equal(t, identity.MethodCertificate, id.AuthType())
+		assert.Equal(t, identity.MethodCertificate, id.AuthMethod())
 		claims = id.Claims()
 		assert.Equal(t, "trusty-client", claims["role"])
 		assert.Equal(t, "trusty/client", claims["spiffe"])

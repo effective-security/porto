@@ -18,6 +18,13 @@ type IdentityMap struct {
 	AWS AWSIdentityMap `json:"aws" yaml:"aws"`
 }
 
+func (c *IdentityMap) GetAuthCookieName() string {
+	if c == nil {
+		return ""
+	}
+	return c.JWT.AuthCookie
+}
+
 // GenericIdentityMap provides roles mapping
 type GenericIdentityMap struct {
 	// DefaultAuthenticatedRole specifies role name for identity, if not found in maps

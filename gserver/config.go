@@ -123,7 +123,6 @@ type SwaggerCfg struct {
 
 // CORS contains configuration for CORS.
 type CORS struct {
-
 	// Enabled specifies if the CORS is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 
