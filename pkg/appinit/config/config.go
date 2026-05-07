@@ -13,6 +13,9 @@ type Metrics struct {
 	// Prefix specifies the prefix added to all metrics
 	Prefix string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
 
+	// PrefixForNumberLabels specifies a prefix to add to tag values that are 64-bit numbers
+	PrefixForNumberLabels string `json:"prefix_for_number_labels,omitempty" yaml:"prefix_for_number_labels,omitempty"`
+
 	// Prometheus provider config
 	Prometheus *Prometheus `json:"prometheus,omitempty" yaml:"prometheus,omitempty"`
 
