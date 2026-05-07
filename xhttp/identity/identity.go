@@ -51,7 +51,7 @@ type Identity interface {
 	Claims() jwt.MapClaims
 	AccessToken() string
 	TokenType() string
-	AuthType() AuthMethod
+	AuthMethod() AuthMethod
 }
 
 // ProviderFromRequest returns Identity from supplied HTTP request
@@ -61,7 +61,7 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 
 // NewIdentity returns a new Identity instance with the indicated role
-func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string, authType AuthMethod) Identity {
+func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string, authMethod AuthMethod) Identity {
 	id := identity{
 		role:        role,
 		subject:     subject,
@@ -69,7 +69,7 @@ func NewIdentity(role, subject, tenant string, claims map[string]any, accessToke
 		claims:      jwt.MapClaims{},
 		accessToken: accessToken,
 		tokenType:   tokenType,
-		authType:    authType,
+		authMethod:  authMethod,
 	}
 	if claims != nil {
 		_ = id.claims.Add(claims)
@@ -91,7 +91,7 @@ type identity struct {
 
 	accessToken string
 	tokenType   string
-	authType    AuthMethod
+	authMethod  AuthMethod
 }
 
 // Subject returns the client's subject.
@@ -121,9 +121,9 @@ func (c identity) TokenType() string {
 	return c.tokenType
 }
 
-// AuthType returns auth type for Identity
-func (c identity) AuthType() AuthMethod {
-	return c.authType
+// AuthMethod returns auth type for Identity
+func (c identity) AuthMethod() AuthMethod {
+	return c.authMethod
 }
 
 // Claims returns application specific user info

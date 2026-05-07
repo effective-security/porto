@@ -111,5 +111,5 @@ func TestAuthMethodString(t *testing.T) {
 
 func TestNewIdentityAuthType(t *testing.T) {
 	id := NewIdentity("r", "s", "t", nil, "at", "Bearer", MethodJWT)
-	assert.Equal(t, MethodJWT, id.AuthType())
+	assert.Equal(t, MethodJWT, id.AuthMethod())
 }
