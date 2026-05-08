@@ -49,7 +49,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 		r.Header.Set(csrfHeaderName, tok)
 		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "other"})
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r), "csrf token mismatch")
+		assert.EqualError(t, enforceCSRFCookieAndHeader(r), "csrf token mismatch: passed 'same-token-value', expected 'other'")
 	})
 	/*
 		t.Run("origin_matches_host", func(t *testing.T) {
