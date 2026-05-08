@@ -261,7 +261,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 	var id identity.Identity
 
 	ctx := r.Context()
-	if p.config.AWS.Enabled && strings.EqualFold(typ, awsTokenType) {
+	if authHeader != "" && p.config.AWS.Enabled && strings.EqualFold(typ, awsTokenType) {
 		id, err = p.awsIdentity(ctx, token, typ)
 		if err == nil {
 			return id, nil
@@ -271,7 +271,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "awsIdentity", "err", err.Error())
 	}
 
-	if p.config.DPoP.Enabled && strings.EqualFold(typ, dpopTokenType) {
+	if authHeader != "" && p.config.DPoP.Enabled && strings.EqualFold(typ, dpopTokenType) {
 		phdr := r.Header.Get(dpop.HTTPHeader)
 		u := r.URL
 		coreURL := url.URL{
@@ -289,7 +289,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 	}
 
-	if p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
+	if authHeader != "" && p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
 		id, err = p.jwtIdentity(r.Context(), token, typ, values.Select(isCookieAuth, identity.MethodJWTCookie, identity.MethodJWT))
 		if err == nil {
 			return id, nil
@@ -361,8 +361,8 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 
 		dhdr := md["dpop"]
 		if p.config.DPoP.Enabled &&
-			strings.EqualFold(typ, "DPoP") && len(dhdr) > 0 {
-			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, "DPoP")
+			strings.EqualFold(typ, dpopTokenType) && len(dhdr) > 0 {
+			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, dpopTokenType)
 			if err == nil {
 				return id, nil
 			} else if p.config.Strict {
@@ -371,7 +371,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 		}
 
-		if p.config.JWT.Enabled && strings.EqualFold(typ, "Bearer") {
+		if p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
 			id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWT)
 			if err == nil {
 				return id, nil
@@ -677,11 +677,11 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string, meth
 
 	claims, err = p.jwt.ParseToken(ctx, auth, &cfg)
 	if err != nil {
-		return nil, errors.WithMessage(err, "unable to parse JWT token")
+		return nil, errors.WithMessagef(err, "unable to parse %s %s token", method.String(), tokenType)
 	}
 
 	if claims.String("cnf") != "" {
-		return nil, errors.New("DPoP token is not supported for Bearer authentication")
+		return nil, errors.Errorf("DPoP token used for %s %s authentication", method.String(), tokenType)
 	}
 
 	email := claims.String("email")
