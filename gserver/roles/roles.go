@@ -453,7 +453,7 @@ func enforceCSRFCookieAndHeader(r *http.Request) error {
 		return errors.New("missing csrf_token cookie")
 	}
 	if subtle.ConstantTimeCompare([]byte(headerToken), []byte(c.Value)) != 1 {
-		return errors.New("csrf token mismatch")
+		return errors.Errorf("csrf token mismatch: passed '%s', expected '%s'", headerToken, c.Value)
 	}
 
 	/*
