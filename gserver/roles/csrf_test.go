@@ -20,36 +20,36 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 	t.Run("safe_methods_skip", func(t *testing.T) {
 		for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace} {
 			r := httptest.NewRequest(method, "https://example.com/api", nil)
-			assert.NoError(t, enforceCSRFCookieAndHeader(r), method)
+			assert.NoError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), method)
 		}
 	})
 
 	t.Run("authorization_header_skips", func(t *testing.T) {
 		r := newPost()
 		r.Header.Set(header.Authorization, header.Bearer+" x")
-		assert.NoError(t, enforceCSRFCookieAndHeader(r))
+		assert.NoError(t, enforceCSRFCookieAndHeader(r, "csrf_token"))
 	})
 
 	t.Run("missing_csrf_header", func(t *testing.T) {
 		r := newPost()
-		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: tok})
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r), "missing X-CSRF-Token header")
+		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "missing X-CSRF-Token header")
 	})
 
 	t.Run("missing_csrf_cookie", func(t *testing.T) {
 		r := newPost()
 		r.Header.Set(csrfHeaderName, tok)
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r), "missing csrf_token cookie")
+		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "missing CSRF cookie")
 	})
 
 	t.Run("csrf_mismatch", func(t *testing.T) {
 		r := newPost()
 		r.Header.Set(csrfHeaderName, tok)
-		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "other"})
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: "other"})
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r), "csrf token mismatch: passed 'same-token-value', expected 'other'")
+		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "CSRF token mismatch: passed 'same-token-value', expected 'other'")
 	})
 	/*
 		t.Run("origin_matches_host", func(t *testing.T) {

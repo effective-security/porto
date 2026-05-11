@@ -175,12 +175,15 @@ func Test_JWT_CookieAuth(t *testing.T) {
 	}
 
 	p, err := roles.New(&roles.IdentityMap{
+		Cookies: roles.CookiesConfig{
+			Auth: "auth_token",
+			CSRF: "csrf_token",
+		},
 		JWT: roles.JWTIdentityMap{
 			SubjectClaim:             "email",
 			RoleClaim:                "email",
 			Enabled:                  true,
 			DefaultAuthenticatedRole: "jwt_authenticated",
-			AuthCookie:               "auth_token",
 			Roles: map[string][]string{
 				"trusty-client": {"denis@trusty.ca"},
 			},
@@ -222,12 +225,15 @@ func Test_JWT_CookieAuth(t *testing.T) {
 		badMock := mockJWT{claims: claims, err: errors.New("invalid token")}
 		pStrict, err := roles.New(&roles.IdentityMap{
 			Strict: true,
+			Cookies: roles.CookiesConfig{
+				Auth: "auth_token",
+				CSRF: "csrf_token",
+			},
 			JWT: roles.JWTIdentityMap{
 				SubjectClaim:             "email",
 				RoleClaim:                "email",
 				Enabled:                  true,
 				DefaultAuthenticatedRole: "jwt_authenticated",
-				AuthCookie:               "auth_token",
 				Roles: map[string][]string{
 					"trusty-client": {"denis@trusty.ca"},
 				},
@@ -246,12 +252,15 @@ func Test_JWT_CookieAuth(t *testing.T) {
 		badMock := mockJWT{claims: claims, err: errors.New("invalid token")}
 		pStrict, err := roles.New(&roles.IdentityMap{
 			Strict: true,
+			Cookies: roles.CookiesConfig{
+				Auth: "auth_token",
+				CSRF: "csrf_token",
+			},
 			JWT: roles.JWTIdentityMap{
 				SubjectClaim:             "email",
 				RoleClaim:                "email",
 				Enabled:                  true,
 				DefaultAuthenticatedRole: "jwt_authenticated",
-				AuthCookie:               "auth_token",
 				Roles: map[string][]string{
 					"trusty-client": {"denis@trusty.ca"},
 				},

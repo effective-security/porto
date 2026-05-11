@@ -57,7 +57,7 @@ func (d *disco) Register(server string, service any) error {
 // Find interface
 func (d *disco) Find(server string, v any) error {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.Errorf("a pointer to interface is required, invalid type: %v", rv)
 	}
 
@@ -82,7 +82,7 @@ func (d *disco) Find(server string, v any) error {
 // ForEach interface
 func (d *disco) ForEach(v any, f func(typ string) error) error {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.Errorf("a pointer to interface is required, invalid type: %v", rv)
 	}
 
