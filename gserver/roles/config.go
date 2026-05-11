@@ -8,6 +8,9 @@ type IdentityMap struct {
 	// without strict mode, it will try all methods and return
 	Strict bool `json:"strict" yaml:"strict"`
 
+	// Cookies configuration
+	Cookies CookiesConfig `json:"cookies" yaml:"cookies"`
+
 	// TLS identity map
 	TLS GenericIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map
@@ -18,11 +21,23 @@ type IdentityMap struct {
 	AWS AWSIdentityMap `json:"aws" yaml:"aws"`
 }
 
-func (c *IdentityMap) GetAuthCookieName() string {
-	if c == nil {
-		return ""
+func (i *IdentityMap) GetCookiesConfig() CookiesConfig {
+	if i == nil {
+		return CookiesConfig{}
 	}
-	return c.JWT.AuthCookie
+	return i.Cookies
+}
+
+type CookiesConfig struct {
+	// Auth specifies the name of the cookie to be used for JWT authentication.
+	// If empty, the auth cookie is not used.
+	Auth string `json:"auth" yaml:"auth"`
+	// CSRF specifies the name of the cookie to be used for CSRF protection.
+	// If empty, the CSRF cookie is not used.
+	CSRF string `json:"csrf" yaml:"csrf"`
+	// Domain specifies the domain of the cookie to be used for authentication and CSRF protection.
+	// If empty, the cookie domain is not set.
+	Domain string `json:"domain" yaml:"domain"`
 }
 
 // GenericIdentityMap provides roles mapping
@@ -69,8 +84,4 @@ type JWTIdentityMap struct {
 	TenantClaim string `json:"tenant_claim" yaml:"tenant_claim"`
 	// Roles is a map of role to JWT identity
 	Roles map[string][]string `json:"roles" yaml:"roles"`
-	// AuthCookie specifies the name of the cookie to be used for authentication.
-	// If empty, the cookie is not used for authentication.
-	// This option is not used for `jwt_dpop`.
-	AuthCookie string `json:"auth_cookie" yaml:"auth_cookie"`
 }
