@@ -29,7 +29,7 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "roles")
+var logger = xlog.NewPackageLogger("github.com/effective-security/porto/gserver", "roles")
 
 const (
 	// GuestRoleName defines role name for an unauthenticated user
@@ -346,7 +346,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, dumpDM(md)...)
 		}
 
-		if p.config.AWS.Enabled &&
+		if token != "" && p.config.AWS.Enabled &&
 			strings.EqualFold(typ, awsTokenType) {
 			id, err := p.awsIdentity(ctx, token, typ)
 			if err == nil {
@@ -358,7 +358,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		}
 
 		dhdr := md["dpop"]
-		if p.config.DPoP.Enabled &&
+		if token != "" && p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, dpopTokenType) && len(dhdr) > 0 {
 			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, dpopTokenType)
 			if err == nil {
@@ -369,7 +369,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "dpopIdentity", "err", err.Error())
 		}
 
-		if p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
+		if token != "" && p.config.JWT.Enabled && strings.EqualFold(typ, bearerTokenType) {
 			id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWT)
 			if err == nil {
 				return id, nil
@@ -383,18 +383,27 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		cookies := md.Get("cookie")
 		cookie, err := extractCookie(cookies, p.config.Cookies.Auth)
 		if err == nil && cookie != "" {
-			//logger.ContextKV(ctx, xlog.DEBUG, "cookie_set", "true", "uri", uri)
 			token, typ := tokenType(cookie)
-			id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWTCookie)
-			if err == nil {
-				return id, nil
-			}
-			//else if p.config.Strict {
-			//	return nil, err
-			//}
+			// logger.ContextKV(ctx, xlog.DEBUG,
+			// 	"cookie_set", "true",
+			// 	"uri", uri,
+			// 	"type", typ,
+			// 	"token", slices.StringUpto(token, 12),
+			// )
 
-			// For Cookie-based auth, we don't return an error.
-			logger.ContextKV(ctx, xlog.DEBUG, "reason", "cookie_based_auth", "err", err.Error())
+			if token != "" {
+				id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWTCookie)
+				if err == nil {
+					return id, nil
+				}
+
+				// For Cookie-based auth, we don't return an error.
+				logger.ContextKV(ctx, xlog.DEBUG,
+					"reason", "cookie_based_auth",
+					"type", typ,
+					"token", slices.StringUpto(token, 12),
+					"err", err.Error())
+			}
 		}
 	} else {
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_metadata_incoming")
