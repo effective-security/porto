@@ -6,10 +6,10 @@ require (
 	github.com/cockroachdb/errors v1.13.0
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/effective-security/metrics v0.8.136
-	github.com/effective-security/x v0.16.89
-	github.com/effective-security/xdb v0.24.141
+	github.com/effective-security/x v0.16.91
+	github.com/effective-security/xdb v0.24.144
 	github.com/effective-security/xlog v0.10.53
-	github.com/effective-security/xpki v0.26.260
+	github.com/effective-security/xpki v0.26.264
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.5
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -30,7 +30,7 @@ require (
 	go.uber.org/dig v1.19.0
 	golang.org/x/crypto v0.51.0
 	golang.org/x/net v0.54.0
-	google.golang.org/grpc v1.81.0
+	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -130,15 +130,13 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	go.uber.org/config v1.4.0 // indirect
+	go.uber.org/config v1.4.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
-	golang.org/x/lint v0.0.0-20241112194109-818c5a804067 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260504160031-60b97b32f348 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260519071638-aa98bba5eb94 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
