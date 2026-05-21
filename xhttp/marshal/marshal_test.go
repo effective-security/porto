@@ -88,17 +88,17 @@ func TestWriteJSON_Error(t *testing.T) {
 		{
 			httperror.InvalidParam("foo"),
 			`{"code":"invalid_parameter","message":"foo"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"invalid_parameter\", msg=\"foo\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"invalid_parameter\", msg=\"foo\", content-length=0, fn=\"marshal_test.go\", ln=145\n",
 		},
 		{
 			httperror.InvalidParam("foo").WithCause(errWithStack),
 			`{"code":"invalid_parameter","message":"foo"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"invalid_parameter\", msg=\"foo\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\", err=\"important info\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"invalid_parameter\", msg=\"foo\", content-length=0, fn=\"marshal_test.go\", ln=145, err=\"important info\"\n",
 		},
 		{
 			httperror.Unexpected("bar"), //.WithCause(errWithStack),
 			`{"code":"unexpected","message":"bar"}`,
-			"E | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=\"500\", code=\"unexpected\", msg=\"bar\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\"\n",
+			"E | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"bar\", content-length=0, fn=\"marshal_test.go\", ln=145\n",
 		},
 		// {
 		// 	errors.Errorf("generic"),
@@ -113,22 +113,22 @@ func TestWriteJSON_Error(t *testing.T) {
 		{
 			errors.WithMessage(httperror.InvalidParam("bar"), "wrapped"),
 			`{"code":"invalid_parameter","message":"bar"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"invalid_parameter\", msg=\"bar\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"invalid_parameter\", msg=\"bar\", content-length=0, fn=\"marshal_test.go\", ln=145\n",
 		},
 		{
 			httperror.NewGrpcFromCtx(context.Background(), codes.InvalidArgument, "pberror1"),
 			`{"code":"bad_request","message":"pberror1"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"bad_request\", msg=\"pberror1\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror1\", content-length=0, fn=\"marshal_test.go\", ln=145\n",
 		},
 		{
 			errors.WithMessage(httperror.NewGrpcFromCtx(context.Background(), codes.InvalidArgument, "pberror2"), "wrapped"),
 			`{"code":"bad_request","message":"pberror2"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"bad_request\", msg=\"pberror2\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror2\", content-length=0, fn=\"marshal_test.go\", ln=145\n",
 		},
 		{
 			errors.WithMessage(httperror.NewGrpcFromCtx(context.Background(), codes.InvalidArgument, "pberror2").WithCause(errWithStack), "wrapped"),
 			`{"code":"bad_request","message":"pberror2"}`,
-			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=\"400\", code=\"bad_request\", msg=\"pberror2\", content-length=\"0\", fn=\"marshal_test.go\", ln=\"145\", err=\"important info\"\n",
+			"I | pkg=xhttp, type=\"API_ERROR\", path=\"/test\", status=400, code=\"bad_request\", msg=\"pberror2\", content-length=0, fn=\"marshal_test.go\", ln=145, err=\"important info\"\n",
 		},
 	}
 
@@ -138,7 +138,7 @@ func TestWriteJSON_Error(t *testing.T) {
 			writer := bufio.NewWriter(&b)
 
 			xlog.SetGlobalLogLevel(xlog.INFO)
-			xlog.SetFormatter(xlog.NewPrettyFormatter(writer).Options(xlog.FormatSkipTime, xlog.FormatNoCaller))
+			xlog.SetFormatter(xlog.NewPrettyFormatter(writer).Options(xlog.FormatSkipTime(true), xlog.FormatWithCaller(false)))
 
 			r, _ := http.NewRequest(http.MethodGet, "/test", nil)
 			w := httptest.NewRecorder()

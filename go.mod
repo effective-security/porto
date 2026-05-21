@@ -5,11 +5,11 @@ go 1.26.3
 require (
 	github.com/cockroachdb/errors v1.13.0
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/effective-security/metrics v0.8.136
-	github.com/effective-security/x v0.16.91
-	github.com/effective-security/xdb v0.24.144
-	github.com/effective-security/xlog v0.10.53
-	github.com/effective-security/xpki v0.26.264
+	github.com/effective-security/metrics v0.8.138
+	github.com/effective-security/x v0.16.92
+	github.com/effective-security/xdb v0.24.145
+	github.com/effective-security/xlog v0.11.54
+	github.com/effective-security/xpki v0.26.265
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.5
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0

@@ -58,7 +58,7 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 		var sink io.Writer
 		if flags.LogStd {
 			sink = os.Stderr
-			formatter = xlog.NewPrettyFormatter(sink).Options(xlog.FormatWithColor)
+			formatter = xlog.NewPrettyFormatter(sink).Options(xlog.FormatWithColor(true))
 		} else {
 			// do not redirect stderr to our log files
 			log.SetOutput(os.Stderr)
@@ -86,15 +86,15 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 	} else if flags.LogJSON {
 		formatter = xlog.NewJSONFormatter(os.Stderr)
 	} else if flags.LogPretty {
-		formatter = xlog.NewPrettyFormatter(os.Stderr).Options(xlog.FormatWithColor)
+		formatter = xlog.NewPrettyFormatter(os.Stderr).Options(xlog.FormatWithColor(true))
 	} else {
 		formatter = xlog.NewStringFormatter(os.Stderr)
 	}
 
 	xlog.SetFormatter(formatter)
-	formatter.Options(xlog.FormatWithCaller)
+	formatter.Options(xlog.FormatWithCaller(true))
 	if flags.LogDebug {
-		formatter.Options(xlog.FormatWithLocation)
+		formatter.Options(xlog.FormatWithLocation(true))
 	}
 	logger.KV(xlog.INFO,
 		"status", "service_starting",
