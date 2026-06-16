@@ -60,4 +60,8 @@ const (
 	XFilename = "X-Filename"
 	// XForwardedProto contains the protocol
 	XForwardedProto = "X-Forwarded-Proto"
+	// XGRPCStream is set by gRPC-Web clients to indicate a streaming call.
+	// When present, the server must not apply HTTP-level gzip compression,
+	// as it would break streaming.
+	XGRPCStream = "X-Grpc-Stream"
 )

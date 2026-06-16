@@ -17,7 +17,7 @@ import (
 
 func TestGrpcWebResponse_Header(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	headers := g.Header()
 	require.NotNil(t, headers)
@@ -26,7 +26,7 @@ func TestGrpcWebResponse_Header(t *testing.T) {
 
 func TestGrpcWebResponse_Write(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	data := []byte("test data")
 	n, err := g.Write(data)
@@ -37,7 +37,7 @@ func TestGrpcWebResponse_Write(t *testing.T) {
 
 func TestGrpcWebResponse_WriteHeader(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.WriteHeader(http.StatusAccepted)
 	assert.Equal(t, http.StatusAccepted, resp.Code)
@@ -45,7 +45,7 @@ func TestGrpcWebResponse_WriteHeader(t *testing.T) {
 
 func TestGrpcWebResponse_Flush(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.Flush()
 	assert.Equal(t, 200, resp.Code)
@@ -53,7 +53,7 @@ func TestGrpcWebResponse_Flush(t *testing.T) {
 
 func TestGrpcWebResponse_PrepareHeadersJSON(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.headers.Set("Content-Type", "application/json")
 	g.prepareHeaders()
@@ -66,7 +66,7 @@ func TestGrpcWebResponse_PrepareHeadersJSON(t *testing.T) {
 
 func TestGrpcWebResponse_PrepareHeaders(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.headers.Set("Content-Type", "application/grpc-web+proto")
 	g.prepareHeaders()
@@ -79,7 +79,7 @@ func TestGrpcWebResponse_PrepareHeaders(t *testing.T) {
 
 func TestGrpcWebResponse_FinishRequest(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.finishRequest()
 	assert.Equal(t, http.StatusOK, resp.Code)
@@ -102,7 +102,7 @@ func TestExtractTrailingHeaders(t *testing.T) {
 
 func TestCopyTrailersToPayload(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.headers.Set("Grpc-Status", "0")
 	g.copyTrailersToPayload()
@@ -114,7 +114,7 @@ func TestCopyTrailersToPayload(t *testing.T) {
 
 func TestGrpcWebResponse_WriteText(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, false)
 
 	data := []byte("test data")
 	n, err := g.Write(data)
@@ -126,7 +126,7 @@ func TestGrpcWebResponse_WriteText(t *testing.T) {
 
 func TestGrpcWebResponse_PrepareHeadersText(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, false)
 
 	g.headers.Set("Content-Type", header.ApplicationGRPCWebText)
 	g.prepareHeaders()
@@ -139,7 +139,7 @@ func TestGrpcWebResponse_PrepareHeadersText(t *testing.T) {
 
 func TestGrpcWebResponse_CopyTrailersToPayloadText(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, "")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, false)
 
 	g.headers.Set("Grpc-Status", "0")
 	g.copyTrailersToPayload()
@@ -152,9 +152,28 @@ func TestGrpcWebResponse_CopyTrailersToPayloadText(t *testing.T) {
 	assert.Equal(t, byte(1<<7), decoded[0])
 }
 
+// TestGrpcWebResponse_NoCompression verifies that when compression is disabled
+// (e.g. for streaming calls) the body is written verbatim and no
+// Content-Encoding header is set.
+func TestGrpcWebResponse_NoCompression(t *testing.T) {
+	resp := httptest.NewRecorder()
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+
+	payload := []byte("hello world")
+	_, err := g.Write(payload)
+	require.NoError(t, err)
+
+	g.finishRequest()
+
+	// No HTTP-level content-encoding must be set.
+	assert.Empty(t, resp.Header().Get(header.ContentEncoding))
+	// Payload is written verbatim (not gzip compressed).
+	assert.True(t, bytes.HasPrefix(resp.Body.Bytes(), payload))
+}
+
 func TestGrpcWebResponse_GzipProto(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, header.Gzip)
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, true)
 
 	payload := []byte("hello gzip")
 	_, err := g.Write(payload)
@@ -172,7 +191,7 @@ func TestGrpcWebResponse_GzipProto(t *testing.T) {
 
 func TestGrpcWebResponse_GzipTextStreaming(t *testing.T) {
 	resp := httptest.NewRecorder()
-	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, header.Gzip)
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, true)
 
 	// Simulate server-side streaming: write two chunks
 	_, err := g.Write([]byte("hello "))
