@@ -555,7 +555,14 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					wh.Set("Access-Control-Allow-Credentials", "true")
 				}
 
-				w = newGrpcWebResponse(w, ct, r.Header.Get(header.AcceptEncoding))
+				// Only apply HTTP-level gzip for unary (non-streaming) calls.
+				// Streaming calls are flagged by the client via the
+				// header.XGRPCStream header; gzip-ing a stream forces the body
+				// to be buffered (fixed Content-Length) and swallows per-message
+				// flushes, which breaks streaming.
+				isStream := r.Header.Get(header.XGRPCStream) != ""
+				compress := !isStream && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip)
+				w = newGrpcWebResponse(w, ct, compress)
 				defer func() {
 					grw := w.(*grpcWebResponse)
 					grw.Close()

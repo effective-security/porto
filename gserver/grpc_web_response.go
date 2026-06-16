@@ -30,19 +30,23 @@ type grpcWebResponse struct {
 	contentType string
 }
 
-// newGrpcWebResponse creates a grpcWebResponse. If the client indicated that it
-// accepts gzip encoding ("Accept-Encoding" contains "gzip"), the response will
-// be transparently compressed and the appropriate headers will be set.
-func newGrpcWebResponse(resp http.ResponseWriter, ct string, acceptEncoding string) *grpcWebResponse {
+// newGrpcWebResponse creates a grpcWebResponse.
+//
+// When compress is true, the response body is transparently gzip-compressed and
+// the appropriate Content-Encoding header is set. Compression MUST only be
+// enabled for unary (non-streaming) responses: gRPC-Web has no concept of
+// HTTP-level streaming compression, and gzip-ing a stream forces the whole body
+// to be buffered (emitting a fixed Content-Length) and swallows per-message
+// flushes, which breaks streaming. The caller is responsible for disabling
+// compression for streaming calls (see header.XGRPCStream).
+func newGrpcWebResponse(resp http.ResponseWriter, ct string, compress bool) *grpcWebResponse {
 	g := &grpcWebResponse{
 		headers:     make(http.Header),
 		wrapped:     resp,
 		contentType: ct,
 	}
 
-	// Enable gzip compression only if requested by the client and only once
-	// per response.
-	if strings.Contains(acceptEncoding, header.Gzip) {
+	if compress {
 		g.compress = true
 		g.gz = gzip.NewWriter(resp)
 		// The Content-Encoding header must be set before headers are written.
@@ -115,6 +119,9 @@ func (w *grpcWebResponse) Flush() {
 		// Work around the fact that WriteHeader and a call to Flush would have caused a 200 response.
 		// This is the case when there is no payload.
 		if w.compress && w.gz != nil {
+			// Unary, compressed response: flush the gzip writer only. We do NOT
+			// flush the wrapped writer here so net/http can still compute a
+			// Content-Length for the buffered body.
 			err := w.gz.Flush()
 			if err != nil {
 				logger.KV(xlog.ERROR,
@@ -122,6 +129,9 @@ func (w *grpcWebResponse) Flush() {
 					"err", err.Error())
 			}
 		} else {
+			// Streaming (uncompressed) response: forwarding to the underlying
+			// writer is what enables streaming – each per-message flush is sent
+			// to the client as a chunk/DATA frame.
 			flushWriter(w.wrapped)
 		}
 	}

@@ -9,10 +9,10 @@ import (
 )
 
 // benchmarkGrpcWebResponse measures the cost of writing a single 1 KB payload
-// through a grpcWebResponse with the given content type while the client
-// advertises gzip support. It exercises the typical call pattern used by the
-// handler: create writer, stream request, then finish the request.
-func benchmarkGrpcWebResponse(b *testing.B, contentType string) {
+// through a grpcWebResponse with the given content type and compression flag.
+// It exercises the typical call pattern used by the handler: create writer,
+// stream request, then finish the request.
+func benchmarkGrpcWebResponse(b *testing.B, contentType string, compress bool) {
 	payload := bytes.Repeat([]byte("x"), 1024) // 1 KB
 
 	b.SetBytes(int64(len(payload)))
@@ -20,7 +20,7 @@ func benchmarkGrpcWebResponse(b *testing.B, contentType string) {
 
 	for i := 0; i < b.N; i++ {
 		resp := httptest.NewRecorder()
-		g := newGrpcWebResponse(resp, contentType, header.Gzip)
+		g := newGrpcWebResponse(resp, contentType, compress)
 
 		// Simulate a unary response: single write followed by finish.
 		_, _ = g.Write(payload)
@@ -28,12 +28,20 @@ func benchmarkGrpcWebResponse(b *testing.B, contentType string) {
 	}
 }
 
+func BenchmarkGrpcWebResponse_Proto(b *testing.B) {
+	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebProto, false)
+}
+
+func BenchmarkGrpcWebResponse_Text(b *testing.B) {
+	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebText, false)
+}
+
 func BenchmarkGrpcWebResponse_Proto_Gzip(b *testing.B) {
-	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebProto)
+	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebProto, true)
 }
 
 func BenchmarkGrpcWebResponse_Text_Gzip(b *testing.B) {
-	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebText)
+	benchmarkGrpcWebResponse(b, header.ApplicationGRPCWebText, true)
 }
 
 func benchmarkGrpcWebResponseStreaming(b *testing.B, contentType string) {
@@ -46,7 +54,8 @@ func benchmarkGrpcWebResponseStreaming(b *testing.B, contentType string) {
 
 	for i := 0; i < b.N; i++ {
 		resp := httptest.NewRecorder()
-		g := newGrpcWebResponse(resp, contentType, header.Gzip)
+		// Streaming calls are never compressed.
+		g := newGrpcWebResponse(resp, contentType, false)
 		for j := 0; j < chunksPerResponse; j++ {
 			_, _ = g.Write(chunk)
 		}
@@ -54,10 +63,10 @@ func benchmarkGrpcWebResponseStreaming(b *testing.B, contentType string) {
 	}
 }
 
-func BenchmarkGrpcWebResponseStreaming_Proto_Gzip(b *testing.B) {
+func BenchmarkGrpcWebResponseStreaming_Proto(b *testing.B) {
 	benchmarkGrpcWebResponseStreaming(b, header.ApplicationGRPCWebProto)
 }
 
-func BenchmarkGrpcWebResponseStreaming_Text_Gzip(b *testing.B) {
+func BenchmarkGrpcWebResponseStreaming_Text(b *testing.B) {
 	benchmarkGrpcWebResponseStreaming(b, header.ApplicationGRPCWebText)
 }
