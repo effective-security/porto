@@ -3,13 +3,13 @@ module github.com/effective-security/porto
 go 1.26.3
 
 require (
-	github.com/cockroachdb/errors v1.13.0
+	github.com/cockroachdb/errors v1.14.0
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/effective-security/metrics v0.8.138
-	github.com/effective-security/x v0.16.92
-	github.com/effective-security/xdb v0.24.145
-	github.com/effective-security/xlog v0.11.54
-	github.com/effective-security/xpki v0.26.265
+	github.com/effective-security/x v0.16.93
+	github.com/effective-security/xdb v0.24.146
+	github.com/effective-security/xlog v0.11.55
+	github.com/effective-security/xpki v0.26.266
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.5
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -76,8 +76,8 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/getsentry/sentry-go v0.46.2 // indirect
+	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/getsentry/sentry-go v0.47.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -113,7 +113,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.68.1 // indirect
+	github.com/prometheus/common v0.69.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
@@ -125,17 +125,17 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0 // indirect
-	go.opentelemetry.io/otel v1.43.0 // indirect
-	go.opentelemetry.io/otel/metric v1.43.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/config v1.4.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260618152121-87f3d3e198d3 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
