@@ -140,8 +140,12 @@ func (tc *transportCredential) Clone() grpccredentials.TransportCredentials {
 	}
 }
 
-func (tc *transportCredential) OverrideServerName(serverNameOverride string) error {
-	return tc.gtc.OverrideServerName(serverNameOverride)
+// OverrideServerName implements the (deprecated) grpccredentials.TransportCredentials
+// method. gRPC no longer uses it; callers should use grpc.WithAuthority to override
+// the authority on a channel instead of configuring the credentials. It is kept as a
+// no-op to satisfy the interface.
+func (tc *transportCredential) OverrideServerName(string) error {
+	return nil
 }
 
 // perRPCCredential implements "grpccredentials.PerRPCCredentials" interface.

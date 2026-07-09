@@ -138,7 +138,7 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 		if !ok {
 			return nil, errors.New("tls: private key type does not match public key type")
 		}
-		if pub.X.Cmp(priv.X) != 0 || pub.Y.Cmp(priv.Y) != 0 {
+		if !pub.Equal(&priv.PublicKey) {
 			return nil, errors.New("tls: private key does not match public key")
 		}
 	case ed25519.PublicKey:
