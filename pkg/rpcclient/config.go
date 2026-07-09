@@ -32,8 +32,8 @@ type Config struct {
 	TLS *tls.Config
 
 	// DialOptions is a list of dial options for the grpc client (e.g., for interceptors).
-	// For example, pass "grpc.WithBlock()" to block until the underlying connection is up.
-	// Without this, Dial returns immediately and connecting the server happens in background.
+	// By default the client connects lazily and establishing the connection to the server
+	// happens in the background. Set DialTimeout to block until the connection is up.
 	DialOptions []grpc.DialOption
 
 	// CallOptions is a list of call options for the grpc client (e.g., for interceptors).

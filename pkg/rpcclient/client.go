@@ -14,6 +14,7 @@ import (
 	"github.com/effective-security/xpki/jwt/dpop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -186,15 +187,6 @@ func (c *Client) dial(target string, creds credentials.TransportCredentials, dop
 	}
 
 	opts = append(opts, c.cfg.DialOptions...)
-	dctx := c.ctx
-
-	if c.cfg.DialTimeout > 0 {
-		opts = append(opts, grpc.WithBlock())
-
-		var cancel context.CancelFunc
-		dctx, cancel = context.WithTimeout(c.ctx, c.cfg.DialTimeout)
-		defer cancel()
-	}
 
 	target = removePrefix.Replace(target)
 	if !strings.Contains(target, ":") {
@@ -203,9 +195,29 @@ func (c *Client) dial(target string, creds credentials.TransportCredentials, dop
 
 	logger.KV(xlog.DEBUG, "target", target, "timeout", c.cfg.DialTimeout)
 
-	conn, err := grpc.DialContext(dctx, target, opts...)
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, err
+	}
+
+	if c.cfg.DialTimeout > 0 {
+		// grpc.NewClient connects lazily, so to preserve the previous blocking
+		// dial behavior we explicitly trigger the connection and wait until it
+		// becomes ready or the timeout elapses.
+		dctx, cancel := context.WithTimeout(c.ctx, c.cfg.DialTimeout)
+		defer cancel()
+
+		conn.Connect()
+		for {
+			state := conn.GetState()
+			if state == connectivity.Ready {
+				break
+			}
+			if !conn.WaitForStateChange(dctx, state) {
+				_ = conn.Close()
+				return nil, errors.Errorf("failed to connect to %q within %s", target, c.cfg.DialTimeout)
+			}
+		}
 	}
 
 	logger.KV(xlog.DEBUG, "target", target, "status", "connecton_created")
