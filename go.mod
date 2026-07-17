@@ -9,7 +9,7 @@ require (
 	github.com/effective-security/x v0.16.95
 	github.com/effective-security/xdb v0.24.149
 	github.com/effective-security/xlog v0.11.57
-	github.com/effective-security/xpki v0.27.273
+	github.com/effective-security/xpki v0.27.275
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v3 v3.0.5
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -132,7 +132,7 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/config v1.4.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
+	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
