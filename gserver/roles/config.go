@@ -10,7 +10,8 @@ type IdentityMap struct {
 
 	// Cookies configuration
 	Cookies CookiesConfig `json:"cookies" yaml:"cookies"`
-
+	// SkipAuthPaths if set, specifies a list of paths to not require authentication
+	SkipAuthPaths []string `json:"skip_auth" yaml:"skip_auth"`
 	// TLS identity map
 	TLS GenericIdentityMap `json:"tls" yaml:"tls"`
 	// JWT identity map

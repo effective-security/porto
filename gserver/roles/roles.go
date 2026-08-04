@@ -230,6 +230,11 @@ func tokenType(auth string) (token string, tokenType string) {
 
 // IdentityFromRequest returns identity from the request
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
+	if slices.Contains(p.config.SkipAuthPaths, r.URL.Path) {
+		logger.ContextKV(r.Context(), xlog.DEBUG, "reason", "skipped", "path", r.URL.Path)
+		return identity.GuestIdentityMapper(r)
+	}
+
 	peers := getPeerCertAndCount(r)
 	// logger.ContextKV(r.Context(), xlog.DEBUG,
 	// 	"dpop_enabled", p.config.DPoP.Enabled,

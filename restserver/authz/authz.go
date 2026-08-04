@@ -94,7 +94,7 @@ type Config struct {
 	// Allow will allow the specified roles access to this path and its children, in format: ${path}:${role},${role}
 	Allow []string `json:"allow" yaml:"allow"`
 
-	// AllowAny will allow any authenticated request access to this path and its children
+	// AllowAny will allow any request access to this path and its children
 	AllowAny []string `json:"allow_any" yaml:"allow_any"`
 
 	// AllowAnyRole will allow any authenticated request that include a non empty role
