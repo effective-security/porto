@@ -10,9 +10,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/x/fileutil/resolve"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
-	"github.com/mitchellh/go-homedir"
 	"gopkg.in/yaml.v3"
 )
 
@@ -136,7 +136,7 @@ func NewFactory(cfg Config) (*Factory, error) {
 
 // LoadFactory returns new Factory
 func LoadFactory(file string) (*Factory, error) {
-	file, _ = homedir.Expand(file)
+	file = resolve.ExpandPath(file)
 
 	f, err := os.ReadFile(file)
 	if err != nil {
@@ -149,6 +149,14 @@ func LoadFactory(file string) (*Factory, error) {
 	}
 
 	for _, c := range cfg.Clients {
+		c.StorageFolder = resolve.ExpandPath(c.StorageFolder)
+
+		if c.TLS != nil {
+			c.TLS.CertFile = resolve.ExpandPath(c.TLS.CertFile)
+			c.TLS.KeyFile = resolve.ExpandPath(c.TLS.KeyFile)
+			c.TLS.TrustedCAFile = resolve.ExpandPath(c.TLS.TrustedCAFile)
+		}
+
 		hf := HostFolderName(c.Host)
 		if !strings.HasSuffix(c.StorageFolder, hf) {
 			c.StorageFolder = filepath.Join(c.StorageFolder, hf)
@@ -206,7 +214,7 @@ func NewForHost(cfg, host string) (*Client, error) {
 
 // LoadClient returns new Client
 func LoadClient(file string) (*Client, error) {
-	f, err := os.ReadFile(file)
+	f, err := os.ReadFile(resolve.ExpandPath(file))
 	if err != nil {
 		return nil, errors.WithMessage(err, "failed to load config")
 	}
@@ -214,6 +222,12 @@ func LoadClient(file string) (*Client, error) {
 	err = yaml.Unmarshal(f, &cfg)
 	if err != nil {
 		return nil, errors.WithMessagef(err, "failed to parse config: %s", file)
+	}
+	cfg.StorageFolder = resolve.ExpandPath(cfg.StorageFolder)
+	if cfg.TLS != nil {
+		cfg.TLS.CertFile = resolve.ExpandPath(cfg.TLS.CertFile)
+		cfg.TLS.KeyFile = resolve.ExpandPath(cfg.TLS.KeyFile)
+		cfg.TLS.TrustedCAFile = resolve.ExpandPath(cfg.TLS.TrustedCAFile)
 	}
 
 	return New(cfg)
