@@ -251,10 +251,6 @@ citest: vet lint
 	cov-report -fmt xml -o ${COVPATH}/coverage.xml -ex ${COVERAGE_EXCLUSIONS} -cc ${COVPATH}/combined.out ${COVPATH}/cc*.out
 	cov-report -fmt ds -o ${COVPATH}/summary.xml -ex ${COVERAGE_EXCLUSIONS} ${COVPATH}/cc*.out
 
-coveralls:
-	echo "Running coveralls"
-	goveralls -v -coverprofile=coverage.out -service=travis-ci -package ./...
-
 help:
 	echo "make vars - print make variables"
 	echo "make env - pring GO environment"
@@ -268,4 +264,3 @@ help:
 	echo "make testshort - run test with -short flag"
 	echo "make covtest - run test with coverage report"
 	echo "make coverage - open coverage report"
-	echo "make coveralls - publish coverage to coveralls"
