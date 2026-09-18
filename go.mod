@@ -7,7 +7,7 @@ require (
 	github.com/didip/tollbooth/v7 v7.0.2
 	github.com/effective-security/metrics v0.9.148
 	github.com/effective-security/x v0.17.104
-	github.com/effective-security/xdb v0.25.157
+	github.com/effective-security/xdb v0.25.159
 	github.com/effective-security/xlog v0.12.61
 	github.com/effective-security/xpki v0.28.286
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
@@ -28,7 +28,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
 	github.com/ugorji/go/codec v1.3.2
 	go.uber.org/dig v1.19.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
