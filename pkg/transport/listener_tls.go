@@ -40,7 +40,14 @@ type tlsListener struct {
 
 type tlsCheckFunc func(context.Context, *tls.Conn) error
 
-// NewTLSListener handshakes TLS connections and performs optional CRL checking.
+// NewTLSListener wraps l so that every accepted connection is TLS-handshaked
+// in its own goroutine before Accept returns it; connections that fail the
+// handshake or the CRL check (when tlsinfo.CRLVerifier is set) are closed and
+// reported to tlsinfo.HandshakeFailure. It calls tlsinfo.ServerTLSWithReloader,
+// so the tls.Config is available afterwards via tlsinfo.Config(). If tlsinfo
+// is nil or Empty, l is closed and an error returned. The caller must Close
+// the returned listener; Close blocks until the accept loop and pending
+// handshakes finish. Handshakes have no deadline.
 func NewTLSListener(l net.Listener, tlsinfo *TLSInfo) (net.Listener, error) {
 	check := func(context.Context, *tls.Conn) error { return nil }
 	return newTLSListener(l, tlsinfo, check)

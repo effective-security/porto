@@ -17,7 +17,9 @@ import (
 )
 
 var (
-	// WarnUnaryRequestLatency is the threshold for logging a warning for a slow unary request.
+	// WarnUnaryRequestLatency is the duration above which a gRPC request
+	// (unary or stream) is logged at WARNING level as slow_request. It is a
+	// process-global setting read on every request.
 	WarnUnaryRequestLatency = 2 * time.Second
 )
 

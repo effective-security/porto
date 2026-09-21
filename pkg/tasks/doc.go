@@ -1,37 +1,44 @@
-// Package tasks is task scheduling package which lets you run Go functions
-// periodically at pre-determined interval using a simple, human-friendly syntax.
-/*
-	scheduler := tasks.NewScheduler()
-
-	// Do tasks with params
-	tasks.NewTaskAtIntervals(1, Minutes).Do(taskWithParams, 1, "hello")
-
-	// Do tasks without params
-	tasks.NewTaskAtIntervals(30, Seconds).Do(task)
-	tasks.NewTaskAtIntervals(5, Minutes).Do(task)
-	tasks.NewTaskAtIntervals(8, Hours).Do(task)
-
-	// Do tasks on specific weekday
-	tasks.NewTaskOnWeekday(time.Monday, 23, 59).Do(task)
-
-	// Do tasks daily
-	tasks.NewTaskDaily(10,30).Do(task)
-
-	// Parse from string format
-	tasks.NewTask("16:18")
-	tasks.NewTask("every 1 second")
-	tasks.NewTask("every 61 minutes")
-	tasks.NewTask("every day")
-	tasks.NewTask("every day 11:15")
-	tasks.NewTask("Monday")
-	tasks.NewTask("Saturday 23:13")
-
-	scheduler.Add(j)
-
-	// Start the scheduler
-	scheduler.Start()
-
-	// Stop the scheduler
-	scheduler.Stop()
-*/
+// Package tasks is an in-process, cron-like scheduler that runs Go functions
+// periodically using a small, human-friendly schedule syntax.
+//
+// A Task pairs a Schedule (interval, weekday, or daily time) with a callback
+// bound via Do. A Scheduler owns a set of tasks and a single ticker goroutine
+// that, on every tick, starts every task whose NextRunAt has passed in its own
+// goroutine. A task never overlaps with itself: Run acquires a per-task lock and
+// gives up (returning false) if the lock cannot be acquired within the task's
+// run timeout. Panics raised by a callback are recovered and logged, and the
+// task is rescheduled.
+//
+// Schedule formats accepted by NewTask and ParseSchedule (case-insensitive):
+//
+//	"every 1 second"      "every 61 minutes"     "every 2 hours"
+//	"every day"           "every day 11:15"      "16:18"        (daily at 16:18)
+//	"monday"              "saturday 23:13"       (weekly on that day)
+//
+// Usage:
+//
+//	s := tasks.NewScheduler(tasks.WithTickerInterval(time.Second))
+//
+//	s.Add(tasks.NewTaskAtIntervals(30, tasks.Seconds).Do("cleanup", cleanup))
+//	s.Add(tasks.NewTaskAtIntervals(1, tasks.Minutes).Do("report", report, 1, "hello"))
+//	s.Add(tasks.NewTaskOnWeekday(time.Monday, 23, 59).Do("weekly", weekly))
+//	s.Add(tasks.NewTaskDaily(10, 30).Do("daily", daily))
+//
+//	t, err := tasks.NewTask("every day 11:15", tasks.WithID("nightly"))
+//	if err != nil {
+//		return err
+//	}
+//	s.Add(t.Do("nightly", nightly))
+//
+//	if err := s.Start(); err != nil { // spawns the ticker goroutine
+//		return err
+//	}
+//	defer s.Stop() // signals the ticker to exit; does not wait for running tasks
+//
+// The constructors NewTaskOnWeekday, NewTaskDaily and Task.Do panic on invalid
+// input (out-of-range time, non-function callback, wrong parameter count);
+// NewTask and ParseSchedule return an error for an invalid format string.
+//
+// Package-level state: TimeNow (the clock, overridable in tests) and the time
+// location set by SetGlobalLocation are process-global and not synchronized.
 package tasks

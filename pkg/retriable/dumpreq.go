@@ -3,6 +3,7 @@ package retriable
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -11,11 +12,14 @@ import (
 	"time"
 )
 
-// DumpRequestOut is like [DumpRequest] but for outgoing client requests. It
-// includes any headers that the standard [http.Transport] adds, such as
-// User-Agent.
+// DumpRequestOut returns the wire representation of an outgoing client
+// request, like httputil.DumpRequestOut: it includes any headers that the
+// standard http.Transport adds, such as User-Agent. When body is true the
+// request body is read into memory and restored on req.
 //
-// NOTE: this is copied from the Go standard library, but modified to drop Auth headers
+// NOTE: this is a copy of the Go standard library implementation, kept in
+// this package so it can be adapted. It does not redact the Authorization
+// or DPoP headers; the client only calls it at DEBUG log level.
 func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 	save := req.Body
 	dummyBody := false
@@ -58,7 +62,7 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 	dr := &delegateReader{c: make(chan io.Reader)}
 
 	t := &http.Transport{
-		Dial: func(_, _ string) (net.Conn, error) {
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return &dumpConn{io.MultiWriter(&buf, pw), dr}, nil
 		},
 	}

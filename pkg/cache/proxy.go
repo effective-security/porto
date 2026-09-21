@@ -11,7 +11,9 @@ type proxyProv struct {
 	prov   Provider
 }
 
-// NewProxyProvider returns proxy provider
+// NewProxyProvider returns a Provider that prefixes every key with prefix
+// and delegates to prov. Its Close is a no-op (the parent owns the
+// connection) and Publish/Subscribe pass channels through unprefixed.
 func NewProxyProvider(prefix string, prov Provider) Provider {
 	p := &proxyProv{
 		prefix: prefix,

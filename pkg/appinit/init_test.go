@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/effective-security/x/guid"
+	"github.com/effective-security/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +27,17 @@ func TestLogs(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, closer)
 	closer.Close()
+
+	// the rotating log file must actually receive output
+	fileDir := t.TempDir()
+	closer, err = Logs(&LogConfig{LogDir: fileDir, LogStd: false}, "filesvc")
+	require.NoError(t, err)
+	require.NotNil(t, closer)
+	logger.KV(xlog.ERROR, "test", "written_to_file")
+	require.NoError(t, closer.Close())
+	content, err := os.ReadFile(filepath.Join(fileDir, "filesvc.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "written_to_file")
 
 	closer, err = Logs(&LogConfig{LogDir: nullDevName}, "test")
 	require.NoError(t, err)

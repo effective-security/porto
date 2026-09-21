@@ -12,7 +12,9 @@ type oauthAccess struct {
 	token string
 }
 
-// NewOauthAccess constructs the PerRPCCredentials using a given token.
+// NewOauthAccess returns PerRPCCredentials that send token verbatim as the
+// authorization metadata value (include the scheme, e.g. "Bearer x"). RPCs
+// fail unless the connection provides PrivacyAndIntegrity security.
 func NewOauthAccess(token string) credentials.PerRPCCredentials {
 	return oauthAccess{token: token}
 }

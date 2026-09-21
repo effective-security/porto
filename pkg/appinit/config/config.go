@@ -2,12 +2,13 @@ package config
 
 import "time"
 
-// Metrics specifies the metrics pipeline configuration
+// Metrics specifies the metrics pipeline configuration for appinit.Metrics.
 type Metrics struct {
-	// Disabled specifies if the metrics provider is disabled
+	// Disabled turns the pipeline off when true; nil means enabled.
 	Disabled *bool `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 
-	// Provider specifies the metrics provider: prometheus|inmem
+	// Provider is a comma-separated list of sinks: prometheus, cloudwatch, inmem.
+	// Empty disables metrics.
 	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
 
 	// Prefix specifies the prefix added to all metrics
@@ -16,13 +17,17 @@ type Metrics struct {
 	// PrefixForNumberLabels specifies a prefix to add to tag values that are 64-bit numbers
 	PrefixForNumberLabels string `json:"prefix_for_number_labels,omitempty" yaml:"prefix_for_number_labels,omitempty"`
 
-	// Prometheus provider config
+	// Prometheus provider config; required when Provider includes "prometheus".
 	Prometheus *Prometheus `json:"prometheus,omitempty" yaml:"prometheus,omitempty"`
 
+	// EnableRuntimeMetrics enables Go runtime metrics collection.
 	EnableRuntimeMetrics bool `json:"runtime_metrics,omitempty" yaml:"runtime_metrics,omitempty"`
 
+	// CloudWatch provider config; required when Provider includes "cloudwatch".
 	CloudWatch *CloudWatch `json:"cloudwatch" yaml:"cloudwatch"`
 
+	// GlobalTags lists tags added to every metric; supported names are
+	// "service", "cluster_id" and "node" (value from $NODE_NAME).
 	GlobalTags []string `json:"global_tags,omitempty" yaml:"global_tags,omitempty"`
 
 	// AllowedPrefixes specifies a list of metric prefixes to allow, with '.' as the separator
@@ -31,20 +36,22 @@ type Metrics struct {
 	BlockedPrefixes []string `json:"blocked_prefixes,omitempty" yaml:"blocked_prefixes,omitempty"`
 }
 
-// GetDisabled specifies if the metrics provider is disabled
+// GetDisabled reports whether Disabled is set to true.
 func (c *Metrics) GetDisabled() bool {
 	return c.Disabled != nil && *c.Disabled
 }
 
-// Prometheus provider config
+// Prometheus configures the Prometheus sink.
 type Prometheus struct {
+	// Addr, when set, is the listen address for the /metrics HTTP endpoint.
 	Addr string `json:"addr,omitempty" yaml:"addr,omitempty"`
 	// Expiration is the duration a metric is valid for, after which it will be
 	// untracked. If the value is zero, a default expiration applied
 	Expiration time.Duration `json:"expiration,omitempty" yaml:"expiration,omitempty"`
 }
 
-// CloudWatch specifies the Prometheus settings for CloudWatch
+// CloudWatch configures the CloudWatch sink. AdditionalTags and ReplaceTags
+// are parsed but not currently applied by appinit.Metrics.
 type CloudWatch struct {
 	// AwsRegion where the service is deployed.
 	AwsRegion string `json:"aws_region" yaml:"aws_region"`

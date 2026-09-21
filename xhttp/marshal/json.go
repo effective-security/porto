@@ -1,4 +1,3 @@
-// Package marshal provides some common handlers for encoding or decoding json
 package marshal
 
 import (
@@ -65,22 +64,22 @@ func encoderHandle(printSetting PrettyPrintSetting) *codec.JsonHandle {
 	return &jsonEncHandle
 }
 
-// DecoderHandle returns a code handle pre-configured for decoding json back into go
-// types. It is setup to error when a field in the json has no matching field in the
-// go type, and that all maps are deserialized into a map[stirng]interface{}
-// the returned handle is shared, it should not be mutated by callers.
+// DecoderHandle returns the codec handle used for decoding JSON into Go
+// types. It errors when a JSON field has no matching Go field, and decodes
+// untyped objects into map[string]any. The returned handle is shared and
+// must not be mutated by callers.
 func DecoderHandle() *codec.JsonHandle {
 	return &jsonDecHandle
 }
 
-// NewEncoder returns a new Encoder ready to write a value, its configured
-// based on the request [currently just if it should pretty print or not]
+// NewEncoder returns a JSON encoder writing to w, pretty-printing when the
+// request URL has a "pp" query parameter. r must not be nil.
 func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder {
 	return codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r)))
 }
 
-// EncodeBytes is a helper that takes the supplied go value, and encoded it to json
-// and returned the byte slice containing the encoded value.
+// EncodeBytes encodes value to JSON with the given pretty-print setting and
+// returns the bytes.
 func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error) {
 	var b []byte
 	err := codec.NewEncoderBytes(&b, encoderHandle(printSetting)).Encode(value)
@@ -90,8 +89,8 @@ func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error) {
 	return b, err
 }
 
-// DecodeBytes is a helper that takes the supplied json and decodes it into
-// the supplied result instance.
+// DecodeBytes decodes JSON data into result using DecoderHandle (strict:
+// unknown fields are an error).
 func DecodeBytes(data []byte, result any) error {
 	err := codec.NewDecoderBytes(data, DecoderHandle()).Decode(result)
 	if err != nil {
@@ -100,8 +99,9 @@ func DecodeBytes(data []byte, result any) error {
 	return nil
 }
 
-// Decode will read the json from the supplied reader,
-// and decode it into the supplied result instance.
+// Decode reads JSON from r and decodes it into result using DecoderHandle.
+// The reader is not size-limited; wrap request bodies with
+// http.MaxBytesReader first.
 func Decode(r io.Reader, result any) error {
 	// codec can make many little reads from the reader, so wrap it in a buffered reader
 	// to keep perf lively
@@ -112,9 +112,10 @@ func Decode(r io.Reader, result any) error {
 	return nil
 }
 
-// DecodeBody will read the json from the HTTP request body,
-// and decode it into the supplied result instance.
-// If error occured, then it will write to the response
+// DecodeBody decodes the JSON request body into result. On failure it
+// writes a 400 invalid_json response (including the decode error text) to w
+// and returns the error, so callers can simply return. The body is not
+// size-limited.
 func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error {
 	err := Decode(r.Body, result)
 	if err != nil {

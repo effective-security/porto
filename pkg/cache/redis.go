@@ -20,7 +20,11 @@ type redisProv struct {
 	client *redis.Client
 }
 
-// NewRedisProvider returns Redis cache
+// NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed
+// with redis.ParseURL; cfg.ClientTLS files (if set) configure TLS and
+// cfg.Password overrides the URL credentials. An empty prefix becomes "/";
+// a zero cfg.TTL becomes 1h. Maintenance notifications are disabled.
+// The connection is established lazily, so a bad address only fails later.
 func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 	options, err := redis.ParseURL(cfg.Server)
 	if err != nil {

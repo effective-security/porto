@@ -1,7 +1,3 @@
-// Package tasks provides an in-process scheduler for periodic tasks
-// that uses the builder pattern for configuration.
-// Schedule lets you run Golang functions periodically
-// at pre-determined intervals using a simple, human-friendly syntax.
 package tasks
 
 import (
@@ -15,43 +11,59 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "tasks")
 
-// DefaultTickerInterval for scheduler
+// DefaultTickerInterval is the upper bound for the scheduler tick when
+// WithTickerInterval is not given; Start lowers it to 1/10 of the shortest
+// task interval if that is smaller.
 const DefaultTickerInterval = time.Second
 
-// Time location, default set by the time.Local (*time.Location)
+// loc is the time location used to compute daily/weekly run times;
+// defaults to time.Local and is changed by SetGlobalLocation.
 var loc = time.Local
 
-// SetGlobalLocation the time location for the package
+// SetGlobalLocation sets the process-global time location used when computing
+// daily and weekly run times (NewTaskDaily, NewTaskOnWeekday, "hh:mm" formats).
+// It is not synchronized; call it before creating tasks.
 func SetGlobalLocation(newLocation *time.Location) {
 	loc = newLocation
 }
 
-// Scheduler defines the scheduler interface
+// Scheduler owns a set of tasks and a ticker goroutine that starts due tasks.
+// All methods are safe for concurrent use except Count, which reads without a lock.
 type Scheduler interface {
+	// SetPublisher sets the publisher on the scheduler and on every task
+	// already added; tasks added later inherit it in Add.
 	SetPublisher(Publisher) Scheduler
-	// Add adds a task to a pool of scheduled tasks
+	// Add appends a task to the pool. It may be called while the scheduler
+	// is running; the task is picked up on the next tick.
 	Add(Task) Scheduler
-	// Get returns the task by id
-	// return nil if task not found
+	// Get returns the task with the given ID, or nil if not found.
 	Get(id string) Task
-	// List returns all registered tasks
+	// List returns the registered tasks. The returned slice shares the
+	// scheduler's backing array; do not modify it.
 	List() []Task
-	// Clear will delete all scheduled tasks
+	// Clear removes all tasks from the pool. Tasks already started keep running.
 	Clear()
-	// Count returns the number of registered tasks
+	// Count returns the number of registered tasks.
 	Count() int
-	// IsRunning return the status
+	// IsRunning reports whether Start has been called and Stop has not yet
+	// taken effect.
 	IsRunning() bool
-	// Start all the pending tasks
+	// Start publishes every task and spawns the ticker goroutine.
+	// It returns an error if the scheduler is already running.
 	Start() error
-	// Stop the scheduler
+	// Stop signals the ticker goroutine to exit. It does not wait for the
+	// goroutine or for in-flight tasks. It returns an error if not running.
 	Stop() error
-	// Publish the tasks to Publisher
+	// Publish calls Publish on every registered task.
 	Publish()
 }
 
-// Publisher defines a publisher interface
+// Publisher receives task status notifications: Scheduler.Start publishes
+// every task once, and each task publishes itself right before and right
+// after every run (see Task.IsRunning). Implementations must be safe for
+// concurrent use because tasks run in their own goroutines.
 type Publisher interface {
+	// Publish is called with the task whose status changed.
 	Publish(task Task)
 }
 
@@ -85,7 +97,8 @@ func (s *scheduler) Less(i, j int) bool {
 	return sj.NextRunAt.After(si.NextRunAt)
 }
 
-// NewScheduler creates a new scheduler
+// NewScheduler creates a stopped scheduler. Only WithTickerInterval and
+// WithPublisher are meaningful here; task-level options are ignored.
 func NewScheduler(ops ...Option) Scheduler {
 	s := &scheduler{
 		tasks:   []Task{},
@@ -100,7 +113,7 @@ func NewScheduler(ops ...Option) Scheduler {
 	return s
 }
 
-// SetPublisher sets the publisher for all tasks
+// SetPublisher sets the publisher for the scheduler and all registered tasks.
 func (s *scheduler) SetPublisher(pub Publisher) Scheduler {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -112,7 +125,7 @@ func (s *scheduler) SetPublisher(pub Publisher) Scheduler {
 	return s
 }
 
-// Publish the tasks to Publisher
+// Publish calls Publish on every registered task.
 func (s *scheduler) Publish() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -165,7 +178,7 @@ func (s *scheduler) Add(j Task) Scheduler {
 	return s
 }
 
-// Get returns the task by the given name
+// Get returns the task with the given ID, or nil if not found.
 func (s *scheduler) Get(id string) Task {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -193,15 +206,15 @@ func (s *scheduler) Clear() {
 	s.tasks = []Task{}
 }
 
-// IsRunning return the status
+// IsRunning reports whether the ticker goroutine is active.
 func (s *scheduler) IsRunning() bool {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	return s.running
 }
 
-// Start all the pending tasks,
-// and create a second ticker
+// Start publishes every task, computes the tick interval and spawns the
+// ticker goroutine. It returns an error if already running.
 func (s *scheduler) Start() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -252,7 +265,8 @@ func (s *scheduler) Start() error {
 	return nil
 }
 
-// Stop the scheduler
+// Stop signals the ticker goroutine to exit; it does not wait for it or for
+// in-flight tasks. It returns an error if the scheduler is not running.
 func (s *scheduler) Stop() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -265,7 +279,10 @@ func (s *scheduler) Stop() error {
 	return nil
 }
 
-// Option configures how we set up the client
+// Option configures a Scheduler (NewScheduler) or a Task (New, NewTask*).
+// Options not applicable to the receiver are silently ignored: WithTickerInterval
+// applies only to schedulers, WithID and WithRunTimeout only to tasks, and
+// WithPublisher to both.
 type Option interface {
 	apply(*options)
 }
@@ -291,28 +308,31 @@ func newFuncOption(f func(*options)) *funcOption {
 	}
 }
 
-// WithTickerInterval option to provide ticker interval
+// WithTickerInterval sets a fixed scheduler tick interval instead of the
+// computed default (see DefaultTickerInterval). Scheduler-only.
 func WithTickerInterval(tickerInterval time.Duration) Option {
 	return newFuncOption(func(o *options) {
 		o.tickerInterval = tickerInterval
 	})
 }
 
-// WithID option to provide ID
+// WithID sets the task ID instead of the generated UUIDv7. Task-only.
 func WithID(id string) Option {
 	return newFuncOption(func(o *options) {
 		o.id = id
 	})
 }
 
-// WithRunTimeout option to provide run timeout
+// WithRunTimeout sets how long Task.Run waits to acquire the task's run lock
+// before giving up (default DefaultRunTimeoutInterval). Task-only.
 func WithRunTimeout(runTimeout time.Duration) Option {
 	return newFuncOption(func(o *options) {
 		o.runTimeout = runTimeout
 	})
 }
 
-// WithPublisher option to provide publisher
+// WithPublisher sets the Publisher for a scheduler (propagated to its tasks)
+// or for an individual task.
 func WithPublisher(publisher Publisher) Option {
 	return newFuncOption(func(o *options) {
 		o.publisher = publisher

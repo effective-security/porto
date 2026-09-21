@@ -2,14 +2,17 @@ package metricskey
 
 import "github.com/effective-security/metrics"
 
-// Descriptions of emited metrics keys
+// Descriptors of the metrics emitted by this repo.
 var (
+	// HTTPReqPerf samples HTTP request latency by verb, status and URI
+	// (restserver/telemetry).
 	HTTPReqPerf = metrics.Describe{
 		Name:         "http_requests_perf",
 		Type:         metrics.TypeSample,
 		RequiredTags: []string{"verb", "status", "uri"},
 		Help:         "provides quantiles for HTTP request.",
 	}
+	// HTTPReqByRole counts HTTP requests by verb, status, URI and caller role.
 	HTTPReqByRole = metrics.Describe{
 		Name:         "http_requests_role",
 		Type:         metrics.TypeCounter,
@@ -17,12 +20,14 @@ var (
 		Help:         "provides counts for HTTP request by role.",
 	}
 
+	// GRPCReqPerf samples gRPC request latency by API and status code (gserver).
 	GRPCReqPerf = metrics.Describe{
 		Name:         "rpc_requests_perf",
 		Type:         metrics.TypeSample,
 		RequiredTags: []string{"api", "status"},
 		Help:         "provides quantiles for gRPC request.",
 	}
+	// GRPCReqByRole counts gRPC requests by API, status code and caller role.
 	GRPCReqByRole = metrics.Describe{
 		Name:         "rpc_requests_role",
 		Type:         metrics.TypeCounter,
@@ -30,14 +35,15 @@ var (
 		Help:         "provides counts for gRPC request by role.",
 	}
 
-	// StatsVersion is gauge metric for app version
+	// StatsVersion is a gauge set to the commit number by appinit.Metrics.
 	StatsVersion = metrics.Describe{
 		Type: metrics.TypeGauge,
 		Name: "version",
 		Help: "version provides the deployed version",
 		//RequiredTags: []string{},
 	}
-	// HealthLogErrors is counter metric for log errors
+	// HealthLogErrors counts errors written to the log, by package and build
+	// (incremented from the xlog error hook installed by appinit.Metrics).
 	HealthLogErrors = metrics.Describe{
 		Type:         metrics.TypeCounter,
 		Name:         "log_errors",
@@ -46,11 +52,11 @@ var (
 	}
 )
 
-// Metrics returns slice of metrics from this repo
+// Metrics lists every descriptor in this package, for registering help text
+// with a sink (see appinit.Metrics).
 var Metrics = []*metrics.Describe{
 	&HTTPReqPerf,
 	&HTTPReqByRole,
-	&GRPCReqPerf,
 	&GRPCReqPerf,
 	&GRPCReqByRole,
 	&StatsVersion,

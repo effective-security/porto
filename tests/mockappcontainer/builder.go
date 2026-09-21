@@ -7,24 +7,24 @@ import (
 	"go.uber.org/dig"
 )
 
-// Builder helps to build container
+// Builder accumulates providers into a dig container for gserver tests.
 type Builder struct {
 	container *dig.Container
 }
 
-// NewBuilder returns ContainerBuilder
+// NewBuilder returns a Builder over a new, empty dig container.
 func NewBuilder() *Builder {
 	return &Builder{
 		container: dig.New(),
 	}
 }
 
-// Container returns Container
+// Container returns the underlying dig container.
 func (b *Builder) Container() *dig.Container {
 	return b.container
 }
 
-// WithConfig sets gserver.HTTPServerCfg
+// WithConfig provides *gserver.Config.
 func (b *Builder) WithConfig(c *gserver.Config) *Builder {
 	_ = b.container.Provide(func() *gserver.Config {
 		return c
@@ -32,7 +32,7 @@ func (b *Builder) WithConfig(c *gserver.Config) *Builder {
 	return b
 }
 
-// WithJwtSigner sets JWT Signer
+// WithJwtSigner provides jwt.Signer.
 func (b *Builder) WithJwtSigner(j jwt.Signer) *Builder {
 	_ = b.container.Provide(func() jwt.Signer {
 		return j
@@ -40,7 +40,7 @@ func (b *Builder) WithJwtSigner(j jwt.Signer) *Builder {
 	return b
 }
 
-// WithJwtParser sets JWT Parser
+// WithJwtParser provides jwt.Parser.
 func (b *Builder) WithJwtParser(j jwt.Parser) *Builder {
 	_ = b.container.Provide(func() jwt.Parser {
 		return j
@@ -48,7 +48,7 @@ func (b *Builder) WithJwtParser(j jwt.Parser) *Builder {
 	return b
 }
 
-// WithDiscovery sets Discover
+// WithDiscovery provides discovery.Discovery.
 func (b *Builder) WithDiscovery(d discovery.Discovery) *Builder {
 	_ = b.container.Provide(func() discovery.Discovery {
 		return d

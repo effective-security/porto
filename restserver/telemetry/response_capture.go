@@ -4,8 +4,11 @@ import (
 	"net/http"
 )
 
-// ResponseCapture is a net/http.ResponseWriter that delegates everything
-// to the contained delegate, but captures the status code and number of bytes written
+// ResponseCapture is a net/http.ResponseWriter that delegates everything to
+// the contained delegate, but captures the status code and number of bytes
+// written. The status defaults to 200 until WriteHeader is called. It
+// implements http.Flusher but not http.Hijacker or Unwrap, so handlers that
+// hijack connections (WebSocket) cannot run behind it.
 type ResponseCapture struct {
 	statusCode int
 	bodySize   uint64
@@ -48,7 +51,8 @@ func (r *ResponseCapture) WriteHeader(sc int) {
 	r.delegate.WriteHeader(sc)
 }
 
-// Flush sends any buffered data to the client.
+// Flush sends any buffered data to the client when the delegate implements
+// http.Flusher; otherwise it is a no-op.
 func (r *ResponseCapture) Flush() {
 	if flusher, ok := r.delegate.(http.Flusher); ok {
 		flusher.Flush()

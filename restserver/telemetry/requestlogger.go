@@ -10,17 +10,20 @@ import (
 	"github.com/effective-security/xlog"
 )
 
-// Option is an option that can be passed to New().
+// Option configures NewRequestLogger; see WithLoggerSkipPaths.
 type Option option
 type option func(c *configuration)
 
-// LoggerSkipPath allows to skip a log for specified Path and Agent
+// LoggerSkipPath describes requests to exclude from logging by Path and
+// User-Agent. Path is compared exactly ("*" matches every path); Agent is a
+// substring match ("*" matches every agent). Both must match.
 type LoggerSkipPath struct {
 	Path  string `json:"path,omitempty" yaml:"path,omitempty"`
 	Agent string `json:"agent,omitempty" yaml:"agent,omitempty"`
 }
 
-// ShouldSkip returns true if the logs should be skipped
+// ShouldSkip reports whether a request for path with the given User-Agent
+// matches any entry in cfg and should therefore not be logged.
 func ShouldSkip(cfg []LoggerSkipPath, path, userAgent string) bool {
 	for _, skip := range cfg {
 		pathMatch := skip.Path == "*" || path == skip.Path
@@ -38,22 +41,28 @@ type configuration struct {
 	logger      xlog.KeyValueLogger
 }
 
-// WithLoggerSkipPaths is an Option allows to skip logs on path/agent match
+// WithLoggerSkipPaths returns an Option that suppresses log lines for
+// requests matching any of the given LoggerSkipPath entries.
 func WithLoggerSkipPaths(value []LoggerSkipPath) Option {
 	return func(c *configuration) {
 		c.skippaths = value
 	}
 }
 
-// RequestLogger is a http.Handler that logs requests and forwards them on down the chain.
+// RequestLogger is a http.Handler that forwards requests to the wrapped
+// handler and then logs one INFO line per request (method, path, status,
+// bytes, duration, remote IP, agent) using the request context for
+// correlation fields.
 type RequestLogger struct {
 	handler http.Handler
 	cfg     configuration
 }
 
-// NewRequestLogger create a new RequestLogger handler, requests are chained to the supplied handler.
-// The log includes the clock time to handle the request, with specified granularity (e.g. time.Millisecond).
-// skippath parameter allows to specify a list of paths to not log.
+// NewRequestLogger creates a RequestLogger that chains to handler. The
+// logged duration is expressed in units of granularity (e.g. time.Millisecond),
+// which must be greater than zero. It panics if handler is nil and returns
+// handler unchanged (no logging) if logger is nil. The remote address logged
+// is identity.ClientIPFromRequest, which honours X-Forwarded-For.
 func NewRequestLogger(
 	handler http.Handler,
 	granularity time.Duration,

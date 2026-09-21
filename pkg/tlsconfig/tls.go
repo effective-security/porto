@@ -26,10 +26,11 @@ import (
 // In the clone below, we reuse the parsed certs for OCSP
 // response validation
 
-// LoadX509KeyPairWithOCSP reads and parses a public/private key pair from a pair
-// of files. The files must contain PEM encoded data. The certificate file
-// may contain intermediate certificates following the leaf certificate to
-// form a certificate chain.
+// LoadX509KeyPairWithOCSP reads a PEM certificate chain and private key from
+// files and, if a file named "<certFile without extension>.ocsp" exists, uses
+// its content as the OCSP staple (see X509KeyPairWithOCSP). A missing OCSP
+// file is not an error. The certificate file may contain intermediates after
+// the leaf.
 func LoadX509KeyPairWithOCSP(certFile, keyFile string) (*tls.Certificate, error) {
 	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
@@ -53,14 +54,18 @@ func LoadX509KeyPairWithOCSP(certFile, keyFile string) (*tls.Certificate, error)
 	return X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspBytes)
 }
 
-// X509KeyPair parses a public/private key pair from a pair of
-// PEM encoded data.
+// X509KeyPair is X509KeyPairWithOCSP without an OCSP staple. Unlike
+// tls.X509KeyPair it always populates Certificate.Leaf.
 func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (*tls.Certificate, error) {
 	return X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, nil)
 }
 
-// X509KeyPairWithOCSP parses a public/private key pair from a pair of
-// PEM encoded data.
+// X509KeyPairWithOCSP parses a PEM certificate chain and private key (PKCS#1,
+// PKCS#8 or SEC1; RSA, ECDSA or Ed25519), verifies the key matches the leaf,
+// and sets Certificate.Leaf. Expired certificates are accepted. If ocspStaple
+// is given and the chain has an issuer, the staple is validated against the
+// leaf: a Revoked status is an error, an expired or unparsable staple is
+// dropped with a warning, and a good staple is set as Certificate.OCSPStaple.
 func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Certificate, error) {
 	var cert tls.Certificate
 	var skippedBlockTypes []string

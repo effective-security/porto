@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -24,19 +25,23 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "rest")
 
-// MaxRequestSize specifies max size of regular HTTP Post requests in bytes, 64 Mb
+// MaxRequestSize is the recommended maximum size in bytes (64 MiB) of a regular
+// HTTP POST body. The server does not enforce it; handlers that read bodies
+// should wrap r.Body with http.MaxBytesReader(w, r.Body, MaxRequestSize).
 const MaxRequestSize = 64 * 1024 * 1024
 
+// Event source and message names that services may use when reporting
+// lifecycle status (for example to an audit log).
 const (
-	// EvtSourceStatus specifies source for service Status
+	// EvtSourceStatus is the event source name for service status events.
 	EvtSourceStatus = "status"
-	// EvtServiceStarted specifies Service Started event
+	// EvtServiceStarted is the event message for a started service.
 	EvtServiceStarted = "service started"
-	// EvtServiceStopped specifies Service Stopped event
+	// EvtServiceStopped is the event message for a stopped service.
 	EvtServiceStopped = "service stopped"
 )
 
-// ServerEvent specifies server event type
+// ServerEvent identifies a server lifecycle event delivered to OnEvent handlers.
 type ServerEvent int
 
 const (
@@ -48,41 +53,69 @@ const (
 	ServerStoppingEvent
 )
 
-// ServerEventFunc is a callback to handle server events
+// ServerEventFunc is a callback invoked synchronously when a ServerEvent is
+// broadcast. ServerStartedEvent is delivered on the serving goroutine;
+// ServerStoppingEvent and ServerStoppedEvent on the StopHTTP caller.
 type ServerEventFunc func(evt ServerEvent)
 
-// Server is an interface to provide server status
+// Server is the interface exposed to services and middleware for querying
+// server identity, configuration and lifecycle. *HTTPServer is the
+// implementation; services receive it via their constructors.
 type Server interface {
 	http.Handler
+	// Name returns the configured server name (Config.GetServerName).
 	Name() string
+	// Version returns the version string passed to New.
 	Version() string
+	// HostName returns the host part of the bind address, or the OS hostname.
 	HostName() string
+	// LocalIP returns the IP address passed to New, or the auto-detected local IP.
 	LocalIP() string
+	// Port returns the port part of the bind address.
 	Port() string
+	// Protocol returns "https" when a TLS config is set, "http" otherwise.
 	Protocol() string
+	// PublicURL returns Config.GetPublicURL.
 	PublicURL() string
+	// StartedAt returns the UTC time the server instance was created.
 	StartedAt() time.Time
+	// Service returns a registered service by name, or nil.
 	Service(name string) Service
+	// Config returns the server configuration.
 	Config() Config
+	// TLSConfig returns the TLS configuration, or nil for plain HTTP.
 	TLSConfig() *tls.Config
 
-	// IsReady indicates that all subservices are ready to serve
+	// IsReady indicates that the server is serving and all services are ready to serve
 	IsReady() bool
 
+	// AddService registers a service; it must be called before StartHTTP.
 	AddService(s Service)
+	// StartHTTP starts serving in a background goroutine.
 	StartHTTP() error
+	// StopHTTP closes services and gracefully shuts down the listener.
 	StopHTTP()
 
+	// OnEvent registers a handler for a lifecycle event.
 	OnEvent(evt ServerEvent, handler ServerEventFunc)
 }
 
-// MuxFactory creates http handlers.
+// MuxFactory creates the root http.Handler used by StartHTTP. HTTPServer is
+// its own default MuxFactory (see HTTPServer.NewMux); use WithMuxFactory to
+// substitute a custom middleware chain.
 type MuxFactory interface {
+	// NewMux builds and returns the root handler.
 	NewMux() http.Handler
 }
 
-// HTTPServer is responsible for exposing the collection of the services
-// as a single HTTP server
+// HTTPServer exposes a collection of Service implementations as a single
+// HTTP or HTTPS server. Configure it with the With* methods and AddService
+// before calling StartHTTP; those setters are not synchronised against a
+// running server.
+//
+// The embedded Server interface is left nil: only the methods implemented
+// directly on *HTTPServer are usable (note that Config() is not, use
+// HTTPConfig()).
 type HTTPServer struct {
 	Server
 	authz           authz.HTTPAuthz
@@ -96,7 +129,7 @@ type HTTPServer struct {
 	port            string
 	ipaddr          string
 	version         string
-	serving         bool
+	serving         atomic.Bool
 	startedAt       time.Time
 	clientAuth      string
 	services        map[string]Service
@@ -105,7 +138,10 @@ type HTTPServer struct {
 	shutdownTimeout time.Duration
 }
 
-// New creates a new instance of the server
+// New creates a server for the given configuration. version is reported by
+// Version(); ipaddr is the address reported by LocalIP() and is auto-detected
+// (falling back to 127.0.0.1) when empty; a nil tlsConfig serves plain HTTP.
+// The default shutdown timeout is 5 seconds. New never returns an error today.
 func New(
 	version string,
 	ipaddr string,
@@ -145,25 +181,29 @@ func New(
 	return s, nil
 }
 
-// WithAuthz enables to use Authz
+// WithAuthz enables path/role authorization; the handler is created from
+// authz by NewMux, so it must be set before StartHTTP.
 func (server *HTTPServer) WithAuthz(authz authz.HTTPAuthz) *HTTPServer {
 	server.authz = authz
 	return server
 }
 
-// WithIdentityProvider enables to set idenity on each request
+// WithIdentityProvider sets the mapper that derives the caller identity for
+// each request. When unset identity.GuestIdentityMapper is used.
 func (server *HTTPServer) WithIdentityProvider(provider identity.ProviderFromRequest) *HTTPServer {
 	server.identityMapper = provider
 	return server
 }
 
-// WithCORS enables CORS options
+// WithCORS enables the CORS middleware around the router with the given
+// options; nil options disable CORS.
 func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer {
 	server.cors = cors
 	return server
 }
 
-// WithShutdownTimeout sets the connection draining timeouts on server shutdown
+// WithShutdownTimeout sets how long StopHTTP waits for in-flight requests to
+// drain before giving up (default 5s).
 func (server *HTTPServer) WithShutdownTimeout(timeout time.Duration) *HTTPServer {
 	server.shutdownTimeout = timeout
 	return server
@@ -177,7 +217,8 @@ var tlsClientAuthToStrMap = map[tls.ClientAuthType]string{
 	tls.RequireAndVerifyClientCert: "RequireAndVerifyClientCert",
 }
 
-// AddService provides a service registration for the server
+// AddService registers a service by its Name. It panics (via the logger) if a
+// service with the same name is already registered. Call it before StartHTTP.
 func (server *HTTPServer) AddService(s Service) {
 	server.lock.Lock()
 	defer server.lock.Unlock()
@@ -187,7 +228,8 @@ func (server *HTTPServer) AddService(s Service) {
 	server.services[s.Name()] = s
 }
 
-// OnEvent accepts a callback to handle server events
+// OnEvent registers a callback for the given lifecycle event. Handlers are
+// invoked synchronously in registration order.
 func (server *HTTPServer) OnEvent(evt ServerEvent, handler ServerEventFunc) {
 	server.lock.Lock()
 	defer server.lock.Unlock()
@@ -195,7 +237,7 @@ func (server *HTTPServer) OnEvent(evt ServerEvent, handler ServerEventFunc) {
 	server.evtHandlers[evt] = append(server.evtHandlers[evt], handler)
 }
 
-// Service returns a registered server
+// Service returns the registered service with the given name, or nil.
 func (server *HTTPServer) Service(name string) Service {
 	server.lock.Lock()
 	defer server.lock.Unlock()
@@ -207,12 +249,12 @@ func (server *HTTPServer) HostName() string {
 	return server.hostname
 }
 
-// Port returns the port name of the server
+// Port returns the port part of the bind address (see GetPort).
 func (server *HTTPServer) Port() string {
 	return server.port
 }
 
-// Protocol returns the protocol
+// Protocol returns "https" when a TLS config was supplied, otherwise "http".
 func (server *HTTPServer) Protocol() string {
 	if server.tlsConfig != nil {
 		return "https"
@@ -220,51 +262,55 @@ func (server *HTTPServer) Protocol() string {
 	return "http"
 }
 
-// LocalIP returns the IP address of the server
+// LocalIP returns the IP address passed to New, or the auto-detected local IP.
 func (server *HTTPServer) LocalIP() string {
 	return server.ipaddr
 }
 
-// PublicURL returns the public URL of the server
+// PublicURL returns the configured public URL (Config.GetPublicURL).
 func (server *HTTPServer) PublicURL() string {
 	return server.httpConfig.GetPublicURL()
 }
 
-// StartedAt returns the time when the server started
+// StartedAt returns the UTC time at which the server instance was created.
 func (server *HTTPServer) StartedAt() time.Time {
 	return server.startedAt
 }
 
-// Uptime returns the duration the server was up
+// Uptime returns the time elapsed since StartedAt.
 func (server *HTTPServer) Uptime() time.Duration {
 	return time.Now().UTC().Sub(server.startedAt)
 }
 
-// Version returns the version of the server
+// Version returns the version string passed to New.
 func (server *HTTPServer) Version() string {
 	return server.version
 }
 
-// Name returns the server name
+// Name returns the configured server name (Config.GetServerName).
 func (server *HTTPServer) Name() string {
 	return server.httpConfig.GetServerName()
 }
 
-// HTTPConfig returns HTTPServerConfig
+// HTTPConfig returns the Config passed to New.
 func (server *HTTPServer) HTTPConfig() Config {
 	return server.httpConfig
 }
 
-// TLSConfig returns TLSConfig
+// TLSConfig returns the TLS configuration passed to New, or nil for plain HTTP.
 func (server *HTTPServer) TLSConfig() *tls.Config {
 	return server.tlsConfig
 }
 
-// IsReady returns true when the server is ready to serve
+// IsReady reports whether the listener has been started and every registered
+// service reports IsReady. It is used by the ready middleware to answer 503
+// until then.
 func (server *HTTPServer) IsReady() bool {
-	if !server.serving {
+	if !server.serving.Load() {
 		return false
 	}
+	server.lock.RLock()
+	defer server.lock.RUnlock()
 	for _, ss := range server.services {
 		if !ss.IsReady() {
 			return false
@@ -273,7 +319,8 @@ func (server *HTTPServer) IsReady() bool {
 	return true
 }
 
-// WithMuxFactory requires the server to use `muxFactory` to create server handler.
+// WithMuxFactory replaces the factory used by StartHTTP to build the root
+// handler, allowing a custom middleware chain instead of NewMux.
 func (server *HTTPServer) WithMuxFactory(muxFactory MuxFactory) {
 	server.muxFactory = muxFactory
 }
@@ -284,7 +331,12 @@ func (server *HTTPServer) broadcast(evt ServerEvent) {
 	}
 }
 
-// StartHTTP will verify all the TLS related files are present and start the actual HTTPS listener for the server
+// StartHTTP builds the handler via the MuxFactory and starts serving in a
+// background goroutine, returning immediately. With TLS the listener is bound
+// synchronously and bind errors are returned; for plain HTTP the listener is
+// bound inside the goroutine and a failure there (for example address in
+// use) panics via the logger. ServerStartedEvent is broadcast from the
+// serving goroutine.
 func (server *HTTPServer) StartHTTP() error {
 	bindAddr := server.httpConfig.GetBindAddr()
 	var err error
@@ -328,7 +380,7 @@ func (server *HTTPServer) StartHTTP() error {
 	server.httpServer.Handler = httpHandler
 
 	serve := func() error {
-		server.serving = true
+		server.serving.Store(true)
 		if httpsListener != nil {
 			return server.httpServer.Serve(httpsListener)
 		}
@@ -342,7 +394,7 @@ func (server *HTTPServer) StartHTTP() error {
 
 		// this is a blocking call to serve
 		if err := serve(); err != nil {
-			server.serving = false
+			server.serving.Store(false)
 			// panic, only if not Serve error while stopping the server,
 			// which is a valid error
 			if netutil.IsAddrInUse(err) || err != http.ErrServerClosed {
@@ -355,18 +407,12 @@ func (server *HTTPServer) StartHTTP() error {
 	return nil
 }
 
-// StopHTTP will perform a graceful shutdown of the serivce by
-//  1. signally to the Load Balancer to remove this instance from the pool
-//     by changing to response to /availability
-//  2. cause new responses to have their Connection closed when finished
-//     to force clients to re-connect [hopefully to a different instance]
-//  3. wait the minShutdownTime to ensure the LB has noticed the status change
-//  4. wait for existing requests to finish processing
-//  5. step 4 is capped by a overrall timeout where we'll give up waiting
-//     for the requests to complete and will exit.
-//
-// it is expected that you don't try and use the server instance again
-// after this. [i.e. if you want to start it again, create another server instance]
+// StopHTTP performs a graceful shutdown: it broadcasts ServerStoppingEvent,
+// calls Close on every registered service, then calls http.Server.Shutdown
+// bounded by the shutdown timeout (see WithShutdownTimeout) so in-flight
+// requests can drain, and finally broadcasts ServerStoppedEvent. Shutdown
+// errors are logged, not returned. StopHTTP must only be called after a
+// successful StartHTTP, and the instance must not be reused afterwards.
 func (server *HTTPServer) StopHTTP() {
 	server.broadcast(ServerStoppingEvent)
 
@@ -385,8 +431,13 @@ func (server *HTTPServer) StopHTTP() {
 	server.broadcast(ServerStoppedEvent)
 }
 
-// NewMux creates a new http handler for the http server, typically you only
-// need to call this directly for tests.
+// NewMux builds the default handler chain: a Router (with CORS when
+// configured) on which every registered service has called Register, wrapped
+// (innermost to outermost) by the ready verifier, the authz handler when set,
+// the request logger, request metrics, the identity context handler and the
+// correlation ID handler. It is called by StartHTTP through the MuxFactory;
+// call it directly only in tests. It panics via the logger if the authz
+// handler cannot be created.
 func (server *HTTPServer) NewMux() http.Handler {
 	// NOTE: the handlers are executed in the reverse order
 
@@ -452,7 +503,10 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
 }
 
-// GetServerURL returns complete server URL for given relative end-point
+// GetServerURL returns the absolute URL for relativeEndpoint as seen by the
+// client of request r. The scheme is taken from the X-Forwarded-Proto header
+// when present (it is trusted as-is), otherwise from s.Protocol(); the host
+// from r.URL.Host, then r.Host, then the server's host:port.
 func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL {
 	proto := s.Protocol()
 
@@ -477,7 +531,8 @@ func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL {
 	}
 }
 
-// GetServerBaseURL returns server base URL
+// GetServerBaseURL returns scheme://host:port for the server's own bind
+// address, without consulting any request headers.
 func GetServerBaseURL(s Server) *url.URL {
 	return &url.URL{
 		Scheme: s.Protocol(),

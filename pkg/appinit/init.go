@@ -15,7 +15,9 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "appinit")
 
-// LogConfig defines config for logs
+// LogConfig holds the logging command line flags consumed by Logs.
+// The help tags are for kong. Precedence: LogDir (file rotation) >
+// "/dev/null" (discard) > LogStackdriver > LogJSON > LogPretty > plain text.
 type LogConfig struct {
 	LogStd         bool   `help:"output logs to stderr"`
 	LogDebug       bool   `help:"output logs with debug info, such as filename:line"`
@@ -25,7 +27,9 @@ type LogConfig struct {
 	LogDir         string `help:"Store logs in folder"`
 }
 
-// Flags defines common flags
+// Flags holds the command line flags shared by services (kong tags):
+// config file paths, CPU profiling output, dry-run, client TLS files and
+// environment/service/region/cluster overrides.
 type Flags struct {
 	Version ctl.VersionFlag `name:"version" help:"Print version information and quit" hidden:""`
 
@@ -49,7 +53,11 @@ const (
 	nullDevName = "/dev/null"
 )
 
-// Logs initializes app logs
+// Logs configures the process-global xlog formatter from flags and logs a
+// "service_starting" line with os.Args. When LogDir is set, log rotation is
+// initialized under LogDir/<serviceName>.log and the returned closer must be
+// closed at shutdown; otherwise the closer is nil. LogDir "/dev/null"
+// discards all output.
 func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 	var closer io.Closer
 	var formatter xlog.Formatter
@@ -58,15 +66,9 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 		var sink io.Writer
 		if flags.LogStd {
 			sink = os.Stderr
-			formatter = xlog.NewPrettyFormatter(sink).Options(xlog.FormatWithColor(true))
 		} else {
 			// do not redirect stderr to our log files
 			log.SetOutput(os.Stderr)
-			if flags.LogPretty {
-				formatter = xlog.NewPrettyFormatter(os.Stderr)
-			} else {
-				formatter = xlog.NewStringFormatter(os.Stderr)
-			}
 		}
 
 		logRotate, err := logrotate.Initialize(flags.LogDir, serviceName, 10, 10, true, sink)
@@ -78,20 +80,26 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 			return nil, errors.WithMessage(err, "failed to initialize log rotate")
 		}
 		closer = logRotate
-
-	} else if flags.LogDir == nullDevName {
-		formatter = xlog.NewNilFormatter()
-	} else if flags.LogStackdriver {
-		formatter = stackdriver.NewFormatter(os.Stderr, serviceName)
-	} else if flags.LogJSON {
-		formatter = xlog.NewJSONFormatter(os.Stderr)
-	} else if flags.LogPretty {
-		formatter = xlog.NewPrettyFormatter(os.Stderr).Options(xlog.FormatWithColor(true))
+		// logrotate.Initialize installed the rotating-file formatter; keep it
+		// (calling SetFormatter here would replace it and leave the file empty)
+		// and only adjust its options.
+		formatter = xlog.GetFormatter()
 	} else {
-		formatter = xlog.NewStringFormatter(os.Stderr)
+		switch {
+		case flags.LogDir == nullDevName:
+			formatter = xlog.NewNilFormatter()
+		case flags.LogStackdriver:
+			formatter = stackdriver.NewFormatter(os.Stderr, serviceName)
+		case flags.LogJSON:
+			formatter = xlog.NewJSONFormatter(os.Stderr)
+		case flags.LogPretty:
+			formatter = xlog.NewPrettyFormatter(os.Stderr).Options(xlog.FormatWithColor(true))
+		default:
+			formatter = xlog.NewStringFormatter(os.Stderr)
+		}
+		xlog.SetFormatter(formatter)
 	}
 
-	xlog.SetFormatter(formatter)
 	formatter.Options(xlog.FormatWithCaller(true))
 	if flags.LogDebug {
 		formatter.Options(xlog.FormatWithLocation(true))
@@ -102,7 +110,9 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 	return closer, nil
 }
 
-// CPUProfiler starts CPU profiles
+// CPUProfiler starts a CPU profile written to file and returns a closer that
+// stops it. It returns a nil closer and nil error when file is empty or
+// "/dev/null". The profile file handle is not closed by the closer.
 func CPUProfiler(file string) (io.Closer, error) {
 	// create CPU Profiler
 	if file != "" && file != nullDevName {

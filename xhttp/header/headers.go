@@ -46,7 +46,7 @@ const (
 	Location = "Location"
 	// ReplayNonce is HTTP header for "Replay-Nonce"
 	ReplayNonce = "Replay-Nonce"
-	// TextPlain is HTTP header value for "application/json"
+	// TextPlain is HTTP header value for "text/plain"
 	TextPlain = "text/plain"
 	// UserAgent is HTTP header value for "User-Agent"
 	UserAgent = "User-Agent"

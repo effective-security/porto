@@ -22,35 +22,49 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "gserver")
 
-// ServiceFactory is interface to create Services
+// ServiceFactory builds a Service for the given server. The returned value is
+// passed to dig.Container.Invoke, so it must be a function whose parameters are
+// resolved from the container; the function itself should call GServer.AddService.
 type ServiceFactory func(GServer) any
 
-// Service provides a way for subservices to be registered so they get added to the http API.
+// Service is a named sub-service hosted by a Server. Services are created by a
+// ServiceFactory and registered with GServer.AddService; a Service may
+// additionally implement RouteRegistrator, GRPCRegistrator or StartSubcriber.
 type Service interface {
+	// Name returns the unique service name used as the key in GServer.Service.
 	Name() string
+	// Close releases the service resources; it is called by Server.Close before
+	// the listeners are shut down.
 	Close()
 	// IsReady indicates that service is ready to serve its end-points
 	IsReady() bool
 }
 
-// StartSubcriber provides
+// StartSubcriber is an optional interface a Service can implement to be
+// notified once the server has started.
 type StartSubcriber interface {
 	// OnStarted is called when the server started and
 	// is ready to serve requests
 	OnStarted() error
 }
 
-// RouteRegistrator provides interface to register HTTP route
+// RouteRegistrator is an optional interface a Service implements to expose
+// REST endpoints; it is invoked once per listener when the router is built.
 type RouteRegistrator interface {
+	// RegisterRoute adds the service HTTP handlers to the router.
 	RegisterRoute(restserver.Router)
 }
 
-// GRPCRegistrator provides interface to register gRPC service
+// GRPCRegistrator is an optional interface a Service implements to expose gRPC
+// services; it is invoked once per gRPC server instance (secure and insecure).
 type GRPCRegistrator interface {
+	// RegisterGRPC registers the service implementation on the gRPC server.
 	RegisterGRPC(*grpc.Server)
 }
 
-// GServer is the interface for gRPC server
+// GServer is the server handle passed to ServiceFactory functions and
+// returned by Start. Services use it to register themselves and to query
+// server state; it is safe for concurrent reads after Start returns.
 type GServer interface {
 	// Name returns server name
 	Name() string
@@ -80,8 +94,11 @@ type GServer interface {
 	Close()
 }
 
-// Server contains a running server and its listeners.
+// Server is the GServer implementation returned by Start. It owns the
+// listeners, the per-listener HTTP and gRPC servers, and the registered
+// services. Use Start to construct it; the zero value is not usable.
 type Server struct {
+	// Listeners are the accepted network listeners, one per unique listen address.
 	Listeners []net.Listener
 
 	ipaddr   string
@@ -107,7 +124,12 @@ type Server struct {
 	opts options
 }
 
-// Start returns running Server
+// Start creates the services from serviceFactories, opens the listeners from
+// cfg.ListenURLs and begins serving in background goroutines, returning the
+// running server. The container must provide discovery.Discovery and, when
+// cfg.IdentityMap enables JWT or DPoP, a jwt.Parser. On error any partially
+// opened listeners are closed and the error is returned; on success the caller
+// must eventually call Close. Serve errors are reported on Err.
 func Start(
 	name string,
 	cfg *Config,
@@ -351,7 +373,8 @@ func stopServers(ctx context.Context, ss *servers) {
 	}
 }
 
-// Err returns error channel
+// Err returns the channel on which listener/serve errors are reported. The
+// channel is buffered and is never closed; errors are dropped once Close begins.
 func (e *Server) Err() <-chan error { return e.errc }
 
 // Name returns server name
@@ -359,24 +382,27 @@ func (e *Server) Name() string {
 	return e.name
 }
 
-// Configuration of the server
+// Configuration returns a pointer to the server's copy of the Config;
+// mutating it after Start has no effect on already configured listeners.
 func (e *Server) Configuration() *Config {
 	return &e.cfg
 }
 
-// AddService to the server
+// AddService registers svc by its Name, replacing any service with the same
+// name. It must be called from a ServiceFactory, before Start begins serving;
+// the services map is not synchronized.
 func (e *Server) AddService(svc Service) {
 	logger.KV(xlog.NOTICE, "server", e.Name(), "service", svc.Name())
 
 	e.services[svc.Name()] = svc
 }
 
-// Service returns service by name
+// Service returns the registered service with the given name, or nil.
 func (e *Server) Service(name string) Service {
 	return e.services[name]
 }
 
-// IsReady returns true when the server is ready to serve
+// IsReady returns true when every registered service reports IsReady.
 func (e *Server) IsReady() bool {
 	for _, ss := range e.services {
 		if !ss.IsReady() {
@@ -392,7 +418,8 @@ func (e *Server) StartedAt() time.Time {
 	return e.startedAt
 }
 
-// ListenURLs is the list of URLs that the server listens on
+// ListenURLs returns the configured Config.ListenURLs (not the resolved
+// listener addresses).
 func (e *Server) ListenURLs() []string {
 	return e.cfg.ListenURLs
 }
@@ -402,12 +429,14 @@ func (e *Server) Hostname() string {
 	return e.hostname
 }
 
-// LocalIP is the local IP4
+// LocalIP returns the local IPv4 address detected at startup, or 127.0.0.1
+// when it could not be determined.
 func (e *Server) LocalIP() string {
 	return e.ipaddr
 }
 
-// Discovery returns Discovery interface
+// Discovery returns the discovery.Discovery injected from the container; all
+// services are registered with it under the server name after Start.
 func (e *Server) Discovery() discovery.Discovery {
 	return e.disco
 }

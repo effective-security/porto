@@ -18,7 +18,9 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/xhttp", "correlation")
 
-// CorrelationIDgRPCHeaderName specifies default name for gRPC header
+// CorrelationIDgRPCHeaderName is the gRPC metadata key used to carry the
+// correlation ID on outgoing calls and read it on incoming ones. It is a
+// process-global that may be changed at startup, before any traffic.
 var CorrelationIDgRPCHeaderName = "x-correlation-id"
 
 type contextKey int
@@ -28,22 +30,30 @@ const (
 	keyCorrelation
 )
 
-// IDSize specifies a size in characters for the correlation ID
+// IDSize is the length in characters of generated correlation IDs; incoming
+// IDs longer than this are truncated.
 const IDSize = 12
 
-// Correlator interface allows to provide request ID
+// Correlator is implemented by values (such as httperror.Error) that carry a
+// correlation ID.
 type Correlator interface {
+	// CorrelationID returns the correlation ID, or "" when unknown.
 	CorrelationID() string
 }
 
-// RequestContext represents user contextual information about a request being processed by the server,
-// it includes ID, aka Request-ID or Correlation-ID (for cross system request correlation).
+// RequestContext is the value stored in the context by this package; it
+// holds the request ID, aka Request-ID or Correlation-ID (for cross system
+// request correlation). Retrieve it with Value or ID.
 type RequestContext struct {
+	// ID is the correlation ID.
 	ID string
 }
 
-// NewHandler returns a handler that will extact/add the correlationID from the request
-// and stash them away in the request context for later handlers to use.
+// NewHandler returns middleware that reads the correlation ID from the
+// X-Correlation-ID or X-Request-ID request header (or generates one), stores
+// it in the request context, adds it to the xlog context as "ctx" and sets
+// the X-Correlation-ID response header before calling delegate. An ID
+// already present in the context is reused.
 func NewHandler(delegate http.Handler) http.Handler {
 	h := func(w http.ResponseWriter, r *http.Request) {
 		var rctx *RequestContext
@@ -67,8 +77,10 @@ func NewHandler(delegate http.Handler) http.Handler {
 	return http.HandlerFunc(h)
 }
 
-// NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
-// identity to the context
+// NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that adds the
+// correlation ID (from incoming metadata or newly generated) to the context
+// and xlog fields, and recovers panics from the handler, logging them and
+// returning an "unhandled exception" error.
 func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		defer func() {
@@ -99,6 +111,9 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// NewStreamServerInterceptor returns the streaming counterpart of
+// NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext
+// so handlers see the enriched context.
 func NewStreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		ctx := ss.Context()
@@ -192,7 +207,7 @@ func correlationID(req *http.Request) string {
 	return corID
 }
 
-// Value returns correlation RequestContext from the context
+// Value returns the RequestContext stored in ctx, or nil if none.
 func Value(ctx context.Context) *RequestContext {
 	v := ctx.Value(keyContext)
 	if r, ok := v.(*RequestContext); ok {
@@ -201,7 +216,7 @@ func Value(ctx context.Context) *RequestContext {
 	return nil
 }
 
-// ID returns correlation ID from the context
+// ID returns the correlation ID stored in ctx, or "" if none.
 func ID(ctx context.Context) string {
 	corID := ""
 	v := Value(ctx)
@@ -211,9 +226,8 @@ func ID(ctx context.Context) string {
 	return corID
 }
 
-// WithID returns context with Correlation ID,
-// if the context alread has Correlation ID,
-// the original is returned
+// WithID returns a context carrying a newly generated correlation ID (also
+// added to the xlog fields). If ctx already has one, ctx is returned as is.
 func WithID(ctx context.Context) context.Context {
 	v := ctx.Value(keyContext)
 	if v == nil {
@@ -226,8 +240,10 @@ func WithID(ctx context.Context) context.Context {
 	return ctx
 }
 
-// WithMetaFromContext returns context with Correlation ID
-// for the outgoing gRPC call
+// WithMetaFromContext ensures the outgoing gRPC metadata of ctx carries the
+// correlation ID under CorrelationIDgRPCHeaderName, generating and storing
+// a new ID in the context when none exists. Use it before making a gRPC
+// client call.
 func WithMetaFromContext(ctx context.Context) context.Context {
 	md, ok := metadata.FromOutgoingContext(ctx)
 	if !ok || md == nil || len(md[CorrelationIDgRPCHeaderName]) == 0 {
@@ -280,7 +296,10 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, kv...)
 }
 
-// NewFromContext returns new Background context with Correlation ID from incoming context
+// NewFromContext returns a fresh context.Background (detached from ctx's
+// cancellation and deadline) that carries ctx's correlation ID, or a new
+// one, both as a context value and as outgoing gRPC metadata. Use it for
+// background work that should outlive the request.
 func NewFromContext(ctx context.Context) context.Context {
 	cid := ID(ctx)
 	if cid == "" {

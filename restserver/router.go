@@ -20,9 +20,9 @@ type CORSOptions struct {
 	// as argument and returns true if allowed or false otherwise. If this option is
 	// set, the content of AllowedOrigins is ignored.
 	AllowOriginFunc func(origin string) bool
-	// AllowOriginFunc is a custom function to validate the origin. It takes the HTTP Request object and the origin as
-	// argument and returns true if allowed or false otherwise. If this option is set, the content of `AllowedOrigins`
-	// and `AllowOriginFunc` is ignored.
+	// AllowOriginRequestFunc is a custom function to validate the origin. It takes the HTTP Request object and the
+	// origin as argument and returns true if allowed or false otherwise. If this option is set, the content of
+	// `AllowedOrigins` and `AllowOriginFunc` is ignored.
 	AllowOriginRequestFunc func(r *http.Request, origin string) bool
 	// AllowedMethods is a list of methods the client is allowed to use with
 	// cross-domain requests. Default value is simple methods (HEAD, GET and POST).
@@ -69,16 +69,29 @@ func (ps Params) ByName(name string) string {
 // wildcards (variables).
 type Handle func(http.ResponseWriter, *http.Request, Params)
 
-// Router provides a router interface
+// Router is the route registry handed to Service.Register. Paths use
+// httprouter syntax (":name" and "*catchall" segments); registering the same
+// method and path twice panics, as does registering after Handler has been
+// served (httprouter is not safe for concurrent mutation).
 type Router interface {
+	// Handler returns the http.Handler serving the registered routes,
+	// wrapped with CORS when the router was created with NewRouterWithCORS.
 	Handler() http.Handler
+	// GET registers handle for GET requests to path.
 	GET(path string, handle Handle)
+	// HEAD registers handle for HEAD requests to path.
 	HEAD(path string, handle Handle)
+	// OPTIONS registers handle for OPTIONS requests to path.
 	OPTIONS(path string, handle Handle)
+	// POST registers handle for POST requests to path.
 	POST(path string, handle Handle)
+	// PUT registers handle for PUT requests to path.
 	PUT(path string, handle Handle)
+	// PATCH registers handle for PATCH requests to path.
 	PATCH(path string, handle Handle)
+	// DELETE registers handle for DELETE requests to path.
 	DELETE(path string, handle Handle)
+	// CONNECT registers handle for CONNECT requests to path.
 	CONNECT(path string, handle Handle)
 }
 
@@ -87,7 +100,8 @@ type proxy struct {
 	cors   *cors.Cors
 }
 
-// NewRouter returns a new initialized Router.
+// NewRouter returns a Router backed by httprouter with the given handler
+// serving unmatched paths (restserver uses a JSON 404 not_found error).
 func NewRouter(notfoundhandler http.HandlerFunc) Router {
 	r := &proxy{
 		router: httprouter.New(),
@@ -96,21 +110,23 @@ func NewRouter(notfoundhandler http.HandlerFunc) Router {
 	return r
 }
 
-// NewRouterWithCORS returns a new initialized Router with CORS enabled
+// NewRouterWithCORS returns a Router whose Handler is wrapped by the rs/cors
+// middleware configured from opt; a nil opt uses cors.Default() (all origins,
+// simple methods, no credentials).
 func NewRouterWithCORS(notfoundhandler http.HandlerFunc, opt *CORSOptions) Router {
 	var c *cors.Cors
 	if opt != nil {
 		c = cors.New(cors.Options{
-			AllowedOrigins:         opt.AllowedOrigins,
-			AllowOriginFunc:        opt.AllowOriginFunc,
-			AllowOriginRequestFunc: opt.AllowOriginRequestFunc,
-			AllowedMethods:         opt.AllowedMethods,
-			AllowedHeaders:         opt.AllowedHeaders,
-			ExposedHeaders:         opt.ExposedHeaders,
-			MaxAge:                 opt.MaxAge,
-			AllowCredentials:       opt.AllowCredentials,
-			OptionsPassthrough:     opt.OptionsPassthrough,
-			Debug:                  opt.Debug,
+			AllowedOrigins:             opt.AllowedOrigins,
+			AllowOriginFunc:            opt.AllowOriginFunc,
+			AllowOriginVaryRequestFunc: wrapAllowOriginRequestFunc(opt.AllowOriginRequestFunc),
+			AllowedMethods:             opt.AllowedMethods,
+			AllowedHeaders:             opt.AllowedHeaders,
+			ExposedHeaders:             opt.ExposedHeaders,
+			MaxAge:                     opt.MaxAge,
+			AllowCredentials:           opt.AllowCredentials,
+			OptionsPassthrough:         opt.OptionsPassthrough,
+			Debug:                      opt.Debug,
 		})
 	} else {
 		c = cors.Default()
@@ -130,6 +146,7 @@ func proxyHandle(handle Handle) httprouter.Handle {
 	}
 }
 
+// Handler returns the router, wrapped with CORS when configured.
 func (p *proxy) Handler() http.Handler {
 	if p.cors != nil {
 		return p.cors.Handler(p.router)
@@ -175,4 +192,18 @@ func (p *proxy) DELETE(path string, handle Handle) {
 // CONNECT is a shortcut for router.Handle("CONNECT", path, handle)
 func (p *proxy) CONNECT(path string, handle Handle) {
 	p.router.Handle("CONNECT", path, proxyHandle(handle))
+}
+
+// wrapAllowOriginRequestFunc adapts the CORSOptions.AllowOriginRequestFunc
+// signature to the non-deprecated cors.Options.AllowOriginVaryRequestFunc.
+// The returned function reports no extra Vary headers, which matches the
+// behavior of the deprecated option it replaces. A nil input yields nil so the
+// cors library falls back to AllowOriginFunc and AllowedOrigins.
+func wrapAllowOriginRequestFunc(fn func(r *http.Request, origin string) bool) func(r *http.Request, origin string) (bool, []string) {
+	if fn == nil {
+		return nil
+	}
+	return func(r *http.Request, origin string) (bool, []string) {
+		return fn(r, origin), nil
+	}
 }

@@ -1,29 +1,3 @@
-// Package authz provides an implemention of http authorization where specific
-// URI (or URI's and their children) are allowed access by a set of roles
-//
-// the caller can supply a way to map from a request to a role name.
-//
-// the access control points are on entire URI segments only, e.g.
-// Allow("/foo/bar", "bob")
-// gives access to /foo/bar /foo/bar/baz, but not /foo/barry
-//
-// Access is based on the deepest matching path, not the accumulated paths, so,
-// Allow("/foo", "bob")
-// Allow("/foo/bar", "barry")
-// will allow barry access to /foo/bar but not access to /foo
-//
-// AllowAny("/foo") will allow any authenticated request access to the /foo resource
-// AllowAnyRole("/bar") will allow any authenticated request with a non-empty role access to the /bar resource
-//
-// AllowAny, allowAnyRole always overrides any matching Allow regardless of the order of calls
-// multiple calls to Allow for the same resource are cumulative, e.g.
-// Allow("/foo", "bob")
-// Allow("/foo", "barry")
-// is equivilent to
-// Allow("/foo", "bob", "barry")
-//
-// Once you've built your Provider you can call NewHandler to get a http.Handler
-// that implements those rules.
 package authz
 
 import (
@@ -55,13 +29,11 @@ var (
 	ErrNoPathsConfigured = errors.New("you must have at least one path before being able to create a http.Handler")
 )
 
-// HTTPAuthz represents an Authorization provider interface,
-// You can call Allow or AllowAny to specify which roles are allowed
-// access to which path segments.
-// once configured you can create a http.Handler that enforces that
-// configuration for you by calling NewHandler
+// HTTPAuthz is the HTTP-facing authorization contract consumed by
+// restserver.HTTPServer.WithAuthz. *Provider implements it.
 type HTTPAuthz interface {
-	// SetRoleMapper configures the function that provides the mapping from an HTTP request to a role name
+	// SetRoleMapper configures the function that maps an HTTP request to the
+	// identity whose Role() is authorized. The default reads identity.FromRequest.
 	SetRoleMapper(func(*http.Request) identity.Identity)
 	// NewHandler returns a http.Handler that enforces the current authorization configuration
 	// The handler has its own copy of the configuration changes to the Provider after calling
@@ -72,14 +44,13 @@ type HTTPAuthz interface {
 	NewHandler(delegate http.Handler) (http.Handler, error)
 }
 
-// GRPCAuthz represents an Authorization provider interface,
-// You can call Allow or AllowAny to specify which roles are allowed
-// access to which path segments.
-// once configured you can create a Unary interceptor that enforces that
-// configuration for you by calling NewUnaryInterceptor
+// GRPCAuthz is the gRPC-facing authorization contract. *Provider implements
+// it; the full method name (e.g. "/pkg.Service/Method") is matched against
+// the path tree exactly like an HTTP path.
 type GRPCAuthz interface {
-	// SetGRPCRoleMapper configures the function that provides
-	// the mapping from a gRPC request to a role name
+	// SetGRPCRoleMapper configures the function that maps a gRPC request
+	// context to the identity whose Role() is authorized. The default reads
+	// identity.FromContext.
 	SetGRPCRoleMapper(m func(ctx context.Context) identity.Identity)
 	// NewUnaryInterceptor returns grpc.UnaryServerInterceptor that enforces the current
 	// authorization configuration.
@@ -89,7 +60,9 @@ type GRPCAuthz interface {
 	NewUnaryInterceptor() grpc.UnaryServerInterceptor
 }
 
-// Config contains configuration for the authorization module
+// Config is the declarative authorization configuration consumed by New.
+// It is typically loaded from YAML/JSON; see the package documentation for
+// the field names. Paths must start with "/".
 type Config struct {
 	// Allow will allow the specified roles access to this path and its children, in format: ${path}:${role},${role}
 	Allow []string `json:"allow" yaml:"allow"`
@@ -118,11 +91,12 @@ type Config struct {
 	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 }
 
-// Provider represents an Authorization provider,
-// You can call Allow or AllowAny to specify which roles are allowed
-// access to which path segments.
-// once configured you can create a http.Handler that enforces that
-// configuration for you by calling NewHandler
+// Provider holds the path/role tree and the role mappers, and implements
+// HTTPAuthz and GRPCAuthz. Build it with New (or configure a zero value via
+// Allow/AllowAny/AllowAnyRole, but note that isAllowed dereferences cfg, so
+// a Provider created without New must not be used for checks). Mutating
+// calls (Allow*, Set*Mapper) are not synchronised and must complete before
+// the handlers/interceptors serve traffic.
 type Provider struct {
 	requestRoleMapper func(*http.Request) identity.Identity
 	grpcRoleMapper    func(context.Context) identity.Identity
@@ -163,7 +137,10 @@ var defaultGrpcRoleMapper = func(ctx context.Context) identity.Identity {
 	return identity.FromContext(ctx).Identity()
 }
 
-// New returns new Authz provider
+// New builds a Provider from cfg with the default role mappers. Each
+// Config.Allow entry must be "${path}:${role}[,${role}...]", otherwise an
+// error is returned. cfg must not be nil. Paths that do not start with "/"
+// panic.
 func New(cfg *Config) (*Provider, error) {
 	az := &Provider{
 		cfg:               cfg,
@@ -288,7 +265,8 @@ func (n *pathNode) allowRole(r string) bool {
 	return ((n.allow & allowAnyRole) != 0) || n.allowedRoles[r]
 }
 
-// Clone returns a deep copy of this Provider
+// Clone returns a deep copy of this Provider (tree, mappers and config), so
+// later mutations of the original do not affect the copy.
 func (c *Provider) Clone() *Provider {
 	p := &Provider{
 		requestRoleMapper: c.requestRoleMapper,
@@ -302,32 +280,40 @@ func (c *Provider) Clone() *Provider {
 	return p
 }
 
-// SetRoleMapper configures the function that provides the mapping from an HTTP request to a role name
+// SetRoleMapper configures the function that maps an HTTP request to the
+// identity whose Role() is authorized. Setting it to nil makes NewHandler
+// fail with ErrNoRoleMapperSpecified.
 func (c *Provider) SetRoleMapper(m func(r *http.Request) identity.Identity) {
 	c.requestRoleMapper = m
 }
 
-// SetGRPCRoleMapper configures the function that provides the mapping from a gRPC request to a role name
+// SetGRPCRoleMapper configures the function that maps a gRPC context to the
+// identity whose Role() is authorized by the interceptors.
 func (c *Provider) SetGRPCRoleMapper(m func(ctx context.Context) identity.Identity) {
 	c.grpcRoleMapper = m
 }
 
-// AllowAny will allow any authenticated request access to this path and its children
-// [unless a specific Allow/AllowAny is called for a child path]
+// AllowAny allows any request, including unauthenticated guests, access to
+// this path and its children [unless a specific Allow/AllowAny is called for
+// a child path]. It replaces any AllowAnyRole flag on the node; roles added
+// with Allow are kept but ignored while AllowAny is set. Panics if path does
+// not start with "/".
 func (c *Provider) AllowAny(path string) {
 	c.walkPath(path, true).allow = allowAny
 }
 
-// AllowAnyRole will allow any authenticated request that include a non empty role
-// access to this path and its children
-// [unless a specific Allow/AllowAny is called for a child path]
+// AllowAnyRole allows any request whose role is non-empty and not the guest
+// role access to this path and its children [unless a specific
+// Allow/AllowAny is called for a child path]. Panics if path does not start
+// with "/".
 func (c *Provider) AllowAnyRole(path string) {
 	c.walkPath(path, true).allow |= allowAnyRole
 }
 
-// Allow will allow the specified roles access to this path and its children
-// [unless a specific Allow/AllowAny is called for a child path]
-// multiple calls to Allow for the same path are cumulative
+// Allow allows the specified roles access to this path and its children
+// [unless a specific Allow/AllowAny is called for a child path]. Multiple
+// calls to Allow for the same path are cumulative; empty role names are
+// ignored. Panics if path does not start with "/".
 func (c *Provider) Allow(path string, roles ...string) {
 	node := c.walkPath(path, true)
 	for _, role := range roles {
@@ -437,12 +423,14 @@ func (c *Provider) checkAccess(r *http.Request) error {
 	return nil
 }
 
-// NewHandler returns a http.Handler that enforces the current authorization configuration
-// The handler has its own copy of the configuration changes to the Provider after calling
-// NewHandler won't affect previously created Handlers.
-// The returned handler will extract the role and verify that the role has access to the
-// URI being request, and either return an error, or pass the request on to the supplied
-// delegate handler
+// NewHandler returns a http.Handler that enforces the current authorization
+// configuration. The handler works on a Clone of the Provider, so changes to
+// the Provider after calling NewHandler do not affect previously created
+// handlers. The handler maps the request to an identity via the role mapper,
+// checks r.URL.Path against the tree and either writes a JSON 401
+// unauthorized response or passes the request to delegate. OPTIONS requests
+// are always passed through. It returns ErrNoRoleMapperSpecified or
+// ErrNoPathsConfigured when the Provider is not usable.
 func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error) {
 	if c.requestRoleMapper == nil {
 		return nil, errors.WithStack(ErrNoRoleMapperSpecified)
@@ -472,7 +460,11 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// NewUnaryInterceptor returns grpc.UnaryServerInterceptor to check access
+// NewUnaryInterceptor returns a grpc.UnaryServerInterceptor that checks the
+// identity from the gRPC role mapper against info.FullMethod and fails with
+// httperror.Unauthorized (codes.PermissionDenied) when denied. Unlike
+// NewHandler it uses the live Provider, not a clone, and does not require a
+// configured tree (an empty tree denies everything).
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		idn := c.grpcRoleMapper(ctx)
@@ -485,7 +477,8 @@ func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-// NewStreamServerInterceptor returns grpc.StreamServerInterceptor to check access
+// NewStreamServerInterceptor returns the streaming counterpart of
+// NewUnaryInterceptor, checking access once when the stream is opened.
 func (c *Provider) NewStreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := ss.Context()

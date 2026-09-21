@@ -1,0 +1,43 @@
+// Package tlsconfig builds tls.Config values from PEM files and keeps the
+// certificate fresh with a file-polling reloader.
+//
+// Entry points:
+//
+//   - NewServerTLSFromFiles / NewClientTLSFromFiles build a tls.Config with
+//     MinVersion TLS 1.2 and ALPN "h2","http/1.1" from cert, key and optional
+//     CA bundle files. An optional "<cert basename>.ocsp" file next to the
+//     certificate is loaded as an OCSP staple if it is valid and not expired.
+//   - KeypairReloader polls the cert/key files' modification times on a ticker
+//     and reloads them (also forced once per hour). Use GetKeypairFunc as
+//     tls.Config.GetCertificate on servers and GetClientCertificateFunc as
+//     tls.Config.GetClientCertificate on clients.
+//   - NewHTTPTransportWithReloader returns an http.RoundTripper whose client
+//     certificate is swapped in on reload.
+//   - UpdateCipherSuites maps cipher suite names to tls.Config.CipherSuites.
+//
+// Server example:
+//
+//	cfg, err := tlsconfig.NewServerTLSFromFiles(certFile, keyFile, trustedCAFile, clientCAFile, tls.VerifyClientCertIfGiven)
+//	if err != nil {
+//		return err
+//	}
+//	reloader, err := tlsconfig.NewKeypairReloader("", certFile, keyFile, 5*time.Minute)
+//	if err != nil {
+//		return err
+//	}
+//	defer reloader.Close()
+//	cfg.GetCertificate = reloader.GetKeypairFunc()
+//
+// Client example:
+//
+//	cfg, reloader, err := tlsconfig.NewClientTLSWithReloader(certFile, keyFile, rootsFile, 5*time.Minute)
+//	if err != nil {
+//		return err
+//	}
+//	defer reloader.Close()
+//	client := &http.Client{Transport: &http.Transport{TLSClientConfig: cfg}}
+//
+// The reloader panics (via the package logger) when it serves a certificate
+// whose NotAfter has passed; callers that cannot tolerate that must validate
+// expiry before use (see transport.TLSInfo.ServerTLSWithReloader).
+package tlsconfig

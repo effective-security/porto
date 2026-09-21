@@ -1,5 +1,3 @@
-// Package identity extracts the callers contextual identity information from the HTTP/TLS
-// requests and exposes them for access via the generalized go context model.
 package identity
 
 import (
@@ -29,8 +27,10 @@ const (
 	keyIdentity
 )
 
-// RequestContext represents user contextual information about a request being processed by the server,
-// it includes identity, CorrelationID [for cross system request correlation].
+// RequestContext is the per-request value stored in the context by
+// NewContextHandler and the gRPC interceptors: the caller's Identity, client
+// IP, target (HTTP path or gRPC method) and user agent. It implements
+// Context. Correlation IDs live in xhttp/correlation, not here.
 type RequestContext struct {
 	identity Identity
 	clientIP string
@@ -39,7 +39,8 @@ type RequestContext struct {
 	userAgent string
 }
 
-// NewRequestContext creates a request context with a specific identity.
+// NewRequestContext creates a request context with a specific identity and
+// target; client IP and user agent are left empty. Store it with AddToContext.
 func NewRequestContext(id Identity, target string) *RequestContext {
 	return &RequestContext{
 		identity: id,
@@ -47,17 +48,22 @@ func NewRequestContext(id Identity, target string) *RequestContext {
 	}
 }
 
-// Context represents user contextual information about a request being processed by the server,
-// it includes identity, CorrelationID [for cross system request correlation].
+// Context is the read-only view of RequestContext.
 type Context interface {
+	// Identity returns the caller's identity; never nil (guest when unknown).
 	Identity() Identity
+	// ClientIP returns the client IP as determined by ClientIPFromRequest or
+	// ClientIPFromGRPC, or "".
 	ClientIP() string
 	// Target of the request, e.g. HTTP path or gRPC method
 	Target() string
+	// UserAgent returns the User-Agent header (or user-agent / x-user-agent
+	// gRPC metadata), or "".
 	UserAgent() string
 }
 
-// FromContext extracts the RequestContext stored inside a go context. Returns null if no such value exists.
+// FromContext returns the RequestContext stored in ctx. When none exists it
+// returns a new RequestContext with the guest identity, never nil.
 func FromContext(ctx context.Context) *RequestContext {
 	ret, _ := ctx.Value(keyContext).(*RequestContext)
 	if ret == nil {
@@ -68,12 +74,15 @@ func FromContext(ctx context.Context) *RequestContext {
 	return ret
 }
 
-// AddToContext returns a new golang context that adds `rq` as the request context.
+// AddToContext returns a child context carrying rq as the request context,
+// as later returned by FromContext.
 func AddToContext(ctx context.Context, rq *RequestContext) context.Context {
 	return context.WithValue(ctx, keyContext, rq)
 }
 
-// FromRequest returns the full context associated with this http request.
+// FromRequest returns the RequestContext for r (guest when none was stored),
+// filling in target, client IP and user agent from the request when they are
+// empty. Note that it updates the stored RequestContext in place.
 func FromRequest(r *http.Request) *RequestContext {
 	c := FromContext(r.Context())
 	if c.target == "" {
@@ -88,9 +97,13 @@ func FromRequest(r *http.Request) *RequestContext {
 	return c
 }
 
-// NewContextHandler returns a handler that will extact the role & contextID from the request
-// and stash them away in the request context for later handlers to use.
-// Also adds header to indicate which host is currently servicing the request
+// NewContextHandler returns middleware that calls identityMapper for each
+// request and stores the resulting RequestContext (identity, client IP,
+// path, user agent) in the request context for later handlers. A mapper
+// error is answered with a JSON 401 unauthorized response and the request
+// is not forwarded. For non-guest identities tenant/user/email/role are also
+// added to the xlog context fields. A RequestContext already present in the
+// context (for example from WithTestIdentity) is left untouched.
 func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest) http.Handler {
 	h := func(w http.ResponseWriter, r *http.Request) {
 		var rctx *RequestContext
@@ -216,8 +229,12 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 	return ctx, nil
 }
 
-// NewAuthUnaryInterceptor returns grpc.UnaryServerInterceptor that
-// identity to the context
+// NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls
+// identityMapper with the full method name and stores the RequestContext
+// (identity, client IP from x-forwarded-for/x-real-ip metadata or the peer
+// address, user agent) in the context. A mapper error fails the call with
+// codes.PermissionDenied. Panics in the handler are recovered, logged and
+// returned as an "unhandled exception" error.
 func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		defer func() {
@@ -239,6 +256,9 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 	}
 }
 
+// NewStreamServerInterceptor returns the streaming counterpart of
+// NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext
+// so the handler sees the enriched context. It does not recover panics.
 func NewStreamServerInterceptor(identityMapper ProviderFromContext) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx, err := createIdentityContext(ss.Context(), info.FullMethod, identityMapper)
@@ -253,22 +273,22 @@ func NewStreamServerInterceptor(identityMapper ProviderFromContext) grpc.StreamS
 	}
 }
 
-// Identity returns request's identity
+// Identity returns the request's identity; never nil.
 func (c *RequestContext) Identity() Identity {
 	return c.identity
 }
 
-// ClientIP returns request's IP
+// ClientIP returns the request's client IP, or "" when unknown.
 func (c *RequestContext) ClientIP() string {
 	return c.clientIP
 }
 
-// Target returns request's target
+// Target returns the request's target: the HTTP path or gRPC full method.
 func (c *RequestContext) Target() string {
 	return c.target
 }
 
-// UserAgent returns request's user agent
+// UserAgent returns the request's user agent, or "".
 func (c *RequestContext) UserAgent() string {
 	return c.userAgent
 }

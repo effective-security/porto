@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -10,21 +11,22 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/cockroachdb/errors"
-	"github.com/effective-security/x/guid"
-	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 )
 
-// TimeUnit specifies the time unit: 'minutes', 'hours'...
+// TimeUnit is the unit of a Schedule interval (Seconds, Minutes, ...).
 type TimeUnit uint
 
-// TimeNow is a function that returns the current time
+// TimeNow is the clock used by the package to compute and compare run times.
+// It is a process-global variable intended to be overridden in tests.
 var TimeNow = time.Now
 
 const (
-	// Never specifies the time unit to never run a task
+	// Never is the zero unit; ParseSchedule rejects it. A Schedule with Unit
+	// Never has a zero Duration and would be due on every tick.
 	Never TimeUnit = iota
 	// Seconds specifies the time unit in seconds
 	Seconds
@@ -38,56 +40,70 @@ const (
 	Weeks
 )
 
-// Task defines task interface
+// Task is a scheduled unit of work: a Schedule plus a callback bound with Do.
+// Create one with New, NewTask, NewTaskAtIntervals, NewTaskOnWeekday or
+// NewTaskDaily, bind the callback with Do, then hand it to Scheduler.Add.
+// Tasks are not internally synchronized beyond the run lock; status fields
+// are written by the goroutine executing Run.
 type Task interface {
-	// ID returns the id of the task
+	// ID returns the task ID: the WithID option value or a generated UUIDv7.
 	ID() string
-	// Name returns a name of the task
+	// Name returns "<taskName>@<callback function name>" as set by Do;
+	// empty before Do is called.
 	Name() string
-	// RunCount species the number of times the task executed
+	// RunCount returns how many times Run has started the callback.
 	RunCount() uint32
-	// Schedule returns the task schedule
+	// Schedule returns the live schedule (not a copy).
 	Schedule() *Schedule
-	// UpdateSchedule updates the task with the new format
+	// UpdateSchedule replaces the schedule with one parsed from format
+	// (see ParseSchedule); the next run is recomputed on the next Run.
 	UpdateSchedule(format string) error
-	// ShouldRun returns true if the task should be run now
+	// ShouldRun reports whether the task is not running and NextRunAt has passed.
 	ShouldRun() bool
-	// Run will try to run the task, if it's not already running
-	// and immediately reschedule it after run
+	// Run executes the callback if the run lock can be acquired within the
+	// run timeout, then recomputes NextRunAt and returns true. It returns
+	// false without running if the task is already running. Callback panics
+	// are recovered and logged.
 	Run() bool
-	// SetNextRun updates next schedule time
+	// SetNextRun forces the next run to TimeNow()+after.
 	SetNextRun(time.Duration) Task
-	// Do accepts a function that should be called every time the task runs
+	// Do binds the callback and its arguments and computes the first NextRunAt.
+	// It panics if task is not a function or the number of params does not
+	// match its arity; argument types are only checked when the callback is
+	// invoked (a mismatch is then recovered and logged as an error).
 	Do(taskName string, task any, params ...any) Task
-	// IsRunning return the status
+	// IsRunning reports whether the callback is currently executing.
 	IsRunning() bool
-	// SetPublisher sets a publisher for the task, when the status changes
+	// SetPublisher sets the Publisher notified before and after each run.
 	SetPublisher(Publisher) Task
-	// Publish publishes the task status
+	// Publish sends the task to its Publisher, if any.
 	Publish()
 }
 
-// Schedule defines task schedule
+// Schedule describes when a task runs. Fields are exported for inspection
+// (e.g. by a Publisher) and are mutated by Run and UpdateNextRun without locking.
 type Schedule struct {
-	// Format specifies the schedule format
+	// Format is the original string given to ParseSchedule, if any.
 	Format string
-	// Interval * unit bettween runs
+	// Interval is the number of Unit between runs.
 	Interval uint64
-	// Unit specifies time units, ,e.g. 'minutes', 'hours'...
+	// Unit is the time unit of Interval.
 	Unit TimeUnit
-	// StartDay specifies day of the week to start on
+	// StartDay is the weekday for Weeks schedules (ignored otherwise).
 	StartDay time.Weekday
-	// LastRunAt specifies datetime of last run
+	// LastRunAt is when the task last started; nil until first run or
+	// until an "hh:mm" anchor is applied.
 	LastRunAt *time.Time
-	// NextRunAt specifies datetime of next run
+	// NextRunAt is when the task is next due.
 	NextRunAt time.Time
-	// RunCount specifies the number of runs
+	// RunCount is the number of runs; updated atomically by Run.
 	RunCount uint32
-	// cache the period between last an next run
+	// period caches Duration(); it is computed once and never invalidated.
 	period time.Duration
 }
 
-// Equal returns true if the schedules are equal
+// Equal reports whether the two schedules have the same Interval, Unit,
+// StartDay and Format; run state is ignored.
 func (s *Schedule) Equal(other *Schedule) bool {
 	return s.Interval == other.Interval &&
 		s.Unit == other.Unit &&
@@ -95,7 +111,8 @@ func (s *Schedule) Equal(other *Schedule) bool {
 		s.Format == other.Format
 }
 
-// GetLastRun returns the last run time
+// GetLastRun returns LastRunAt, or nil if the task has never actually run
+// (RunCount == 0), even when LastRunAt was set as a schedule anchor.
 func (s *Schedule) GetLastRun() *time.Time {
 	if s.LastRunAt == nil || s.RunCount == 0 {
 		return nil
@@ -122,10 +139,13 @@ type task struct {
 	publisher  Publisher
 }
 
-// DefaultRunTimeoutInterval specify a timeout for a task to start
+// DefaultRunTimeoutInterval is how long Run waits for the task's run lock
+// before reporting "already running" (override with WithRunTimeout).
 const DefaultRunTimeoutInterval = time.Second
 
-// NewTaskAtIntervals creates a new task with the time interval.
+// NewTaskAtIntervals creates a task that runs every interval*unit, starting
+// one interval after Do is called. An interval of 0 yields a zero Duration
+// and the task becomes due on every tick.
 func NewTaskAtIntervals(interval uint64, unit TimeUnit, ops ...Option) Task {
 	s := &Schedule{
 		Interval:  interval,
@@ -137,7 +157,8 @@ func NewTaskAtIntervals(interval uint64, unit TimeUnit, ops ...Option) Task {
 	return New(s, ops...)
 }
 
-// NewTaskOnWeekday creates a new task to execute on specific day of the week.
+// NewTaskOnWeekday creates a weekly task that runs on startDay at hour:minute
+// in the package location. It panics if hour or minute is out of range.
 func NewTaskOnWeekday(startDay time.Weekday, hour, minute int, ops ...Option) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value: time='%d:%d'", hour, minute)
@@ -154,7 +175,8 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int, ops ...Option) Ta
 	return New(s, ops...)
 }
 
-// NewTaskDaily creates a new task to execute daily at specific time
+// NewTaskDaily creates a task that runs every day at hour:minute in the
+// package location. It panics if hour or minute is out of range.
 func NewTaskDaily(hour, minute int, ops ...Option) Task {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		logger.Panicf("invalid time value:, time='%d:%d'", hour, minute)
@@ -171,11 +193,9 @@ func NewTaskDaily(hour, minute int, ops ...Option) Task {
 	return New(s, ops...)
 }
 
-// NewTask creates a new task from parsed format string.
-// every %d
-// seconds | minutes | ...
-// Monday | .. | Sunday
-// at %hh:mm
+// NewTask creates a task from a schedule string (see ParseSchedule), e.g.
+// "every 5 minutes", "every day 11:15", "16:18", "monday", "saturday 23:13".
+// It returns an error for an invalid format.
 func NewTask(format string, ops ...Option) (Task, error) {
 	s, err := ParseSchedule(format)
 	if err != nil {
@@ -185,17 +205,18 @@ func NewTask(format string, ops ...Option) (Task, error) {
 	return New(s, ops...), nil
 }
 
-// New returns new task
+// New wraps an existing Schedule in a Task. Use WithID, WithRunTimeout and
+// WithPublisher to customize; the callback must still be bound with Do.
 func New(s *Schedule, ops ...Option) Task {
 	dops := options{
-		id:         guid.MustCreate(),
+		id:         uuid.NewV7().String(),
 		runTimeout: DefaultRunTimeoutInterval,
 	}
 	for _, op := range ops {
 		op.apply(&dops)
 	}
 
-	dops.id = values.StringsCoalesce(dops.id, guid.MustCreate())
+	dops.id = cmp.Or(dops.id, uuid.NewV7().String())
 	j := &task{
 		id:         dops.id,
 		schedule:   s,
@@ -207,20 +228,20 @@ func New(s *Schedule, ops ...Option) Task {
 	return j
 }
 
-// SetPublisher sets the publisher for all tasks
+// SetPublisher sets the Publisher notified on status changes.
 func (j *task) SetPublisher(pub Publisher) Task {
 	j.publisher = pub
 	return j
 }
 
-// Publish the current state
+// Publish sends the task to its Publisher, if one is set.
 func (j *task) Publish() {
 	if j.publisher != nil {
 		j.publisher.Publish(j)
 	}
 }
 
-// UpdateSchedule updates the task with a new schedule
+// UpdateSchedule replaces the schedule with one parsed from format.
 func (j *task) UpdateSchedule(format string) error {
 	s, err := ParseSchedule(format)
 	if err != nil {
@@ -230,43 +251,44 @@ func (j *task) UpdateSchedule(format string) error {
 	return nil
 }
 
-// SetNextRun updates next schedule time
+// SetNextRun forces the next run to TimeNow()+after.
 func (j *task) SetNextRun(after time.Duration) Task {
 	j.schedule.NextRunAt = TimeNow().Add(after)
 	return j
 }
 
-// ID returns a id of the task
+// ID returns the task ID.
 func (j *task) ID() string {
 	return j.id
 }
 
-// Name returns a name of the task
+// Name returns "<taskName>@<function>" as set by Do.
 func (j *task) Name() string {
 	return j.name
 }
 
-// Schedule returns the task schedule
+// Schedule returns the live schedule.
 func (j *task) Schedule() *Schedule {
 	return j.schedule
 }
 
-// RunCount species the number of times the task executed
+// RunCount returns the number of runs started so far.
 func (j *task) RunCount() uint32 {
 	return atomic.LoadUint32(&j.schedule.RunCount)
 }
 
-// ShouldRun returns true if the task should be run now
+// ShouldRun reports whether the task is idle and due.
 func (j *task) ShouldRun() bool {
 	return !j.running && j.schedule.ShouldRun()
 }
 
-// IsRunning return the status
+// IsRunning reports whether the callback is executing.
 func (j *task) IsRunning() bool {
 	return j.running
 }
 
-// Do accepts a function that should be called every time the task runs
+// Do binds the callback and parameters and schedules the first run.
+// It panics if taskFunc is not a function or len(params) differs from its arity.
 func (j *task) Do(taskName string, taskFunc any, params ...any) Task {
 	typ := reflect.TypeOf(taskFunc)
 	if typ.Kind() != reflect.Func {
@@ -322,8 +344,9 @@ func getFunctionName(fn any) string {
 	return runtime.FuncForPC(reflect.ValueOf((fn)).Pointer()).Name()
 }
 
-// Run will try to run the task, if it's not already running
-// and immediately reschedule it after run
+// Run executes the callback once if the run lock is acquired within the run
+// timeout, publishes before and after, recomputes NextRunAt and returns true.
+// It returns false if the task was still running when the timeout elapsed.
 func (j *task) Run() bool {
 	timeout := j.runTimeout
 	if timeout == 0 {
@@ -404,7 +427,13 @@ func parseTimeFormat(t string) (hour, minutes int, err error) {
 	return
 }
 
-// ParseSchedule parses a schedule string
+// ParseSchedule parses a case-insensitive, space-separated schedule string:
+//
+//	[every] [N] (second|minute|hour|day|week)[s] [hh:mm]
+//	<weekday> [hh:mm]
+//
+// "hh:mm" alone means daily at that time; with a weekday it means weekly.
+// It returns an error when the format is ambiguous or the unit is missing.
 func ParseSchedule(format string) (*Schedule, error) {
 	var errTimeFormat = errors.Errorf("task format not valid: %q", format)
 
@@ -511,12 +540,14 @@ func ParseSchedule(format string) (*Schedule, error) {
 	return s, nil
 }
 
-// ShouldRun returns true if the task should be run now
+// ShouldRun reports whether TimeNow() is past NextRunAt.
 func (s *Schedule) ShouldRun() bool {
 	return TimeNow().After(s.NextRunAt)
 }
 
-// UpdateNextRun computes the instant when this task should run next
+// UpdateNextRun sets NextRunAt to LastRunAt+Duration and returns it. When
+// LastRunAt is nil it is first anchored to now (or, for Weeks, to midnight of
+// the most recent StartDay).
 func (s *Schedule) UpdateNextRun() time.Time {
 	now := TimeNow()
 	if s.LastRunAt == nil {
@@ -536,7 +567,8 @@ func (s *Schedule) UpdateNextRun() time.Time {
 	return s.NextRunAt
 }
 
-// // Duration returns interval between runs
+// Duration returns Interval*Unit as a time.Duration (0 for Never). The value
+// is cached on first call, so later changes to Interval/Unit are not reflected.
 func (s *Schedule) Duration() time.Duration {
 	if s.period == 0 {
 		switch s.Unit {
