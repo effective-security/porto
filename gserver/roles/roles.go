@@ -1,6 +1,7 @@
 package roles
 
 import (
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
@@ -10,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +20,7 @@ import (
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
-	"github.com/effective-security/x/slices"
+	xslices "github.com/effective-security/x/slices"
 	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
@@ -32,28 +35,28 @@ import (
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/gserver", "roles")
 
 const (
-	// GuestRoleName defines role name for an unauthenticated user
+	// GuestRoleName is the role of an unauthenticated caller
 	GuestRoleName = "guest"
 
-	// TLSUserRoleName defines a generic role name for an authenticated user
+	// TLSUserRoleName is a suggested DefaultAuthenticatedRole for TLS identities
 	TLSUserRoleName = "tls_user"
 
-	// JWTUserRoleName defines a generic role name for an authenticated user
+	// JWTUserRoleName is a suggested DefaultAuthenticatedRole for JWT identities
 	JWTUserRoleName = "jwt_user"
 
-	// DPoPUserRoleName defines a generic role name for an authenticated user
+	// DPoPUserRoleName is a suggested DefaultAuthenticatedRole for DPoP identities
 	DPoPUserRoleName = "dpop_user"
 
-	// AWSUserRoleName defines a generic role name for an authenticated user
+	// AWSUserRoleName is a suggested DefaultAuthenticatedRole for AWS identities
 	AWSUserRoleName = "aws_user"
 
-	// DefaultSubjectClaim defines default JWT Subject claim
+	// DefaultSubjectClaim is the JWT claim used as identity subject when SubjectClaim is unset
 	DefaultSubjectClaim = "sub"
 
-	// DefaultRoleClaim defines default Role claim
+	// DefaultRoleClaim is the JWT claim matched against Roles when RoleClaim is unset
 	DefaultRoleClaim = "email"
 
-	// DefaultTenantClaim defines default Tenant claim
+	// DefaultTenantClaim is the JWT claim used as tenant when TenantClaim is unset
 	DefaultTenantClaim = "tenant"
 
 	awsTokenType    = "AWS4"
@@ -61,20 +64,27 @@ const (
 	dpopTokenType   = "DPoP"
 )
 
-// IdentityProvider interface to extract identity from requests
+// IdentityProvider extracts the caller identity from HTTP requests and gRPC
+// contexts. IdentityFromRequest and IdentityFromContext are the mappers to
+// pass to identity.NewContextHandler and identity.NewAuthUnaryInterceptor.
 type IdentityProvider interface {
-	// ApplicableForRequest returns true if the provider is applicable for the request
+	// ApplicableForRequest returns true if the request carries credentials
+	// (Authorization header, auth cookie or client certificate) for an enabled method.
 	ApplicableForRequest(*http.Request) bool
-	// IdentityFromRequest returns identity from the request
+	// IdentityFromRequest returns the identity of the HTTP caller, or the
+	// guest identity when no enabled method matches. An error is returned
+	// only for failed authentication in Strict mode.
 	IdentityFromRequest(*http.Request) (identity.Identity, error)
 
-	// ApplicableForContext returns true if the provider is applicable for the request
+	// ApplicableForContext returns true if the gRPC incoming metadata or peer
+	// carries credentials for an enabled method.
 	ApplicableForContext(ctx context.Context) bool
-	// IdentityFromContext returns identity from the request
+	// IdentityFromContext returns the identity of the gRPC caller for the
+	// given method URI (used to verify DPoP proofs), or the guest identity.
 	IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error)
 }
 
-// Provider for identity
+// provider is the IdentityProvider implementation returned by New.
 type provider struct {
 	config    IdentityMap
 	dpopRoles map[string]string
@@ -86,7 +96,10 @@ type provider struct {
 	awsCache *expirable.LRU[string, *CallerIdentity]
 }
 
-// New returns Authz provider instance
+// New returns an IdentityProvider for the given map. jwt is required when
+// JWT or DPoP is enabled and may be nil otherwise. Missing claim names
+// default to DefaultSubjectClaim, DefaultRoleClaim and DefaultTenantClaim.
+// The provider is safe for concurrent use.
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	prov := &provider{
 		config:    *config,
@@ -110,9 +123,9 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		if jwt == nil {
 			return nil, errors.Errorf("dpop: JWT parser is required")
 		}
-		prov.config.DPoP.SubjectClaim = values.StringsCoalesce(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
-		prov.config.DPoP.RoleClaim = values.StringsCoalesce(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
-		prov.config.DPoP.TenantClaim = values.StringsCoalesce(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
+		prov.config.DPoP.SubjectClaim = cmp.Or(prov.config.DPoP.SubjectClaim, DefaultSubjectClaim)
+		prov.config.DPoP.RoleClaim = cmp.Or(prov.config.DPoP.RoleClaim, DefaultRoleClaim)
+		prov.config.DPoP.TenantClaim = cmp.Or(prov.config.DPoP.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.DPoP.Roles {
 			for _, user := range users {
@@ -124,9 +137,9 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		if jwt == nil {
 			return nil, errors.Errorf("jwt: JWT parser is required")
 		}
-		prov.config.JWT.SubjectClaim = values.StringsCoalesce(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
-		prov.config.JWT.RoleClaim = values.StringsCoalesce(prov.config.JWT.RoleClaim, DefaultRoleClaim)
-		prov.config.JWT.TenantClaim = values.StringsCoalesce(prov.config.JWT.TenantClaim, DefaultTenantClaim)
+		prov.config.JWT.SubjectClaim = cmp.Or(prov.config.JWT.SubjectClaim, DefaultSubjectClaim)
+		prov.config.JWT.RoleClaim = cmp.Or(prov.config.JWT.RoleClaim, DefaultRoleClaim)
+		prov.config.JWT.TenantClaim = cmp.Or(prov.config.JWT.TenantClaim, DefaultTenantClaim)
 
 		for role, users := range config.JWT.Roles {
 			for _, user := range users {
@@ -145,7 +158,7 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	return prov, nil
 }
 
-// ApplicableForRequest returns true if the provider is applicable for the request
+// ApplicableForRequest implements IdentityProvider.
 func (p *provider) ApplicableForRequest(r *http.Request) bool {
 	if (p.config.AWS.Enabled || p.config.DPoP.Enabled || p.config.JWT.Enabled) &&
 		r.Header.Get(header.Authorization) != "" {
@@ -165,7 +178,7 @@ func (p *provider) ApplicableForRequest(r *http.Request) bool {
 	return false
 }
 
-// ApplicableForContext returns true if the provider is applicable for context
+// ApplicableForContext implements IdentityProvider.
 func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	md, ok := metadata.FromIncomingContext(ctx)
 	authorization := ok && len(md["authorization"]) > 0
@@ -228,7 +241,9 @@ func tokenType(auth string) (token string, tokenType string) {
 	return
 }
 
-// IdentityFromRequest returns identity from the request
+// IdentityFromRequest implements IdentityProvider. Methods are tried in the
+// order AWS4, DPoP, Bearer JWT (header or cookie), TLS client certificate;
+// paths listed in SkipAuthPaths short-circuit to the guest identity.
 func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
 	if slices.Contains(p.config.SkipAuthPaths, r.URL.Path) {
 		logger.ContextKV(r.Context(), xlog.DEBUG, "reason", "skipped", "path", r.URL.Path)
@@ -278,8 +293,8 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		phdr := r.Header.Get(dpop.HTTPHeader)
 		u := r.URL
 		coreURL := url.URL{
-			Scheme: values.StringsCoalesce(u.Scheme, "https"),
-			Host:   values.StringsCoalesce(u.Host, r.Host),
+			Scheme: cmp.Or(u.Scheme, "https"),
+			Host:   cmp.Or(u.Host, r.Host),
 			Path:   u.Path,
 		}
 
@@ -337,7 +352,9 @@ func dumpDM(md metadata.MD) []any {
 	return res
 }
 
-// IdentityFromContext returns identity from context
+// IdentityFromContext implements IdentityProvider. It reads the
+// "authorization", "dpop" and "cookie" incoming metadata keys and the peer
+// TLS state; SkipAuthPaths is not consulted.
 func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
@@ -393,7 +410,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			// 	"cookie_set", "true",
 			// 	"uri", uri,
 			// 	"type", typ,
-			// 	"token", slices.StringUpto(token, 12),
+			// 	"token", xslices.StringUpto(token, 12),
 			// )
 
 			if token != "" {
@@ -406,7 +423,7 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 				logger.ContextKV(ctx, xlog.DEBUG,
 					"reason", "cookie_based_auth",
 					"type", typ,
-					"token", slices.StringUpto(token, 12),
+					"token", xslices.StringUpto(token, 12),
 					"err", err.Error())
 			}
 		}
@@ -555,22 +572,31 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 			return nil, errors.WithMessage(err, "failed to parse AWS4 token")
 		}
 
-		r, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err := ValidateSTSPresignedURL(url); err != nil {
+			return nil, errors.WithMessage(err, "invalid AWS4 token")
+		}
+
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, errors.WithMessage(err, "invalid AWS4 token")
+		}
 		r.Header.Set("Accept", "application/json")
-		resp, err := http.DefaultClient.Do(r)
+		resp, err := stsHTTPClient.Do(r)
 		if err != nil {
 			return nil, errors.WithMessage(err, "unable to get Caller Identity from AWS")
 		}
 		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
 		if err != nil {
 			return nil, errors.WithMessage(err, "failed to decode AWS response")
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			// the presigned URL is a bearer credential; log only its host
 			logger.ContextKV(ctx, xlog.WARNING,
-				"url", url,
+				"host", r.URL.Host,
+				"status", resp.StatusCode,
 				"amz_date", amzDate,
 				"amz_expiry", amzExpiry,
 				"expires", tcredentials.TimeISO8601(*expires),
@@ -598,7 +624,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 
 	callerIdentity := ci.GetCallerIdentityResponse.GetCallerIdentityResult
 	acc := callerIdentity.Account
-	if len(p.config.AWS.AllowedAccounts) > 0 && !slices.ContainsString(p.config.AWS.AllowedAccounts, acc) {
+	if len(p.config.AWS.AllowedAccounts) > 0 && !slices.Contains(p.config.AWS.AllowedAccounts, acc) {
 		return nil, errors.Errorf("AWS account %q is not allowed", acc)
 	}
 
@@ -622,7 +648,7 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	}
 	subj := fmt.Sprintf("%s:%s/%s", components.AccountID, components.ResourceType, res)
 
-	role := values.StringsCoalesce(p.awsRoles[subj], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
+	role := cmp.Or(p.awsRoles[subj], p.awsRoles[callerIdentity.Arn], p.config.AWS.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"account", callerIdentity.Account,
 		"arn", callerIdentity.Arn,
@@ -632,6 +658,89 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType, identity.MethodAWS), nil
 }
 
+const (
+	// stsRequestTimeout bounds the outbound GetCallerIdentity call so a slow
+	// STS endpoint cannot stall request authentication indefinitely.
+	stsRequestTimeout = 10 * time.Second
+	// maxSTSResponseBytes bounds the body read from STS; a real
+	// GetCallerIdentity response is well under 1 KiB.
+	maxSTSResponseBytes = 64 << 10
+	// stsGetCallerIdentityAction is the only STS action a presigned URL may carry.
+	stsGetCallerIdentityAction = "GetCallerIdentity"
+)
+
+// awsRegionRe matches AWS region names such as us-east-1, cn-north-1,
+// us-gov-west-1 and eu-isob-east-1.
+var awsRegionRe = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
+
+// stsHTTPClient is the dedicated client for STS presigned-URL lookups.
+// It has a timeout, unlike http.DefaultClient.
+var stsHTTPClient = &http.Client{Timeout: stsRequestTimeout}
+
+// ValidateSTSPresignedURL checks that a presigned URL supplied in an AWS4
+// token is an HTTPS GetCallerIdentity request addressed to an AWS STS
+// endpoint (sts.amazonaws.com, sts[-fips].<region>.amazonaws.com[.cn], or
+// an STS VPC endpoint under amazonaws.com). Without this check the server
+// would fetch an attacker-chosen URL and trust the returned account and ARN.
+func ValidateSTSPresignedURL(presignedURL string) error {
+	u, err := url.Parse(presignedURL)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse presigned URL")
+	}
+	if u.Scheme != "https" {
+		return errors.Errorf("presigned URL must use https, got %q", u.Scheme)
+	}
+	if u.User != nil {
+		return errors.New("presigned URL must not contain user info")
+	}
+	if !isSTSHost(u.Hostname()) {
+		return errors.Errorf("presigned URL host %q is not an AWS STS endpoint", u.Hostname())
+	}
+	if action := u.Query().Get("Action"); action != stsGetCallerIdentityAction {
+		return errors.Errorf("presigned URL action %q is not %s", action, stsGetCallerIdentityAction)
+	}
+	return nil
+}
+
+// isSTSHost reports whether host is an AWS STS endpoint. Accepted forms:
+// sts.amazonaws.com, sts.<region>.amazonaws.com, sts-fips.<region>.amazonaws.com,
+// sts.<region>.amazonaws.com.cn, and VPC endpoints of the form
+// <vpce-id>.sts.<region>.vpce.amazonaws.com. Matching is on whole labels so
+// other AWS-hosted names such as S3 buckets ("sts.s3.amazonaws.com") are rejected.
+func isSTSHost(host string) bool {
+	labels := strings.Split(strings.ToLower(host), ".")
+	// strip the amazonaws.com / amazonaws.com.cn suffix
+	n := len(labels)
+	switch {
+	case n >= 4 && labels[n-3] == "amazonaws" && labels[n-2] == "com" && labels[n-1] == "cn":
+		labels = labels[:n-3]
+	case n >= 3 && labels[n-2] == "amazonaws" && labels[n-1] == "com":
+		labels = labels[:n-2]
+	default:
+		return false
+	}
+	for _, l := range labels {
+		if l == "" {
+			return false
+		}
+	}
+	switch len(labels) {
+	case 1: // sts
+		return labels[0] == "sts"
+	case 2: // sts.<region> or sts-fips.<region>
+		return (labels[0] == "sts" || labels[0] == "sts-fips") && awsRegionRe.MatchString(labels[1])
+	case 4: // <vpce-id>.sts.<region>.vpce
+		return strings.HasPrefix(labels[0], "vpce-") && labels[1] == "sts" &&
+			awsRegionRe.MatchString(labels[2]) && labels[3] == "vpce"
+	default:
+		return false
+	}
+}
+
+// ParseSTSTokenExpiration computes the expiry of an AWS SigV4 presigned URL
+// from its X-Amz-Date and X-Amz-Expires query parameters. It also returns the
+// raw parameter values for logging. An unparsable X-Amz-Expires falls back to
+// credentials.CacheTTL.
 func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error) {
 	u, err := url.Parse(presignedURL)
 	if err != nil {
@@ -661,9 +770,11 @@ func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, e
 	return &exp, qdate, qexp, nil
 }
 
-// CallerIdentity represents the Identity of the caller
-// AWS Caller Identity Response documentation: https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
+// CallerIdentity is the JSON response of the AWS STS GetCallerIdentity API,
+// see https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html.
+// It is cached per presigned URL until Expires.
 type CallerIdentity struct {
+	// GetCallerIdentityResponse is the response envelope.
 	GetCallerIdentityResponse struct {
 		GetCallerIdentityResult struct {
 			Account string `json:"Account"`
@@ -675,6 +786,7 @@ type CallerIdentity struct {
 		} `json:"ResponseMetadata"`
 	} `json:"GetCallerIdentityResponse"`
 
+	// Expires is the presigned URL expiry derived by ParseSTSTokenExpiration.
 	Expires time.Time `json:"-"`
 }
 
@@ -702,7 +814,7 @@ func (p *provider) jwtIdentity(ctx context.Context, auth, tokenType string, meth
 	subj := claims.String(p.config.JWT.SubjectClaim)
 	tenant := claims.String(p.config.JWT.TenantClaim)
 	roleClaim := claims.String(p.config.JWT.RoleClaim)
-	role := values.StringsCoalesce(p.jwtRoles[roleClaim], p.config.JWT.DefaultAuthenticatedRole)
+	role := cmp.Or(p.jwtRoles[roleClaim], p.config.JWT.DefaultAuthenticatedRole)
 	logger.KV(xlog.DEBUG,
 		"role", role,
 		"tenant", tenant,
@@ -718,7 +830,7 @@ func (p *provider) tlsIdentity(TLS *tls.ConnectionState) (identity.Identity, err
 	peer := TLS.PeerCertificates[0]
 	if len(peer.URIs) == 1 && peer.URIs[0].Scheme == "spiffe" {
 		spiffe := peer.URIs[0].String()
-		role := values.StringsCoalesce(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
+		role := cmp.Or(p.tlsRoles[spiffe], p.config.TLS.DefaultAuthenticatedRole)
 		claims := map[string]any{
 			"role":   role,
 			"sub":    peer.Subject.String(),

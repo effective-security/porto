@@ -14,12 +14,14 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "tlsconfig")
 
-// NewServerTLSFromFiles will build a tls.Config from the supplied certificate, key
-// and optional trust roots files, these files are all expected to be PEM encoded.
-// The file paths are relative to the working directory if not specified in absolute
-// format.
-// caBundle is optional.
-// rootsFile is optional, if not specified the standard OS CA roots will be used.
+// NewServerTLSFromFiles builds a server tls.Config (MinVersion TLS 1.2, ALPN
+// h2/http1.1) from PEM files. certFile and keyFile are required; an OCSP staple
+// is loaded from "<cert basename>.ocsp" if present. rootsFile (optional) is
+// used as both RootCAs and ClientCAs; caFile (optional) overrides ClientCAs.
+// When both are empty the OS roots are used and client certificates cannot be
+// verified. clientauthType is applied as-is. Files that contain no valid
+// certificate produce an empty pool without error. The returned config has
+// no GetCertificate; pair it with KeypairReloader for rotation.
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
 	tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
 	if err != nil {
@@ -59,12 +61,11 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientau
 	return cfg, nil
 }
 
-// NewClientTLSFromFiles will build a tls.Config from the supplied certificate, key
-// and optional trust roots files, these files are all expected to be PEM encoded.
-// The file paths are relative to the working directory if not specified in absolute
-// format.
-// caBundle is optional.
-// rootsFile is optional, if not specified the standard OS CA roots will be used.
+// NewClientTLSFromFiles builds a client tls.Config (MinVersion TLS 1.2, ALPN
+// h2/http1.1) from PEM files. rootsFile (optional) sets RootCAs; when empty
+// the OS roots are used. certFile/keyFile (optional) set the client
+// certificate for mutual TLS. The certificate is loaded once; use
+// NewClientTLSWithReloader for rotation.
 func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, error) {
 	var roots *x509.CertPool
 
@@ -104,7 +105,9 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	return cfg, nil
 }
 
-// NewClientTLSWithReloader is a wrapper around NewClientTLSFromFiles with NewKeypairReloader
+// NewClientTLSWithReloader is NewClientTLSFromFiles plus a KeypairReloader
+// wired as GetClientCertificate, polling every checkInterval. certFile and
+// keyFile are required. The caller must Close the returned reloader.
 func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration) (*tls.Config, *KeypairReloader, error) {
 	tlsCfg, err := NewClientTLSFromFiles(certFile, keyFile, rootsFile)
 	if err != nil {
@@ -120,8 +123,12 @@ func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval
 	return tlsCfg, tlsloader, nil
 }
 
-// NewHTTPTransportWithReloader creates an HTTPTransport based on a
-// given Transport (or http.DefaultTransport).
+// NewHTTPTransportWithReloader returns an HTTPTransport that installs a fresh
+// TLS client config (with the reloaded certificate) on the underlying
+// *http.Transport whenever the cert file changes, closing idle connections so
+// new dials use it. When HTTPUserTransport is nil a clone of
+// http.DefaultTransport with 100 max idle/per-host connections is used.
+// The caller must Close the returned transport to stop the reloader.
 func NewHTTPTransportWithReloader(
 	certFile, keyFile, rootsFile string,
 	checkInterval time.Duration,
@@ -164,8 +171,10 @@ func NewHTTPTransportWithReloader(
 	return tripper, nil
 }
 
-// HTTPTransport is an implementation of http.RoundTripper with an
-// auto-updating TLSClientConfig.
+// HTTPTransport is an http.RoundTripper that re-applies its current
+// TLSClientConfig to the wrapped *http.Transport on every request so that a
+// reloaded client certificate takes effect. Create it with
+// NewHTTPTransportWithReloader.
 type HTTPTransport struct {
 	transport *http.Transport
 	tlsConfig *tls.Config
@@ -173,7 +182,8 @@ type HTTPTransport struct {
 	lock      sync.RWMutex
 }
 
-// RoundTrip implements the http.RoundTripper interface.
+// RoundTrip sets the current TLS config on the wrapped transport and forwards
+// the request. Errors are returned with a stack trace attached.
 func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.lock.Lock()
 	cfg := t.tlsConfig
@@ -188,7 +198,8 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// Close will close the reloader and release its resources
+// Close stops the certificate reloader. It returns an error on a second call.
+// The wrapped *http.Transport is left open.
 func (t *HTTPTransport) Close() error {
 	t.lock.RLock()
 	defer t.lock.RUnlock()

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/cockroachdb/errors"
-	"github.com/effective-security/x/guid"
 )
 
 type memProv struct {
@@ -25,7 +25,9 @@ type entry struct {
 	data []byte
 }
 
-// NewMemoryProvider returns memory cache
+// NewMemoryProvider returns an in-process Provider whose keys are joined
+// with prefix. Values are kept JSON encoded; the store is unbounded and
+// expired entries are only dropped on Get or CleanExpired.
 func NewMemoryProvider(prefix string) Provider {
 	prov := &memProv{
 		prefix: prefix,
@@ -103,7 +105,7 @@ func (p *memProv) CleanExpired(_ context.Context) {
 	now := NowFunc()
 	p.cache.Range(func(key any, value any) bool {
 		e := value.(*entry)
-		if e.expires != nil && e.expires.After(now) {
+		if e.expires != nil && !e.expires.After(now) {
 			k := key.(string)
 			p.cache.Delete(k)
 		}
@@ -147,7 +149,7 @@ func (p *memProv) Subscribe(_ context.Context, channel string) Subscription {
 	s := &msub{
 		prov:    p,
 		channel: channel,
-		id:      guid.MustCreate(),
+		id:      uuid.NewV7().String(),
 		ch:      make(chan string, 10),
 	}
 	p.subs.Store(s.id, s)

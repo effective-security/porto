@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,9 +37,9 @@ func Test_KeypairReloader(t *testing.T) {
 	require.NotNil(t, k)
 	defer k.Close()
 
-	reloadedCount := 0
+	var reloadedCount atomic.Int32
 	k.OnReload(func(_ *tls.Certificate) {
-		reloadedCount++
+		reloadedCount.Add(1)
 	})
 
 	loadedAt := k.LoadedAt()
@@ -76,7 +77,7 @@ func Test_KeypairReloader(t *testing.T) {
 	count = int(k.LoadedCount())
 	assert.True(t, count >= 3 && count <= 5, "must be loaded at start, whithin period and after, loaded: %d", k.LoadedCount())
 	assert.True(t, loadedAt3.After(loadedAt2), "re-loaded time must be after last loaded time")
-	assert.True(t, reloadedCount > 1, "must be reloaded when file modified: %d", reloadedCount)
+	assert.True(t, reloadedCount.Load() > 1, "must be reloaded when file modified: %d", reloadedCount.Load())
 
 	getKeypair := k.GetKeypairFunc()
 	kpair, err := getKeypair(nil)
@@ -108,9 +109,9 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 	require.NotNil(t, k)
 	defer k.Close()
 
-	reloadedCount := 0
+	var reloadedCount atomic.Int32
 	k.OnReload(func(_ *tls.Certificate) {
-		reloadedCount++
+		reloadedCount.Add(1)
 	})
 
 	var wg sync.WaitGroup
@@ -123,5 +124,5 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	assert.Equal(t, 0, reloadedCount)
+	assert.Equal(t, int32(0), reloadedCount.Load())
 }

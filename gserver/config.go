@@ -11,9 +11,10 @@ import (
 	"github.com/effective-security/x/netutil"
 )
 
-// Config contains the configuration of the server
+// Config is the server configuration passed to Start. It is usually
+// unmarshalled from YAML/JSON; the yaml and json tags give the field names.
 type Config struct {
-	// DebugLogs allows to add extra debog logs
+	// DebugLogs enables verbose per-request debug logging in the gRPC/HTTP mux.
 	DebugLogs bool `json:"debug_logs" yaml:"debug_logs"`
 
 	// Description provides description of the server
@@ -25,26 +26,31 @@ type Config struct {
 	// ClientURL is the public URL exposed to clients
 	ClientURL string `json:"client_url" yaml:"client_url"`
 
-	// ListenURLs is the list of URLs that the server will be listen on
+	// ListenURLs is the list of URLs to listen on. Supported schemes are
+	// http, https, unix and unixs; a URL without scheme defaults to https when
+	// ServerTLS is set. URLs with the same address share one listener.
 	ListenURLs []string `json:"listen_urls" yaml:"listen_urls"`
 
-	// ServerTLS provides TLS config for server
+	// ServerTLS provides the TLS config for the server; required for https/unixs URLs.
 	ServerTLS *TLSInfo `json:"server_tls,omitempty" yaml:"server_tls,omitempty"`
 
 	// SkipLogPaths if set, specifies a list of paths to not log.
 	// this can be used for /v1/status/node or /metrics
 	SkipLogPaths []telemetry.LoggerSkipPath `json:"logger_skip_paths,omitempty" yaml:"logger_skip_paths,omitempty"`
 
-	// PromGrpc allows to submit gRPC metrics to Prometheus interceptors
+	// PromGrpc adds the go-grpc-prometheus unary and stream interceptors.
 	PromGrpc bool `json:"prom_grpc" yaml:"prom_grpc"`
 
-	// Services is a list of services to enable for this server
+	// Services is the list of service names to enable; each must have a
+	// ServiceFactory registered in the map passed to Start.
 	Services []string `json:"services" yaml:"services"`
 
-	// IdentityMap contains configuration for the roles
+	// IdentityMap configures how callers are authenticated and mapped to roles
+	// (see gserver/roles). When nil an empty map is used and all callers are guests.
 	IdentityMap *roles.IdentityMap `json:"identity_map" yaml:"identity_map"`
 
-	// Authz contains configuration for the authorization module
+	// Authz configures path/role based authorization (see restserver/authz).
+	// It is only activated when at least one of Allow, AllowAny or AllowAnyRole is set.
 	Authz *authz.Config `json:"authz" yaml:"authz"`
 
 	// CORS contains configuration for CORS.
@@ -55,24 +61,30 @@ type Config struct {
 
 	// Timeout settings
 	Timeout struct {
-		// Request is the timeout for client requests to finish.
+		// Request is how long Close waits for in-flight requests to finish
+		// before forcing shutdown; default 3s.
 		Request time.Duration `json:"request,omitempty" yaml:"request,omitempty"`
 	} `json:"timeout" yaml:"timeout"`
 
 	// KeepAlive settings
 	KeepAlive KeepAliveCfg `json:"keep_alive" yaml:"keep_alive"`
 
-	// MaxRecvMsgSize sets the maximum message size that a client can send to the server.
+	// MaxRecvMsgSize sets the maximum gRPC message size a client can send;
+	// the MaxRecvMsgSize Option takes precedence when set.
 	MaxRecvMsgSize int `json:"max_recv_msg_size,omitempty" yaml:"max_recv_msg_size,omitempty"`
 
-	// MaxSendMsgSize sets the maximum message size that a server can send to the client.
+	// MaxSendMsgSize sets the maximum gRPC message size the server can send;
+	// the MaxSendMsgSize Option takes precedence when set.
 	MaxSendMsgSize int `json:"max_send_msg_size,omitempty" yaml:"max_send_msg_size,omitempty"`
 
-	// HTTPHeaders sets the HTTP headers to be sent to the client.
+	// HTTPHeaders are static response headers set on every response served
+	// by TLS listeners (they are not applied on plain http listeners).
 	HTTPHeaders map[string]string `json:"http_headers,omitempty" yaml:"http_headers,omitempty"`
 }
 
-// KeepAliveCfg settings
+// KeepAliveCfg configures gRPC keepalive. MinTime sets the enforcement
+// policy; Interval and Timeout are only applied when both are positive.
+// MaxConnectionIdle is always 5 minutes.
 type KeepAliveCfg struct {
 	// MinTime is the minimum interval that a client should wait before pinging server.
 	MinTime time.Duration `json:"min_time,omitempty" yaml:"min_time,omitempty"`
@@ -84,19 +96,19 @@ type KeepAliveCfg struct {
 	Timeout time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
-// TLSInfo contains configuration info for the TLS
+// TLSInfo is the server TLS configuration. Cert and key files are watched
+// and reloaded by pkg/transport; CRLFile and OCSPFile are currently not used.
 type TLSInfo struct {
-
 	// CertFile specifies location of the cert
 	CertFile string `json:"cert,omitempty" yaml:"cert,omitempty"`
 
 	// KeyFile specifies location of the key
 	KeyFile string `json:"key,omitempty" yaml:"key,omitempty"`
 
-	// TrustedCAFile specifies location of the trusted Root file
+	// TrustedCAFile specifies location of the trusted root CA bundle
 	TrustedCAFile string `json:"trusted_ca,omitempty" yaml:"trusted_ca,omitempty"`
 
-	// ClientCAFile specifies location of the trusted Root file
+	// ClientCAFile specifies location of the CA bundle used to verify client certificates
 	ClientCAFile string `json:"client_ca,omitempty" yaml:"client_ca,omitempty"`
 
 	// CRLFile specifies location of the CRL
@@ -105,14 +117,16 @@ type TLSInfo struct {
 	// OCSPFile specifies location of the OCSP response
 	OCSPFile string `json:"ocsp,omitempty" yaml:"ocsp,omitempty"`
 
-	// CipherSuites allows to speciy Cipher suites
+	// CipherSuites optionally restricts the TLS cipher suites (by name)
 	CipherSuites []string `json:"cipher_suites,omitempty" yaml:"cipher_suites,omitempty"`
 
-	// ClientCertAuth controls client auth
+	// ClientCertAuth, when true, requires and verifies a client certificate;
+	// otherwise a client certificate is verified only if presented.
 	ClientCertAuth *bool `json:"client_cert_auth,omitempty" yaml:"client_cert_auth,omitempty"`
 }
 
-// SwaggerCfg specifies the configuration for Swagger
+// SwaggerCfg specifies the configuration for Swagger. It is not used by
+// gserver itself and is provided for services that serve Swagger files.
 type SwaggerCfg struct {
 	// Enabled allows Swagger
 	Enabled bool `json:"enabled" yaml:"enabled"`
@@ -121,7 +135,9 @@ type SwaggerCfg struct {
 	Files map[string]string `json:"files" yaml:"files"`
 }
 
-// CORS contains configuration for CORS.
+// CORS configures cross-origin handling. When enabled the REST handler is
+// wrapped with github.com/rs/cors; AllowedOrigins, ExposedHeaders and
+// AllowCredentials are also applied to gRPC-Web responses on TLS listeners.
 type CORS struct {
 	// Enabled specifies if the CORS is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
@@ -151,21 +167,23 @@ type CORS struct {
 	Debug *bool `json:"debug,omitempty" yaml:"debug,omitempty"`
 }
 
-// ParseListenURLs constructs a list of listen peers URLs
+// ParseListenURLs parses ListenURLs into URLs, returning an error for any
+// malformed entry.
 func (c *Config) ParseListenURLs() ([]*url.URL, error) {
 	return netutil.ParseURLs(c.ListenURLs)
 }
 
-// Empty returns true if TLS info is empty
+// Empty returns true if the receiver is nil or either CertFile or KeyFile is unset.
 func (info *TLSInfo) Empty() bool {
 	return info == nil || info.CertFile == "" || info.KeyFile == ""
 }
 
-// GetClientCertAuth controls client auth
+// GetClientCertAuth returns true when ClientCertAuth is set and true.
 func (info *TLSInfo) GetClientCertAuth() bool {
 	return info.ClientCertAuth != nil && *info.ClientCertAuth
 }
 
+// String returns a loggable summary of the TLS file locations; safe on a nil receiver.
 func (info *TLSInfo) String() string {
 	if info == nil {
 		return ""
@@ -174,41 +192,44 @@ func (info *TLSInfo) String() string {
 		info.CertFile, info.KeyFile, info.TrustedCAFile, info.GetClientCertAuth(), info.CRLFile)
 }
 
-// GetEnabled specifies if the CORS is enabled.
+// GetEnabled returns true when CORS is configured and enabled; safe on a nil receiver.
 func (c *CORS) GetEnabled() bool {
 	return c != nil && c.Enabled != nil && *c.Enabled
 }
 
-// GetDebug flag adds additional output to debug server side CORS issues.
+// GetDebug returns the Debug flag; safe on a nil receiver.
 func (c *CORS) GetDebug() bool {
 	return c != nil && c.Debug != nil && *c.Debug
 }
 
-// GetAllowCredentials flag
+// GetAllowCredentials returns the AllowCredentials flag; safe on a nil receiver.
 func (c *CORS) GetAllowCredentials() bool {
 	return c != nil && c.AllowCredentials != nil && *c.AllowCredentials
 }
 
-// GetOptionsPassthrough flag
+// GetOptionsPassthrough returns the OptionsPassthrough flag; safe on a nil receiver.
 func (c *CORS) GetOptionsPassthrough() bool {
 	return c != nil && c.OptionsPassthrough != nil && *c.OptionsPassthrough
 }
 
-// RateLimit contains configuration for Rate Limititing.
+// RateLimit configures the per-client token bucket rate limiter
+// (github.com/didip/tollbooth) that wraps the HTTP handler.
 type RateLimit struct {
-	// Enabled specifies if the Rate Limititing is enabled.
+	// Enabled specifies if rate limiting is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	// RequestsPerSecond specifies the maximum number of requests per second.
 	RequestsPerSecond int `json:"requests_per_second,omitempty" yaml:"requests_per_second,omitempty"`
 	// ExpirationTTL specifies the TTL for token bucket, default 10 mins
 	ExpirationTTL time.Duration `json:"expiration_ttl,omitempty" yaml:"expiration_ttl,omitempty"`
-	// HeadersIPLookups, default is  "X-Forwarded-For", "X-Real-IP" or "RemoteAddr".
+	// HeadersIPLookups lists the sources used to identify the client, in order;
+	// default is "X-Forwarded-For", "X-Real-IP", "RemoteAddr".
 	HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
-	// Metods, can be: "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS".
+	// Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET", "POST";
+	// empty means all methods.
 	Metods []string `json:"metods,omitempty" yaml:"metods,omitempty"`
 }
 
-// GetEnabled specifies if the Rate Limititing is enabled.
+// GetEnabled returns true when rate limiting is configured and enabled; safe on a nil receiver.
 func (c *RateLimit) GetEnabled() bool {
 	return c != nil && c.Enabled != nil && *c.Enabled
 }

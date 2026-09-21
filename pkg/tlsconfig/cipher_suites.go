@@ -20,8 +20,9 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// cipher suites implemented by Go
-// https://github.com/golang/go/blob/dev.boringcrypto.go1.10/src/crypto/tls/cipher_suites.go
+// cipherSuites maps TLS 1.0-1.2 cipher suite names to their IDs, including
+// suites Go now lists as insecure (RC4, 3DES, CBC-SHA256). TLS 1.3 suites are
+// not configurable in Go and are absent.
 var cipherSuites = map[string]uint16{
 	"TLS_RSA_WITH_RC4_128_SHA":                      tls.TLS_RSA_WITH_RC4_128_SHA,
 	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":                 tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
@@ -49,14 +50,16 @@ var cipherSuites = map[string]uint16{
 	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256": tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
-// GetCipherSuite returns the corresponding cipher suite,
-// and boolean value if it is supported.
+// GetCipherSuite returns the ID for a cipher suite name such as
+// "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" and whether the name is known.
 func GetCipherSuite(s string) (uint16, bool) {
 	v, ok := cipherSuites[s]
 	return v, ok
 }
 
-// UpdateCipherSuites in tls.Config
+// UpdateCipherSuites sets tls.CipherSuites from names, preserving order.
+// An empty list is a no-op. It returns an error if CipherSuites is already
+// set or a name is unknown; names are not filtered for security.
 func UpdateCipherSuites(tls *tls.Config, ss []string) error {
 	if len(ss) == 0 {
 		// noting to update

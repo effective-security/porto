@@ -1,5 +1,3 @@
-// Package credentials implements gRPC credential interface with etcd specific logic.
-// e.g., client handshake with custom authority parameter
 package credentials
 
 import (
@@ -18,34 +16,44 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "credentials")
 
+// TimeFormatISO8601 is the compact ISO 8601 layout ("yyyyMMddTHHmmssZ") used
+// by AWS SigV4 presigned URLs and by TimeISO8601.
 const TimeFormatISO8601 = "20060102T150405Z"
 
 var (
 
-	// TokenFieldNameGRPC specifies name for token
+	// TokenFieldNameGRPC is the gRPC metadata key carrying the access token.
 	TokenFieldNameGRPC = "authorization"
 
-	// CacheTTL defines TTL for AWS cache
+	// CacheTTL is the default lifetime assigned to tokens from a
+	// CallerIdentity that report no expiry, and the roles package AWS cache TTL.
 	CacheTTL = 5 * time.Minute
 )
 
+// TimeISO8601 formats t using TimeFormatISO8601.
 func TimeISO8601(t time.Time) string {
 	return t.Format(TimeFormatISO8601)
 }
 
 // Config defines gRPC credential configuration.
 type Config struct {
+	// TLSConfig is the client or server TLS configuration wrapped by NewBundle.
 	TLSConfig *tls.Config
 }
 
-// Token provides access token
+// Token is an access token sent as "<TokenType> <AccessToken>" in the
+// authorization metadata.
 type Token struct {
-	TokenType   string
+	// TokenType is the scheme, e.g. "Bearer", "DPoP" or "AWS4".
+	TokenType string
+	// AccessToken is the raw token value.
 	AccessToken string
 	// Expires is expiration time of the token
 	Expires *time.Time
 }
 
+// Expired reports whether the token is empty or expires within one minute.
+// A token without Expires never expires.
 func (t Token) Expired() bool {
 	if t.AccessToken == "" {
 		return true
@@ -69,22 +77,32 @@ func (t Token) Expired() bool {
 	return expired
 }
 
-// CallerIdentity interface
+// CallerIdentity obtains a fresh access token on demand; it is consulted by
+// the per-RPC credentials whenever the current token has expired.
 type CallerIdentity interface {
-	// GetCallerIdentity returns token
+	// GetCallerIdentity returns a new token. If Expires is nil the token is
+	// cached for CacheTTL.
 	GetCallerIdentity(ctx context.Context) (*Token, error)
 }
 
-// Bundle defines gRPC credential interface.
-// see https://pkg.go.dev/google.golang.org/grpc/credentials
+// Bundle is a grpccredentials.Bundle whose PerRPCCredentials sends the
+// configured token. The setters are safe to call concurrently with RPCs.
+// See https://pkg.go.dev/google.golang.org/grpc/credentials.
 type Bundle interface {
 	grpccredentials.Bundle
+	// UpdateAuthToken replaces the token sent with subsequent RPCs.
 	UpdateAuthToken(token Token)
+	// WithDPoP sets the signer used to add a "dpop" proof to RPCs whose
+	// token type is "DPoP".
 	WithDPoP(signer dpop.Signer)
+	// WithCallerIdentity sets the provider used to obtain a new token when
+	// the current one has expired.
 	WithCallerIdentity(provider CallerIdentity)
 }
 
-// NewBundle constructs a new gRPC credential bundle.
+// NewBundle constructs a Bundle whose transport credentials wrap
+// cfg.TLSConfig and whose per-RPC credentials require transport security.
+// NewWithMode is not supported and returns nil, nil.
 func NewBundle(cfg Config) Bundle {
 	return &bundle{
 		tc: newTransportCredential(cfg.TLSConfig),

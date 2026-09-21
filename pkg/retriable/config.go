@@ -16,13 +16,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config of the client
+// Config is the multi-client configuration consumed by NewFactory and
+// LoadFactory: a map of client name to ClientConfig.
 type Config struct {
+	// Clients maps a logical client name to its configuration.
 	Clients map[string]*ClientConfig `json:"clients,omitempty" yaml:"clients,omitempty"`
 }
 
-// ClientConfig of the client, per specific host
+// ClientConfig is the configuration of a Client for one host.
+// It is the YAML/JSON document read by LoadClient and the value of each
+// entry in Config.Clients.
 type ClientConfig struct {
+	// Host is the base URL of the server, e.g. https://foo.bar:3444.
 	Host string `json:"host" yaml:"host"`
 
 	// TLS provides TLS config for the client
@@ -34,15 +39,19 @@ type ClientConfig struct {
 	// StorageFolder specifies the root folder for keys and token.
 	StorageFolder string `json:"storage_folder,omitempty" yaml:"storage_folder,omitempty"`
 
-	// AuthToken specifies the access token
+	// AuthToken is the access token loaded by LoadAuthToken or
+	// CheckAuthTokenFromEnv and used by Client.SetAuthorization.
 	AuthToken *AuthToken `json:"-" yaml:"-"`
 
-	// TokenLocation specifies the location of the token
+	// TokenLocation describes where AuthToken came from
+	// (a file path or "env://NAME"), for logging.
 	TokenLocation string `json:"-" yaml:"-"`
 
 	storage *Storage `json:"-" yaml:"-"`
 }
 
+// Storage returns the token/key storage rooted at StorageFolder,
+// creating it on first use.
 func (c *ClientConfig) Storage() *Storage {
 	if c.storage == nil {
 		c.storage = NewStorage(c.StorageFolder)
@@ -50,6 +59,10 @@ func (c *ClientConfig) Storage() *Storage {
 	return c.storage
 }
 
+// CheckAuthTokenFromEnv loads AuthToken from the named environment
+// variable (see ParseAuthToken for the accepted formats).
+// It returns false when the variable is unset or empty, and an error when
+// the value is malformed or the token has expired.
 func (c *ClientConfig) CheckAuthTokenFromEnv(env string) (bool, error) {
 	val := os.Getenv(env)
 	if val == "" {
@@ -67,6 +80,8 @@ func (c *ClientConfig) CheckAuthTokenFromEnv(env string) (bool, error) {
 	return true, nil
 }
 
+// LoadAuthTokenOrFromEnv sets AuthToken from the named environment variable
+// when it is set, otherwise from the .auth_token file in Storage.
 func (c *ClientConfig) LoadAuthTokenOrFromEnv(env string) error {
 	ok, err := c.CheckAuthTokenFromEnv(env)
 	if err != nil {
@@ -78,8 +93,8 @@ func (c *ClientConfig) LoadAuthTokenOrFromEnv(env string) error {
 	return c.LoadAuthToken()
 }
 
-// LoadAuthToken returns AuthToken
-// returns AuthToken, location, error
+// LoadAuthToken sets AuthToken and TokenLocation from the .auth_token file
+// in Storage. It does not check expiry.
 func (c *ClientConfig) LoadAuthToken() error {
 	storage := c.Storage()
 	if storage == nil {
@@ -94,13 +109,17 @@ func (c *ClientConfig) LoadAuthToken() error {
 	return nil
 }
 
-// RequestPolicy contains configuration info for Request policy
+// RequestPolicy is the configurable subset of Policy.
+// When present in ClientConfig, its values replace TotalRetryLimit and
+// RequestTimeout of DefaultPolicy, even when zero.
 type RequestPolicy struct {
-	RetryLimit int           `json:"retry_limit,omitempty" yaml:"retry_limit,omitempty"`
-	Timeout    time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	// RetryLimit sets Policy.TotalRetryLimit.
+	RetryLimit int `json:"retry_limit,omitempty" yaml:"retry_limit,omitempty"`
+	// Timeout sets Policy.RequestTimeout (e.g. "2s").
+	Timeout time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
-// TLSInfo contains configuration info for the TLS
+// TLSInfo specifies the client certificate and trust anchors, as file paths.
 type TLSInfo struct {
 	// CertFile specifies location of the cert
 	CertFile string `json:"cert,omitempty" yaml:"cert,omitempty"`
@@ -112,13 +131,16 @@ type TLSInfo struct {
 	TrustedCAFile string `json:"trusted_ca,omitempty" yaml:"trusted_ca,omitempty"`
 }
 
-// Factory provides factory for retriable client for a specific host
+// Factory creates Clients from a Config, looked up either by client name
+// or by host URL. When several clients share a host, the last one wins
+// for ForHost/ConfigForHost.
 type Factory struct {
 	cfg     Config
 	perHost map[string]*ClientConfig
 }
 
-// NewFactory returns new Factory
+// NewFactory returns a Factory for cfg. It fails when a client entry has
+// no host.
 func NewFactory(cfg Config) (*Factory, error) {
 	perHost := map[string]*ClientConfig{}
 	for name, c := range cfg.Clients {
@@ -134,7 +156,9 @@ func NewFactory(cfg Config) (*Factory, error) {
 	}, nil
 }
 
-// LoadFactory returns new Factory
+// LoadFactory reads a YAML Config from file (with ~ and $VAR expansion of
+// all paths) and returns a Factory. Each client's StorageFolder gets a
+// per-host sub-folder appended (see HostFolderName) unless already present.
 func LoadFactory(file string) (*Factory, error) {
 	file = resolve.ExpandPath(file)
 
@@ -176,14 +200,15 @@ func (f *Factory) CreateClient(clientName string) (*Client, error) {
 	return New(ClientConfig{})
 }
 
-// ConfigForHost returns config for host
+// ConfigForHost returns the ClientConfig whose Host equals hostname
+// (full URL, e.g. https://foo.bar:3444), or nil.
 func (f *Factory) ConfigForHost(hostname string) *ClientConfig {
 	return f.perHost[hostname]
 }
 
-// ForHost returns Client for specified host name.
-// If the name is not found in the configuration,
-// a client with default settings will be returned.
+// ForHost returns a Client for the specified host URL.
+// If the host is not found in the configuration,
+// a Default client for that host is returned.
 func (f *Factory) ForHost(hostname string) (*Client, error) {
 	if cfg, ok := f.perHost[hostname]; ok {
 		logger.KV(xlog.TRACE, "host", hostname, "cfg", cfg)
@@ -193,7 +218,9 @@ func (f *Factory) ForHost(hostname string) (*Client, error) {
 	return Default(hostname)
 }
 
-// New returns new Client
+// NewForHost loads a Factory from the cfg file and returns its client for
+// host. When the config file cannot be loaded, a Default client for host is
+// returned instead; only a failure to build the configured client is an error.
 func NewForHost(cfg, host string) (*Client, error) {
 	var rc *Client
 	f, err := LoadFactory(cfg)
@@ -212,7 +239,8 @@ func NewForHost(cfg, host string) (*Client, error) {
 	return rc, nil
 }
 
-// LoadClient returns new Client
+// LoadClient reads a single YAML ClientConfig from file (with ~ and $VAR
+// expansion of all paths) and returns a Client built with New.
 func LoadClient(file string) (*Client, error) {
 	f, err := os.ReadFile(resolve.ExpandPath(file))
 	if err != nil {
@@ -233,12 +261,17 @@ func LoadClient(file string) (*Client, error) {
 	return New(cfg)
 }
 
+// WithStorage replaces the token/key storage used by SetAuthorization.
 func (c *Client) WithStorage(storage *Storage) *Client {
 	c.Config.storage = storage
 	return c
 }
 
-// SetAuthorization sets Authorization token
+// SetAuthorization adds the Authorization header from Config.AuthToken,
+// loading it from Storage when not yet set. For DPoP tokens the private key
+// named by the token's dpop_jkt is loaded from Storage and every request is
+// signed. It is a no-op for hosts that are not https:// or unixs://, and an
+// error when the token is missing or expired.
 func (c *Client) SetAuthorization() error {
 	host := c.CurrentHost()
 	// Allow to use Bearer only over TLS connection
@@ -300,7 +333,9 @@ func getValue(vals url.Values, name string) string {
 	return v[0]
 }
 
-// HostFolderName returns a folder name for a host
+// HostFolderName returns the storage sub-folder name derived from a host
+// URL: the host[:port] part with ":" replaced by "_",
+// e.g. "https://foo.bar:3444" -> "foo.bar_3444".
 func HostFolderName(host string) string {
 	u, err := url.Parse(host)
 	if err == nil {

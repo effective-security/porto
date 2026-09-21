@@ -261,7 +261,8 @@ var codeStatus = map[codes.Code]int{
 	codes.Unauthenticated: http.StatusUnauthorized,
 }
 
-// HTTPStatusFromRPC returns HTTP status
+// HTTPStatusFromRPC maps a gRPC status code to an HTTP status following the
+// Google API error model; unknown codes map to 0.
 func HTTPStatusFromRPC(c codes.Code) int {
 	return codeStatus[c]
 }
@@ -284,6 +285,7 @@ var statusCode = map[string]codes.Code{
 	CodeRateLimitExceeded:       codes.ResourceExhausted,
 	CodeRequestFailed:           codes.Unknown,
 	CodeRequestTooLarge:         codes.InvalidArgument,
+	CodeTimeout:                 codes.DeadlineExceeded,
 	CodeTooEarly:                codes.ResourceExhausted,
 	CodeUnauthorized:            codes.PermissionDenied,
 	CodeUnexpected:              codes.Internal,
@@ -328,7 +330,9 @@ var statusCode = map[string]codes.Code{
 	"authentication_required": codes.Unauthenticated,
 }
 
-// FromOAuth returns an error with HTTP status code and description
+// FromOAuth converts an OAuth 2.0 error response (RFC 6749 "error" and
+// "error_description") into an *Error whose Code is the OAuth error code and
+// whose HTTP status is 400, 401, 500 or 503 depending on the code.
 func FromOAuth(code, descr string) *Error {
 	status := http.StatusBadRequest
 	switch code {

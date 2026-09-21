@@ -9,13 +9,17 @@ import (
 	"github.com/effective-security/porto/xhttp/identity"
 )
 
-// a http.Handler that records execution metrics of the wrapper handler
+// requestMetrics is a http.Handler that records execution metrics of the wrapped handler
 type requestMetrics struct {
 	handler       http.Handler
 	responseCodes []string
 }
 
-// NewRequestMetrics creates a wrapper handler to produce metrics for each request
+// NewRequestMetrics wraps h so that every request records
+// metricskey.HTTPReqPerf (latency) and metricskey.HTTPReqByRole (count)
+// labelled by method, status code, URL path and caller role (from
+// identity.FromRequest). Responses with status 404 are counted only under a
+// fixed "unknown" path to limit cardinality from scanners.
 func NewRequestMetrics(h http.Handler) http.Handler {
 	rm := requestMetrics{
 		handler:       h,

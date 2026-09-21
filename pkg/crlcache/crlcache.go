@@ -4,9 +4,11 @@ import (
 	"crypto/x509"
 )
 
-// Verifier provides an interface to check revocation status
+// Verifier checks the revocation status of a certificate against its issuer.
+// Implementations must be safe for concurrent use: transport.NewTLSListener
+// calls Verify from concurrent handshake goroutines.
 type Verifier interface {
-	// Update the cache
+	// Update refreshes the underlying CRL/OCSP cache.
 	Update() error
 
 	// Verify returns OCSP status:
@@ -15,5 +17,3 @@ type Verifier interface {
 	//   ocsp.Unknown - no CRL or OCSP response found for the certificate
 	Verify(crt *x509.Certificate, issuer *x509.Certificate) (int, error)
 }
-
-// TODO: implement

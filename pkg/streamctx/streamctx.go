@@ -7,6 +7,10 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// WithContext returns a grpc.ServerStream whose Context method returns ctx.
+// If ss was already produced by WithContext, its context is replaced in place
+// and the same stream is returned (so earlier holders of that stream observe
+// the new context); otherwise ss is wrapped.
 func WithContext(ctx context.Context, ss grpc.ServerStream) grpc.ServerStream {
 	if sss, ok := ss.(*serverStream); ok {
 		sss.ctx = ctx
@@ -19,6 +23,7 @@ func WithContext(ctx context.Context, ss grpc.ServerStream) grpc.ServerStream {
 	}
 }
 
+// serverStream overrides Context on an embedded grpc.ServerStream.
 type serverStream struct {
 	grpc.ServerStream
 	ctx context.Context

@@ -10,15 +10,18 @@ import (
 )
 
 const (
-	// DefaultReplayNonceHeader provides header name for nonce
+	// DefaultReplayNonceHeader is the conventional (ACME-style) header name
+	// carrying a replay nonce; pass it to Client.WithNonce or NewNonceProvider.
 	DefaultReplayNonceHeader = "Replay-Nonce"
 )
 
-// NonceProvider specifies interface for Nonces
+// NonceProvider supplies server-issued replay nonces for signed requests.
+// It satisfies jose.NonceSource.
 type NonceProvider interface {
-	// Nonce returns new nonce by fetching from server
+	// Nonce returns an unused nonce, taking a cached one received in an
+	// earlier response or fetching a fresh one from the server.
 	Nonce() (string, error)
-	// SetFromHeader extracts Nonce from a HTTP response headers
+	// SetFromHeader caches the nonce found in the response headers, if any.
 	SetFromHeader(hdr http.Header)
 }
 
@@ -32,7 +35,10 @@ type nonceProvider struct {
 	client     HTTPClient
 }
 
-// NewNonceProvider returns default nonce provider
+// NewNonceProvider returns the default NonceProvider: it keeps a bounded
+// LIFO cache (64 entries) of nonces seen in headerName response headers,
+// and when empty fetches one with a HEAD request to noncePath through
+// client. It is safe for concurrent use.
 func NewNonceProvider(client HTTPClient, noncePath, headerName string) NonceProvider {
 	return &nonceProvider{
 		client:     client,

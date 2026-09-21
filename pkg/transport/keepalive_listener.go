@@ -27,10 +27,14 @@ type keepAliveConn interface {
 	SetKeepAlivePeriod(d time.Duration) error
 }
 
-// NewKeepAliveListener returns a listener that listens on the given address.
-// Be careful when wrap around KeepAliveListener with another Listener if TLSInfo is not nil.
-// Some pkgs (like go/http) might expect Listener to return TLSConn type to start TLS handshake.
-// http://tldp.org/HOWTO/TCP-Keepalive-HOWTO/overview.html
+// NewKeepAliveListener wraps l so that accepted connections get TCP keepalive
+// enabled with a 30s period. With scheme "https" the connection is also
+// wrapped with tls.Server(tlscfg) (handshake happens lazily on first I/O) and
+// tlscfg must be non-nil, otherwise an error is returned. Accepted connections
+// must implement SetKeepAlive/SetKeepAlivePeriod (e.g. *net.TCPConn) or
+// Accept panics. Be careful when wrapping the returned listener with another
+// listener: packages like net/http expect Accept to return *tls.Conn.
+// See http://tldp.org/HOWTO/TCP-Keepalive-HOWTO/overview.html
 func NewKeepAliveListener(l net.Listener, scheme string, tlscfg *tls.Config) (net.Listener, error) {
 	if scheme == "https" {
 		if tlscfg == nil {
@@ -83,10 +87,9 @@ func (l *tlsKeepaliveListener) Accept() (net.Conn, error) {
 	return c, nil
 }
 
-// NewListener creates a Listener which accepts connections from an inner
-// Listener and wraps each connection with Server.
-// The configuration config must be non-nil and must have
-// at least one certificate.
+// newTLSKeepaliveListener creates a listener which accepts connections from
+// inner, enables keepalive and wraps each connection with tls.Server.
+// config must be non-nil and must have at least one certificate.
 func newTLSKeepaliveListener(inner net.Listener, config *tls.Config) net.Listener {
 	l := &tlsKeepaliveListener{}
 	l.Listener = inner

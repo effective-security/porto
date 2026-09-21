@@ -6,44 +6,49 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Middleware defines middleware handler
+// Middleware wraps an http.Handler; it is applied by WithMiddleware.
 type Middleware func(handler http.Handler) http.Handler
 
-// Option is an option that can be passed to New().
-// Option configures how we set up the client
+// Option customizes a Server created by Start.
 type Option interface {
 	apply(*options)
 }
 
-// WithMiddleware option to provide HTTP handler
+// WithMiddleware adds an HTTP middleware to the REST handler chain. It runs
+// after the built-in middlewares (identity, authz, logging), closest to the
+// router; multiple middlewares wrap in the order given.
 func WithMiddleware(otherHandler Middleware) Option {
 	return newFuncOption(func(o *options) {
 		o.handlers = append(o.handlers, otherHandler)
 	})
 }
 
-// WithUnaryServerInterceptor option to provide RPC UnaryServerInterceptor
+// WithUnaryServerInterceptor appends a gRPC unary interceptor after the
+// built-in chain (panic recovery, validation, correlation, logging, identity, authz).
 func WithUnaryServerInterceptor(other grpc.UnaryServerInterceptor) Option {
 	return newFuncOption(func(o *options) {
 		o.unary = append(o.unary, other)
 	})
 }
 
-// WithStreamServerInterceptor option to provide RPC StreamServerInterceptor
+// WithStreamServerInterceptor appends a gRPC stream interceptor after the
+// built-in chain (logging, correlation, identity, authz).
 func WithStreamServerInterceptor(other grpc.StreamServerInterceptor) Option {
 	return newFuncOption(func(o *options) {
 		o.stream = append(o.stream, other)
 	})
 }
 
-// MaxRecvMsgSize sets the maximum message size that a client can send to the server.
+// MaxRecvMsgSize sets the maximum gRPC message size a client can send,
+// overriding Config.MaxRecvMsgSize.
 func MaxRecvMsgSize(size int) Option {
 	return newFuncOption(func(o *options) {
 		o.maxRecvMsgSize = size
 	})
 }
 
-// MaxSendMsgSize sets the maximum message size that a server can send to the client.
+// MaxSendMsgSize sets the maximum gRPC message size the server can send,
+// overriding Config.MaxSendMsgSize.
 func MaxSendMsgSize(size int) Option {
 	return newFuncOption(func(o *options) {
 		o.maxSendMsgSize = size

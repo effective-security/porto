@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"cmp"
+
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver"
 	"github.com/effective-security/porto/pkg/tlsconfig"
-	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
@@ -45,6 +46,9 @@ type RateLimiter interface {
 	GetRateLimitRemainingTime(ctx context.Context, key string) (time.Duration, error)
 }
 
+// Provider is the Redis operations interface implemented by *RedisClient;
+// depend on it rather than on the concrete type. All keys are relative to
+// the client prefix. See the RedisClient methods for per-operation details.
 type Provider interface {
 	io.Closer
 
@@ -110,25 +114,34 @@ type Provider interface {
 	Ping(ctx context.Context) error
 }
 
-// Config specifies configuration of the redis.
+// Config specifies the Redis connection.
 type Config struct {
-	Server string        `json:"server,omitempty" yaml:"server,omitempty"`
-	TTL    time.Duration `json:"ttl,omitempty" yaml:"ttl,omitempty"`
+	// Server is the redis:// or rediss:// URL (see redis.ParseURL).
+	Server string `json:"server,omitempty" yaml:"server,omitempty"`
+	// TTL is informational for callers; the client itself applies no default expiry.
+	TTL time.Duration `json:"ttl,omitempty" yaml:"ttl,omitempty"`
 	// ClientTLS describes the TLS certs used to connect to the cluster
 	ClientTLS *gserver.TLSInfo `json:"client_tls,omitempty" yaml:"client_tls,omitempty"`
-	User      string           `json:"user,omitempty" yaml:"user,omitempty"`
-	Password  string           `json:"password,omitempty" yaml:"password,omitempty"`
+	// User is the ACL user name; only applied when Password is set.
+	User string `json:"user,omitempty" yaml:"user,omitempty"`
+	// Password overrides the credentials embedded in Server.
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
 }
 
-// ErrNotFound defines not found error
+// ErrNotFound is returned by Get and HGet for a missing key or field.
 var ErrNotFound = errors.New("not found")
 
-// IsNotFoundError returns true, if error is NotFound
+// IsNotFoundError reports whether err is (or wraps) ErrNotFound, or whose
+// message contains "not found".
 func IsNotFoundError(err error) bool {
 	return err != nil &&
 		(err == ErrNotFound || errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found"))
 }
 
+// RedisClient implements Provider on top of an embedded *redis.Client.
+// The wrapper methods prefix keys (see Key) and wrap errors; the embedded
+// client's own methods are also reachable but bypass the prefix.
+// Create it with New or NewWithClient, and derive namespaced children with WithPrefix.
 type RedisClient struct {
 	*redis.Client
 
@@ -139,6 +152,10 @@ type RedisClient struct {
 // ensure RedisClient implements Provider interface
 var _ Provider = (*RedisClient)(nil)
 
+// NewRedisClient builds a raw *redis.Client from cfg: the URL is parsed,
+// TLS is configured from ClientTLS files, Password/User override the URL
+// credentials, and maintenance notifications are disabled.
+// The connection is established lazily.
 func NewRedisClient(cfg *Config) (*redis.Client, error) {
 	logger.KV(xlog.INFO, "redis", cfg.Server)
 
@@ -172,7 +189,8 @@ func NewRedisClient(cfg *Config) (*redis.Client, error) {
 	return redis.NewClient(options), nil
 }
 
-// New creates a new Redis client with the given options
+// New creates a root RedisClient (no prefix) from cfg. The returned client
+// owns the connection: its Close closes it.
 func New(cfg *Config) (*RedisClient, error) {
 	rc, err := NewRedisClient(cfg)
 	if err != nil {
@@ -186,6 +204,9 @@ func New(cfg *Config) (*RedisClient, error) {
 	return client, nil
 }
 
+// NewWithClient wraps an existing *redis.Client without a prefix.
+// The caller keeps ownership of the connection: Close is a no-op.
+// The error is always nil.
 func NewWithClient(client *redis.Client) (*RedisClient, error) {
 	return &RedisClient{
 		Client:  client,
@@ -199,7 +220,10 @@ func (c *RedisClient) RawClient() *redis.Client {
 	return c.Client
 }
 
-// NewWithPrefix creates a new Redis client with the given options and prefix
+// WithPrefix returns a child client sharing the connection whose keys are
+// namespaced under "/<prefix>/" (surrounding spaces and slashes are
+// trimmed). The child's Close is a no-op. Prefixes do not nest: the parent
+// prefix is ignored.
 func (c *RedisClient) WithPrefix(prefix string) *RedisClient {
 	prefix = strings.TrimSpace(prefix)
 	prefix = strings.Trim(prefix, "/")
@@ -215,6 +239,9 @@ func (c *RedisClient) WithPrefix(prefix string) *RedisClient {
 	}
 }
 
+// Close closes the underlying connection when this client owns it (created
+// by New); for clients from NewWithClient or WithPrefix it is a no-op.
+// Close errors are logged, never returned; the client must not be used afterwards.
 func (c *RedisClient) Close() error {
 	if c.Client != nil && !c.noclose {
 		// close the client only if no prefix is set
@@ -227,6 +254,8 @@ func (c *RedisClient) Close() error {
 	return nil
 }
 
+// Key returns the full Redis key for key: the prefix joined with key using
+// path.Join (so "a//b" and "../x" are cleaned), or key itself when there is no prefix.
 func (c *RedisClient) Key(key string) string {
 	if c.prefix == "" {
 		return key
@@ -234,6 +263,7 @@ func (c *RedisClient) Key(key string) string {
 	return path.Join(c.prefix, key)
 }
 
+// SubKey strips the client prefix from a full Redis key, inverting Key.
 func (c *RedisClient) SubKey(key string) string {
 	if c.prefix == "" {
 		return key
@@ -241,6 +271,8 @@ func (c *RedisClient) SubKey(key string) string {
 	return strings.TrimPrefix(key, c.prefix)
 }
 
+// Get loads the value stored under key into v, which must be a non-nil
+// pointer (see UnmarshalStringCmd). It returns ErrNotFound for a missing key.
 func (c *RedisClient) Get(ctx context.Context, key string, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -259,6 +291,8 @@ func (c *RedisClient) Get(ctx context.Context, key string, v any) error {
 	return UnmarshalStringCmd(val, v)
 }
 
+// Set stores v under key (see Marshal for the encoding) with the given
+// expiration; 0 means no expiry and redis.KeepTTL keeps the existing one.
 func (c *RedisClient) Set(ctx context.Context, key string, v any, expiration time.Duration) error {
 	value, err := Marshal(v)
 	if err != nil {
@@ -272,6 +306,7 @@ func (c *RedisClient) Set(ctx context.Context, key string, v any, expiration tim
 	return nil
 }
 
+// Del removes key; a missing key is not an error.
 func (c *RedisClient) Del(ctx context.Context, key string) error {
 	err := c.Client.Del(ctx, c.Key(key)).Err()
 	if err != nil {
@@ -280,6 +315,7 @@ func (c *RedisClient) Del(ctx context.Context, key string) error {
 	return nil
 }
 
+// LPush prepends values to the list at key.
 func (c *RedisClient) LPush(ctx context.Context, key string, values ...any) error {
 	err := c.Client.LPush(ctx, c.Key(key), values...).Err()
 	if err != nil {
@@ -288,6 +324,7 @@ func (c *RedisClient) LPush(ctx context.Context, key string, values ...any) erro
 	return nil
 }
 
+// RPush appends values to the list at key.
 func (c *RedisClient) RPush(ctx context.Context, key string, values ...any) error {
 	err := c.Client.RPush(ctx, c.Key(key), values...).Err()
 	if err != nil {
@@ -296,6 +333,8 @@ func (c *RedisClient) RPush(ctx context.Context, key string, values ...any) erro
 	return nil
 }
 
+// LPop removes and returns the first element of the list at key.
+// An empty or missing list yields a wrapped redis.Nil error, not ErrNotFound.
 func (c *RedisClient) LPop(ctx context.Context, key string) (string, error) {
 	val, err := c.Client.LPop(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -304,6 +343,8 @@ func (c *RedisClient) LPop(ctx context.Context, key string) (string, error) {
 	return val, nil
 }
 
+// RPop removes and returns the last element of the list at key.
+// An empty or missing list yields a wrapped redis.Nil error, not ErrNotFound.
 func (c *RedisClient) RPop(ctx context.Context, key string) (string, error) {
 	val, err := c.Client.RPop(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -312,6 +353,8 @@ func (c *RedisClient) RPop(ctx context.Context, key string) (string, error) {
 	return val, nil
 }
 
+// LRange returns the elements of the list at key between the start and
+// stop indexes (inclusive, negative counts from the end).
 func (c *RedisClient) LRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
 	val, err := c.Client.LRange(ctx, c.Key(key), start, stop).Result()
 	if err != nil {
@@ -320,6 +363,7 @@ func (c *RedisClient) LRange(ctx context.Context, key string, start, stop int64)
 	return val, nil
 }
 
+// LTrim keeps only the elements of the list at key between start and stop.
 func (c *RedisClient) LTrim(ctx context.Context, key string, start, stop int64) error {
 	err := c.Client.LTrim(ctx, c.Key(key), start, stop).Err()
 	if err != nil {
@@ -328,6 +372,7 @@ func (c *RedisClient) LTrim(ctx context.Context, key string, start, stop int64) 
 	return nil
 }
 
+// LLen returns the length of the list at key (0 when missing).
 func (c *RedisClient) LLen(ctx context.Context, key string) (int64, error) {
 	val, err := c.Client.LLen(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -336,6 +381,7 @@ func (c *RedisClient) LLen(ctx context.Context, key string) (int64, error) {
 	return val, nil
 }
 
+// LIndex returns the element at index in the list at key.
 func (c *RedisClient) LIndex(ctx context.Context, key string, index int64) (string, error) {
 	val, err := c.Client.LIndex(ctx, c.Key(key), index).Result()
 	if err != nil {
@@ -344,6 +390,7 @@ func (c *RedisClient) LIndex(ctx context.Context, key string, index int64) (stri
 	return val, nil
 }
 
+// Exists reports whether key exists.
 func (c *RedisClient) Exists(ctx context.Context, key string) (bool, error) {
 	val, err := c.Client.Exists(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -352,6 +399,7 @@ func (c *RedisClient) Exists(ctx context.Context, key string) (bool, error) {
 	return val > 0, nil
 }
 
+// Expire sets the TTL of key and reports whether the key existed.
 func (c *RedisClient) Expire(ctx context.Context, key string, expiration time.Duration) (bool, error) {
 	val, err := c.Client.Expire(ctx, c.Key(key), expiration).Result()
 	if err != nil {
@@ -360,6 +408,7 @@ func (c *RedisClient) Expire(ctx context.Context, key string, expiration time.Du
 	return val, nil
 }
 
+// TTL returns the remaining TTL of key (-1 for no expiry, -2 when missing).
 func (c *RedisClient) TTL(ctx context.Context, key string) (time.Duration, error) {
 	val, err := c.Client.TTL(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -368,6 +417,7 @@ func (c *RedisClient) TTL(ctx context.Context, key string) (time.Duration, error
 	return val, nil
 }
 
+// Ping checks connectivity to the server.
 func (c *RedisClient) Ping(ctx context.Context) error {
 	_, err := c.Client.Ping(ctx).Result()
 	if err != nil {
@@ -391,7 +441,10 @@ func (c *RedisClient) Keys(ctx context.Context, pattern string) ([]string, error
 	return list, nil
 }
 
-// ScanKeys returns list of keys.
+// ScanKeys returns keys matching pattern (relative to the prefix) using
+// SCAN in batches of 100, stopping once at least limit keys were collected
+// (limit <= 0 means 1000) or the scan completes. It may return up to 99 keys
+// more than limit.
 func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) ([]string, error) {
 	var (
 		cursor uint64
@@ -400,7 +453,7 @@ func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) (
 		batch  []string
 	)
 
-	limit = values.NumbersCoalesce(limit, 1000)
+	limit = cmp.Or(limit, 1000)
 
 	for {
 		batch, cursor, err = c.Client.Scan(ctx, cursor, c.Key(pattern), 100).Result()
@@ -420,6 +473,7 @@ func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) (
 	return keys, nil
 }
 
+// SAdd adds members to the set at key.
 func (c *RedisClient) SAdd(ctx context.Context, key string, members ...any) error {
 	err := c.Client.SAdd(ctx, c.Key(key), members...).Err()
 	if err != nil {
@@ -428,6 +482,7 @@ func (c *RedisClient) SAdd(ctx context.Context, key string, members ...any) erro
 	return nil
 }
 
+// SRem removes members from the set at key.
 func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) error {
 	err := c.Client.SRem(ctx, c.Key(key), members...).Err()
 	if err != nil {
@@ -436,6 +491,7 @@ func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) erro
 	return nil
 }
 
+// SIsMember reports whether member belongs to the set at key.
 func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bool, error) {
 	val, err := c.Client.SIsMember(ctx, c.Key(key), member).Result()
 	if err != nil {
@@ -444,6 +500,7 @@ func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bo
 	return val, nil
 }
 
+// SMembers returns all members of the set at key.
 func (c *RedisClient) SMembers(ctx context.Context, key string) ([]string, error) {
 	val, err := c.Client.SMembers(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -452,6 +509,7 @@ func (c *RedisClient) SMembers(ctx context.Context, key string) ([]string, error
 	return val, nil
 }
 
+// SCard returns the number of members of the set at key.
 func (c *RedisClient) SCard(ctx context.Context, key string) (int64, error) {
 	val, err := c.Client.SCard(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -460,6 +518,10 @@ func (c *RedisClient) SCard(ctx context.Context, key string) (int64, error) {
 	return val, nil
 }
 
+// SAddWithEviction adds member to the set at key and records the insertion
+// order in the list at listKey; when the list grows beyond limit the oldest
+// member is removed from both. The steps are separate commands (not
+// atomic) and errors from the eviction step are ignored.
 func (c *RedisClient) SAddWithEviction(ctx context.Context, key string, listKey string, limit int64, member string) error {
 	// Add to Set
 	err := c.SAdd(ctx, key, member)
@@ -482,7 +544,8 @@ func (c *RedisClient) SAddWithEviction(ctx context.Context, key string, listKey 
 	return nil
 }
 
-// Hash operations
+// HSetMany sets several fields of the hash at key in one HSET command.
+// An empty map is a no-op.
 func (c *RedisClient) HSetMany(ctx context.Context, key string, values map[string]any) error {
 	if len(values) == 0 {
 		return nil
@@ -500,6 +563,7 @@ func (c *RedisClient) HSetMany(ctx context.Context, key string, values map[strin
 	return nil
 }
 
+// HSet sets a single field of the hash at key.
 func (c *RedisClient) HSet(ctx context.Context, key string, field string, value any) error {
 	err := c.Client.HSet(ctx, c.Key(key), field, value).Err()
 	if err != nil {
@@ -508,6 +572,8 @@ func (c *RedisClient) HSet(ctx context.Context, key string, field string, value 
 	return nil
 }
 
+// HGet returns a field of the hash at key, or ErrNotFound when the field
+// or the hash is missing.
 func (c *RedisClient) HGet(ctx context.Context, key string, field string) (string, error) {
 	val, err := c.Client.HGet(ctx, c.Key(key), field).Result()
 	if err != nil {
@@ -519,6 +585,7 @@ func (c *RedisClient) HGet(ctx context.Context, key string, field string) (strin
 	return val, nil
 }
 
+// HGetAll returns all fields of the hash at key (empty map when missing).
 func (c *RedisClient) HGetAll(ctx context.Context, key string) (map[string]string, error) {
 	val, err := c.Client.HGetAll(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -527,6 +594,7 @@ func (c *RedisClient) HGetAll(ctx context.Context, key string) (map[string]strin
 	return val, nil
 }
 
+// HDel removes fields from the hash at key.
 func (c *RedisClient) HDel(ctx context.Context, key string, fields ...string) error {
 	err := c.Client.HDel(ctx, c.Key(key), fields...).Err()
 	if err != nil {
@@ -535,6 +603,7 @@ func (c *RedisClient) HDel(ctx context.Context, key string, fields ...string) er
 	return nil
 }
 
+// HExists reports whether the hash at key has field.
 func (c *RedisClient) HExists(ctx context.Context, key string, field string) (bool, error) {
 	val, err := c.Client.HExists(ctx, c.Key(key), field).Result()
 	if err != nil {
@@ -543,6 +612,7 @@ func (c *RedisClient) HExists(ctx context.Context, key string, field string) (bo
 	return val, nil
 }
 
+// HKeys returns the field names of the hash at key.
 func (c *RedisClient) HKeys(ctx context.Context, key string) ([]string, error) {
 	val, err := c.Client.HKeys(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -551,6 +621,7 @@ func (c *RedisClient) HKeys(ctx context.Context, key string) ([]string, error) {
 	return val, nil
 }
 
+// HVals returns the field values of the hash at key.
 func (c *RedisClient) HVals(ctx context.Context, key string) ([]string, error) {
 	val, err := c.Client.HVals(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -559,6 +630,10 @@ func (c *RedisClient) HVals(ctx context.Context, key string) ([]string, error) {
 	return val, nil
 }
 
+// HSetWithEviction sets field in the hash at hashKey and records the
+// insertion order in the list at orderListKey; when the list grows beyond
+// maxFields the oldest field is deleted from the hash. The steps are
+// separate commands (not atomic) and errors from the eviction step are ignored.
 func (c *RedisClient) HSetWithEviction(ctx context.Context, hashKey, orderListKey string, maxFields int64, field string, value any) error {
 	// Set the hash field
 	err := c.Client.HSet(ctx, c.Key(hashKey), field, value).Err()
@@ -583,21 +658,30 @@ func (c *RedisClient) HSetWithEviction(ctx context.Context, hashKey, orderListKe
 
 // Sorted Set (ZSet) operations
 
+// ZAdd adds member with score to the sorted set at key, updating the score
+// if the member exists. The go-redis error is returned unwrapped.
 func (c *RedisClient) ZAdd(ctx context.Context, key string, score float64, member string) error {
 	_, err := c.Client.ZAdd(ctx, c.Key(key), redis.Z{Score: score, Member: member}).Result()
 	return err
 }
 
+// ZIncrBy adds increment to the score of member in the sorted set at key.
+// The go-redis error is returned unwrapped.
 func (c *RedisClient) ZIncrBy(ctx context.Context, key string, increment float64, member string) error {
 	_, err := c.Client.ZIncrBy(ctx, c.Key(key), increment, member).Result()
 	return err
 }
 
+// ZRem removes members from the sorted set at key.
+// The go-redis error is returned unwrapped.
 func (c *RedisClient) ZRem(ctx context.Context, key string, members ...any) error {
 	_, err := c.Client.ZRem(ctx, c.Key(key), members...).Result()
 	return err
 }
 
+// ZRevRangeWithScores returns the elements of the sorted set at key between
+// the start and stop ranks ordered by score from high to low, with scores.
+// Use (0, N-1) for the top N and (-N, -1) for the bottom N.
 func (c *RedisClient) ZRevRangeWithScores(ctx context.Context, key string, start, stop int64) ([]redis.Z, error) {
 	// ZRevRangeWithScores returns the specified range of elements in the sorted set stored at key,
 	// by index, with scores ordered from high to low.
@@ -610,6 +694,7 @@ func (c *RedisClient) ZRevRangeWithScores(ctx context.Context, key string, start
 	return val, nil
 }
 
+// ZCard returns the number of members of the sorted set at key.
 func (c *RedisClient) ZCard(ctx context.Context, key string) (int64, error) {
 	val, err := c.Client.ZCard(ctx, c.Key(key)).Result()
 	if err != nil {
@@ -618,6 +703,10 @@ func (c *RedisClient) ZCard(ctx context.Context, key string) (int64, error) {
 	return val, nil
 }
 
+// ZRemRangeByRank removes the elements of the sorted set at key between the
+// start and stop ranks (0-based, ascending by score) and returns the count
+// removed. Use (0, -N-1) to keep only the top N. The go-redis error is
+// returned unwrapped.
 func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {
 	val, err := c.Client.ZRemRangeByRank(ctx, c.Key(key), start, stop).Result()
 	return val, err
@@ -625,8 +714,10 @@ func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, st
 
 // Distributed Lock implementations
 
-// TryLock attempts to acquire a distributed lock using Redis SET with NX and EX options
-// This implements a simple but effective distributed lock pattern
+// TryLock attempts to acquire the lock "lock:<key>" with SET NX EX, expiring
+// after timeout. It returns (true, 0, nil) when acquired, otherwise
+// (false, remaining TTL, nil). The lock is not owner-bound: any caller can
+// release it with ReleaseLock.
 func (c *RedisClient) TryLock(ctx context.Context, key string, timeout time.Duration) (bool, time.Duration, error) {
 	lockKey := "lock:" + key
 	lockValue := time.Now().UnixNano() // Use timestamp as lock value for uniqueness
@@ -684,8 +775,12 @@ func (c *RedisClient) IsLocked(ctx context.Context, key string) (bool, error) {
 
 // Rate Limiter implementations
 
-// TryAcquireRateLimit implements a sliding window rate limiter using Redis sorted sets
-// This allows only one execution per window duration
+// TryAcquireRateLimit implements a sliding-window limiter that allows one
+// execution per window for key, using the sorted set "ratelimit:<key>" and
+// the "ratelimit_window:<key>" value. Every call, allowed or not, records
+// its timestamp, so continuous denied attempts keep the window busy.
+// It returns (true, 0, nil) when allowed, otherwise (false, time until the
+// window resets, nil). The commands are pipelined but not transactional.
 func (c *RedisClient) TryAcquireRateLimit(ctx context.Context, key string, window time.Duration) (bool, time.Duration, error) {
 	rateLimitKey := "ratelimit:" + key
 	windowKey := "ratelimit_window:" + key

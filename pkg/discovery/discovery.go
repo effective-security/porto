@@ -10,16 +10,28 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "discovery")
 
+// serviceInfo is a registry entry.
 type serviceInfo struct {
 	ServerName string
 	Service    any
 	Type       reflect.Type
 }
 
-// Discovery provides service discovery interface
+// Discovery is an in-process registry of service implementations,
+// resolved by the interface a caller needs. Not safe for concurrent
+// modification; register everything before concurrent lookups.
 type Discovery interface {
+	// Register adds service under server; the key is "<server>/<concrete type>".
+	// It returns an error if the same server/type pair is already registered.
 	Register(server string, service any) error
+	// Find sets *v (v must be a non-nil pointer to an interface) to a
+	// registered service that implements that interface. server "" matches
+	// any server. It returns an error if v is not a pointer to interface or
+	// nothing matches.
 	Find(server string, v any) error
+	// ForEach sets *v to each registered service implementing the interface
+	// in turn and calls f with the registry key; the first error from f
+	// aborts iteration.
 	ForEach(v any, f func(typ string) error) error
 }
 
@@ -27,14 +39,14 @@ type disco struct {
 	reg map[string]serviceInfo
 }
 
-// New return new Discovery
+// New returns an empty registry.
 func New() Discovery {
 	return &disco{
 		reg: make(map[string]serviceInfo),
 	}
 }
 
-// Register interface
+// Register adds service under server keyed by its concrete type.
 func (d *disco) Register(server string, service any) error {
 	typ := reflect.TypeOf(service)
 
@@ -54,7 +66,7 @@ func (d *disco) Register(server string, service any) error {
 	return nil
 }
 
-// Find interface
+// Find assigns the first registered service implementing *v's interface.
 func (d *disco) Find(server string, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -79,7 +91,7 @@ func (d *disco) Find(server string, v any) error {
 	return errors.Errorf("not implemented: %s", rv.String())
 }
 
-// ForEach interface
+// ForEach calls f for every registered service implementing *v's interface.
 func (d *disco) ForEach(v any, f func(typ string) error) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {

@@ -20,14 +20,22 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// can be initialized only once per process.
-// keep global for tests
+// Sinks can be initialized only once per process; kept global for tests.
 var (
 	promSink metrics.Sink
 	cwSink   *cloudwatch.Sink
 )
 
-// Metrics initializer
+// Metrics initializes the global metrics pipeline from cfg. Provider is a
+// comma-separated list of "prometheus", "cloudwatch" and "inmem"; an empty
+// provider or Disabled=true is a no-op returning (nil, nil). Prometheus
+// registers with the default registry and, when Prometheus.Addr is set,
+// serves promhttp on that address in a goroutine (fatal on listen error).
+// CloudWatch starts a publishing goroutine; the returned closer flushes it.
+// GlobalTags accepts "service", "cluster_id" and "node" (from $NODE_NAME).
+// describe lists the caller's metric descriptors, merged with metricskey.Metrics
+// for Prometheus help text. It returns an error if a sink is already
+// initialized or a provider is unknown.
 func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (io.Closer, error) {
 	if cfg.Provider == "" || cfg.GetDisabled() {
 		logger.KV(xlog.INFO,
@@ -78,6 +86,9 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 			if promSink != nil {
 				return nil, errors.New("prometheus sink already initialized")
 			}
+			if cfg.Prometheus == nil {
+				return nil, errors.New("metrics: provider prometheus requires the prometheus config section")
+			}
 			// Remove Go collector
 			prom.Unregister(collectors.NewGoCollector())
 			prom.Unregister(collectors.NewBuildInfoCollector())
@@ -91,11 +102,11 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 
 			promSink, err = prometheus.NewSinkFrom(ops)
 			if err != nil {
-				return nil, nil
+				return nil, errors.WithMessage(err, "failed to create prometheus sink")
 			}
 			sinks = append(sinks, promSink)
 
-			if cfg.Prometheus != nil && cfg.Prometheus.Addr != "" {
+			if cfg.Prometheus.Addr != "" {
 				go func() {
 					logger.KV(xlog.INFO,
 						"status", "starting_prometheus",
@@ -109,6 +120,9 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 		case "cloudwatch":
 			if cwSink != nil {
 				return nil, errors.New("cloudwatch sink already initialized")
+			}
+			if cfg.CloudWatch == nil {
+				return nil, errors.New("metrics: provider cloudwatch requires the cloudwatch config section")
 			}
 			c := cloudwatch.Config{
 				AwsRegion:       cfg.CloudWatch.AwsRegion,
@@ -171,10 +185,12 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	return closer, nil
 }
 
+// contextCloser flushes the CloudWatch sink on Close.
 type contextCloser struct {
 	ctx context.Context
 }
 
+// Close flushes the CloudWatch sink; it does not stop its Run goroutine.
 func (c *contextCloser) Close() error {
 	if cwSink != nil {
 		err := cwSink.Flush(context.Background())

@@ -6,10 +6,11 @@ import (
 	"math"
 	"strings"
 
+	"cmp"
+
 	"github.com/cockroachdb/errors"
 	tcredentials "github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/xhttp/httperror"
-	"github.com/effective-security/x/values"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"google.golang.org/grpc"
@@ -29,7 +30,6 @@ var (
 
 	// client-side request send limit, gRPC default is math.MaxInt32
 	// Make sure that "client-side send limit < server-side default send/recv limit"
-	// Same value as "embed.DefaultMaxRequestBytes" plus gRPC overhead bytes
 	defaultMaxCallSendMsgSize = 10 * 1024 * 1024
 
 	// client-side response receive limit, gRPC default is 4MB
@@ -39,7 +39,9 @@ var (
 	defaultMaxCallRecvMsgSize = math.MaxInt32
 )
 
-// Client provides and manages v1 client session.
+// Client owns a gRPC connection created from a Config, together with the
+// default call options to use on it. Obtain one with New or NewFromURL and
+// release it with Close.
 type Client struct {
 	cfg      Config
 	conn     *grpc.ClientConn
@@ -51,19 +53,22 @@ type Client struct {
 	//lock sync.RWMutex
 }
 
-// NewFromURL creates a new client from a URL.
+// NewFromURL creates a client for the endpoint with default settings:
+// no TLS, no authentication, lazy (non-blocking) connect.
 func NewFromURL(url string) (*Client, error) {
 	return New(&Config{
 		Endpoint: url,
 	})
 }
 
-// New creates a new client from a given configuration.
+// New creates a client from cfg (see Config for the fields). It returns an
+// error when Endpoint is empty, the DPoP key cannot be loaded, the AuthToken
+// has expired, or (when DialTimeout > 0) the connection is not ready in time.
 func New(cfg *Config) (*Client, error) {
 	return newClient(cfg)
 }
 
-// Close shuts down the client's connections.
+// Close cancels the client context and closes the gRPC connection.
 func (c *Client) Close() error {
 	c.cancel()
 	if c.conn != nil {
@@ -72,12 +77,14 @@ func (c *Client) Close() error {
 	return c.ctx.Err()
 }
 
-// Conn returns the current in-use connection
+// Conn returns the gRPC connection, to be passed to generated service
+// client constructors.
 func (c *Client) Conn() *grpc.ClientConn {
 	return c.conn
 }
 
-// Opts returns the current Call options
+// Opts returns the call options to pass on each RPC: WaitForReady(true) and
+// the send/receive message size limits, or Config.CallOptions when set.
 func (c *Client) Opts() []grpc.CallOption {
 	return c.callOpts
 }
@@ -98,8 +105,8 @@ func newClient(cfg *Config) (*Client, error) {
 	// Defaults will be overridden by the settings in "client.Config".
 	defaultCallOpts := []grpc.CallOption{
 		defaultWaitForReady,
-		grpc.MaxCallSendMsgSize(values.NumbersCoalesce(cfg.MaxSendMsgSize, defaultMaxCallSendMsgSize)),
-		grpc.MaxCallRecvMsgSize(values.NumbersCoalesce(cfg.MaxRecvMsgSize, defaultMaxCallRecvMsgSize)),
+		grpc.MaxCallSendMsgSize(cmp.Or(cfg.MaxSendMsgSize, defaultMaxCallSendMsgSize)),
+		grpc.MaxCallRecvMsgSize(cmp.Or(cfg.MaxRecvMsgSize, defaultMaxCallRecvMsgSize)),
 	}
 
 	ctx, cancel := context.WithCancel(baseCtx)
@@ -143,7 +150,7 @@ func newClient(cfg *Config) (*Client, error) {
 			}
 			// grpc: the credentials require transport level security
 			token := at.AccessToken
-			typ := values.StringsCoalesce(at.TokenType, "Bearer")
+			typ := cmp.Or(at.TokenType, "Bearer")
 			if at.DpopJkt != "" {
 				k, _, err := cfg.Storage().LoadKey(at.DpopJkt)
 				if err != nil {

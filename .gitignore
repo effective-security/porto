@@ -6,6 +6,8 @@ bin/
 .tmp/
 .docker/
 .DS_Store
+.codebase-memory
+CLAUDE.md
 
 debug
 debug.test

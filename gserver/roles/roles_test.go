@@ -747,3 +747,39 @@ func (m mockJWT) ParseToken(ctx context.Context, authorization string, cfg *jwt.
 	}
 	return m.claims, err
 }
+
+func TestValidateSTSPresignedURL(t *testing.T) {
+	tcases := []struct {
+		name string
+		url  string
+		ok   bool
+	}{
+		{"global", "https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Date=20240101T000000Z&X-Amz-Expires=60", true},
+		{"regional", "https://sts.us-east-1.amazonaws.com/?Action=GetCallerIdentity", true},
+		{"fips", "https://sts-fips.us-gov-west-1.amazonaws.com/?Action=GetCallerIdentity", true},
+		{"china", "https://sts.cn-north-1.amazonaws.com.cn/?Action=GetCallerIdentity", true},
+		{"vpce", "https://vpce-0abc.sts.us-east-1.vpce.amazonaws.com/?Action=GetCallerIdentity", true},
+		{"upper case host", "https://STS.US-EAST-1.AMAZONAWS.COM/?Action=GetCallerIdentity", true},
+		{"http", "http://sts.amazonaws.com/?Action=GetCallerIdentity", false},
+		{"attacker host", "https://sts.amazonaws.com.evil.example/?Action=GetCallerIdentity", false},
+		{"s3 bucket", "https://sts.s3.amazonaws.com/?Action=GetCallerIdentity", false},
+		{"metadata", "https://169.254.169.254/latest/meta-data/?Action=GetCallerIdentity", false},
+		{"user info", "https://sts.amazonaws.com@evil.example/?Action=GetCallerIdentity", false},
+		{"wrong action", "https://sts.amazonaws.com/?Action=AssumeRole", false},
+		{"no action", "https://sts.amazonaws.com/", false},
+		{"garbage", "://bad", false},
+		{"regional s3 bucket", "https://sts.s3.us-west-2.amazonaws.com/?Action=GetCallerIdentity", false},
+		{"bare amazonaws", "https://amazonaws.com/?Action=GetCallerIdentity", false},
+		{"empty label", "https://sts..amazonaws.com/?Action=GetCallerIdentity", false},
+	}
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := roles.ValidateSTSPresignedURL(tc.url)
+			if tc.ok {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}

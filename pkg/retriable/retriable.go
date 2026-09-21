@@ -30,22 +30,23 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "retriable")
 
+// Reason strings returned by Policy.ShouldRetry when it stops retrying.
 const (
-	// Success returned when request succeeded
+	// Success is returned when the request succeeded (status < 400).
 	Success = "success"
-	// NotFound returned when request returned 404
+	// NotFound is returned when the request returned 404.
 	NotFound = "not-found"
-	// LimitExceeded returned when retry limit exceeded
+	// LimitExceeded is returned when TotalRetryLimit was reached, or on 429.
 	LimitExceeded = "limit-exceeded"
-	// DeadlineExceeded returned when request was timed out
+	// DeadlineExceeded is returned when the request context deadline passed.
 	DeadlineExceeded = "deadline"
-	// Cancelled returned when request was cancelled
+	// Cancelled is returned when the request context was cancelled.
 	Cancelled = "cancelled"
-	// NonRetriableError returned when non-retriable error occured
+	// NonRetriableError is returned for errors and statuses that are never retried.
 	NonRetriableError = "non-retriable"
 )
 
-// contextValueName is cusmom type to be used as a key in context values map
+// contextValueName is a custom type to be used as a key in context values map
 type contextValueName string
 
 const (
@@ -53,52 +54,51 @@ const (
 	contextValueForHTTPHeader = contextValueName("HTTP-Header")
 )
 
-// GenericHTTP defines a number of generalized HTTP request handling wrappers
+// GenericHTTP defines request helpers that take an explicit host,
+// for callers that need to address a server other than the configured one.
 type GenericHTTP interface {
-	// Request sends request to the specified hosts.
-	// The supplied hosts are tried in order until one succeeds.
-	// It will decode the response payload into the supplied body parameter.
+	// Request sends a request to the specified host and decodes the response
+	// into responseBody.
 	// It returns the HTTP headers, status code, and an optional error.
-	// For responses with status codes >= 300 it will try and convert the response
-	// into a Go error.
-	// If configured, this call will apply retry logic.
+	// For responses with status codes >= 300 (except 204) it converts the
+	// response into a Go error, preferably an *httperror.Error.
+	// The client's retry Policy and RequestTimeout are applied.
 	//
 	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	// requestBody can be io.Reader, []byte, or an object to be JSON encoded
+	// requestBody can be io.Reader, []byte, string, or an object to be JSON encoded
 	// responseBody can be io.Writer, or a struct to decode JSON into.
 	Request(ctx context.Context, method string, host string, path string, requestBody any, responseBody any) (http.Header, int, error)
 
-	// RequestURL is similar to Request but uses raw URL to one host
+	// RequestURL is similar to Request but takes a raw URL, from which the
+	// host (scheme://host[:port]) and the path are derived.
 	RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error)
 
-	// HeadTo makes HEAD request against the specified hosts.
-	// The supplied hosts are tried in order until one succeeds.
+	// HeadTo makes a HEAD request against the specified host and returns the
+	// response headers and status without decoding a body.
 	//
 	// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 	// path should be an absolute URI path, i.e. /foo/bar/baz
 	HeadTo(ctx context.Context, host string, path string) (http.Header, int, error)
 }
 
-// HeadRequester defines HTTP Head interface
+// HeadRequester defines the HTTP HEAD helper against the configured host.
 type HeadRequester interface {
-	// Head makes HEAD request.
+	// Head makes a HEAD request to the configured host.
 	// path should be an absolute URI path, i.e. /foo/bar/baz
-	// The client must be configured with the hosts list.
 	Head(ctx context.Context, path string) (http.Header, int, error)
 }
 
-// GetRequester defines HTTP Get interface
+// GetRequester defines the HTTP GET helper against the configured host.
 type GetRequester interface {
-	// Get makes a GET request,
-	// path should be an absolute URI path, i.e. /foo/bar/baz
-	// the resulting HTTP body will be decoded into the supplied body parameter, and the
-	// http status code returned.
-	// The client must be configured with the hosts list.
+	// Get makes a GET request to the configured host;
+	// path should be an absolute URI path, i.e. /foo/bar/baz.
+	// The response body is decoded into body (io.Writer or JSON target) and
+	// the HTTP headers and status code are returned.
 	Get(ctx context.Context, path string, body any) (http.Header, int, error)
 }
 
-// PostRequester defines HTTP Post interface
+// PostRequester defines the HTTP POST helper against the configured host.
 type PostRequester interface {
 	// Post makes an HTTP POST to the supplied path, serializing requestBody to json and sending
 	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
@@ -109,7 +109,7 @@ type PostRequester interface {
 	Post(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error)
 }
 
-// PutRequester defines HTTP Put interface
+// PutRequester defines the HTTP PUT helper against the configured host.
 type PutRequester interface {
 	// Put makes an HTTP PUT to the supplied path, serializing requestBody to json and sending
 	// that as the HTTP body. the HTTP response will be decoded into reponseBody, and the status
@@ -120,16 +120,18 @@ type PutRequester interface {
 	Put(ctx context.Context, path string, requestBody any, responseBody any) (http.Header, int, error)
 }
 
-// DeleteRequester defines HTTP Delete interface
+// DeleteRequester defines the HTTP DELETE helper against the configured host.
 type DeleteRequester interface {
-	// Delete makes a DELETE request,
-	// path should be an absolute URI path, i.e. /foo/bar/baz
-	// the resulting HTTP body will be decoded into the supplied body parameter, and the
-	// http status code returned.
+	// Delete makes a DELETE request to the configured host;
+	// path should be an absolute URI path, i.e. /foo/bar/baz.
+	// The response body is decoded into body (io.Writer or JSON target) and
+	// the HTTP headers and status code are returned.
 	Delete(ctx context.Context, path string, body any) (http.Header, int, error)
 }
 
-// HTTPClient defines a number of generalized HTTP request handling wrappers
+// HTTPClient is the union of the per-method helpers (Head, Get, Post, Put,
+// Delete) that operate against the client's configured host.
+// *Client implements it.
 type HTTPClient interface {
 	HeadRequester
 	GetRequester
@@ -138,15 +140,20 @@ type HTTPClient interface {
 	DeleteRequester
 }
 
-// NonceRequester defines HTTP Nonce interface
+// NonceRequester is implemented by clients that can attach a replay-nonce
+// provider; see NonceProvider.
 type NonceRequester interface {
+	// SetNonceProvider replaces the nonce provider used by the client.
 	SetNonceProvider(provider NonceProvider)
+	// GetNonceProvider returns the current nonce provider, or nil.
 	GetNonceProvider() NonceProvider
-	// WithNonce creates nonce provider out of the given header name and path
+	// WithNonce installs the default provider that fetches nonces with a HEAD
+	// request to path and reads them from the headerName response header.
 	WithNonce(path, headerName string)
 }
 
-// HTTPClientWithNonce defines a HTTPClient with NonceRequester
+// HTTPClientWithNonce is the full client surface: explicit-host requests,
+// configured-host helpers and nonce management. *Client implements it.
 type HTTPClientWithNonce interface {
 	GenericHTTP
 	HTTPClient
@@ -155,32 +162,44 @@ type HTTPClientWithNonce interface {
 
 // ShouldRetry specifies a policy for handling retries. It is called
 // following each request with the response, error values returned by
-// the http.Client and the number of already made retries.
-// If ShouldRetry returns false, the Client stops retrying
-// and returns the response to the caller. The
-// Client will close any response body when retrying, but if the retriable is
-// aborted it is up to the caller to properly close any response body before returning.
+// the http.Client and the number of already made retries (0 on the first
+// call). It returns whether to retry, how long to sleep before the next
+// attempt, and a short reason string used for logging (see the Success,
+// LimitExceeded, ... constants). If ShouldRetry returns false, the Client
+// stops retrying and returns the response to the caller. The Client drains
+// the response body when retrying, but when it stops it is up to the caller
+// of Do to close the returned response body.
 type ShouldRetry func(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string)
 
-// BeforeSendRequest allows to modify request before it's sent
+// BeforeSendRequest is a hook invoked once per request (before retries)
+// that may modify or replace the outgoing request.
 type BeforeSendRequest func(r *http.Request) *http.Request
 
-// Policy represents the retriable policy
+// Policy represents the retry policy of a Client.
+// Use DefaultPolicy as a starting point.
 type Policy struct {
 
 	// Retries specifies a map of HTTP Status code to ShouldRetry function,
 	// 0 status code indicates a connection related error (network, TLS, DNS etc.)
 	Retries map[int]ShouldRetry
 
-	// Maximum number of retries.
+	// TotalRetryLimit is the maximum number of retries across all status codes;
+	// once reached ShouldRetry returns LimitExceeded regardless of Retries.
 	TotalRetryLimit int
 
+	// RequestTimeout, when > 0, bounds each call made through Request and the
+	// Get/Post/Put/Delete/Head helpers by deriving a context with this timeout.
+	// It is not applied by Do.
 	RequestTimeout time.Duration
 
+	// NonRetriableErrors is a list of substrings; a transport error whose
+	// message contains one of them is never retried.
+	// See DefaultNonRetriableErrors.
 	NonRetriableErrors []string
 }
 
 // A ClientOption modifies the default behavior of Client.
+// Options are applied by New after the ClientConfig has been processed.
 type ClientOption interface {
 	applyOption(*Client)
 }
@@ -277,35 +296,42 @@ func WithHost(host string) ClientOption {
 	})
 }
 
-// WithBeforeSendRequest allows to specify a hook
-// to modify request before it's sent
+// WithBeforeSendRequest is a ClientOption that installs a hook
+// to modify the request before it's sent.
 func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.beforeSend = hook
 	})
 }
 
-// WithUserAgent adds User-Agent, X-CLIENT-HOSTNAME, X-CLIENT-IP headers.
+// WithUserAgent is a ClientOption that adds the User-Agent, X-CLIENT-HOSTNAME
+// and X-CLIENT-IP headers to every request; see Client.WithUserAgent.
 func WithUserAgent(name string) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithUserAgent(name)
 	})
 }
 
-// WithCallerIdentity allows to specify token provider
-// to modify request before it's sent
+// WithCallerIdentity is a ClientOption that installs a token provider used
+// to obtain (and refresh on expiry) the Authorization header for each request.
 func WithCallerIdentity(ci credentials.CallerIdentity) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithCallerIdentity(ci)
 	})
 }
 
-// Client is custom implementation of http.Client
+// Client is an HTTP client with retries, JSON marshalling, header
+// propagation and token-based authorization on top of *http.Client.
+// Create it with New, Default, LoadClient or a Factory.
 type Client struct {
-	Name          string
-	Policy        Policy // Rery policy for http requests
+	// Name identifies the client in logs.
+	Name string
+	// Policy is the retry policy for HTTP requests; defaults to DefaultPolicy.
+	Policy        Policy
 	nonceProvider NonceProvider
 
+	// Config is the configuration the client was created from; its Storage
+	// is used by SetAuthorization to load tokens and DPoP keys.
 	Config ClientConfig
 
 	lock       sync.RWMutex
@@ -319,12 +345,16 @@ type Client struct {
 	callerIdentity credentials.CallerIdentity
 }
 
-// Default creates a default Client for the given host
+// Default creates a Client for the given host with DefaultPolicy,
+// no TLS configuration and no token storage.
 func Default(host string) (*Client, error) {
 	return New(ClientConfig{Host: host})
 }
 
-// New creates a new Client
+// New creates a Client from cfg and applies opts on top of it.
+// cfg.TLS (if set) is loaded from files and cfg.Request (if set) overrides
+// the RequestTimeout and TotalRetryLimit of DefaultPolicy.
+// It returns an error only when the TLS files cannot be loaded.
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	dopts := []ClientOption{
 		WithHost(cfg.Host),
@@ -366,24 +396,26 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	return c, nil
 }
 
-// HTTPClient returns undelying http.Client
+// HTTPClient returns the underlying *http.Client, for callers that need
+// to tweak the transport directly.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }
 
-// Storage returns the current storage
+// Storage returns the token/key storage of the client's Config,
+// creating it from Config.StorageFolder on first use.
 func (c *Client) Storage() *Storage {
 	return c.Config.Storage()
 }
 
-// CurrentHost returns the current host
+// CurrentHost returns the configured host (scheme://host[:port]).
 func (c *Client) CurrentHost() string {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.host
 }
 
-// WithHeaders adds additional headers to the request
+// WithHeaders adds headers that are sent with every request.
 func (c *Client) WithHeaders(headers map[string]string) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -398,7 +430,8 @@ func (c *Client) WithHeaders(headers map[string]string) *Client {
 	return c
 }
 
-// AddHeader adds additional header to the request
+// AddHeader adds a header that is sent with every request,
+// replacing any previous value for the same name.
 func (c *Client) AddHeader(header, value string) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -427,7 +460,8 @@ func (c *Client) WithPolicy(policy Policy) *Client {
 	return c
 }
 
-// WithHost sets the host
+// WithHost sets the host (scheme://host[:port]) used by the
+// Head/Get/Post/Put/Delete helpers.
 func (c *Client) WithHost(host string) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -435,8 +469,8 @@ func (c *Client) WithHost(host string) *Client {
 	return c
 }
 
-// WithBeforeSendRequest allows to specify a hook
-// to modify request before it's sent
+// WithBeforeSendRequest installs a hook that is invoked once per request
+// (before retries) to modify or replace the outgoing request.
 func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -444,8 +478,9 @@ func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
 	return c
 }
 
-// WithCallerIdentity allows to specify token provider
-// to modify request before it's sent
+// WithCallerIdentity installs a token provider. Before each request the
+// client calls GetCallerIdentity when it has no token or the cached token
+// has expired, and sets the Authorization header from the result.
 func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -453,7 +488,10 @@ func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
 	return c
 }
 
-// WithTLS modifies TLS configuration.
+// WithTLS sets the TLS configuration of the transport. When no transport
+// has been set yet, a clone of http.DefaultTransport with 100 max
+// (idle) connections per host is installed; otherwise the existing
+// transport is modified in place and must be an *http.Transport.
 func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -475,7 +513,8 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 	return c
 }
 
-// WithTransport modifies HTTP Transport configuration.
+// WithTransport replaces the HTTP transport. Call it before WithTLS or
+// WithDNSServer, which modify the transport in place.
 func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -483,7 +522,8 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 	return c
 }
 
-// WithTimeout modifies HTTP client timeout.
+// WithTimeout sets Policy.RequestTimeout, the per-call timeout applied by
+// Request and the Get/Post/Put/Delete/Head helpers (not by Do).
 func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -491,7 +531,9 @@ func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	return c
 }
 
-// WithUserAgent adds User-Agent, X-CLIENT-HOSTNAME, X-CLIENT-IP headers.
+// WithUserAgent adds the User-Agent, X-CLIENT-HOSTNAME and X-CLIENT-IP
+// headers to every request. It may block up to one second while waiting
+// for a network interface to resolve the local IP.
 func (c *Client) WithUserAgent(name string) *Client {
 	ipaddr, _ := netutil.WaitForNetwork(time.Second)
 	hostname, _ := os.Hostname()
@@ -501,8 +543,11 @@ func (c *Client) WithUserAgent(name string) *Client {
 	return c
 }
 
-// WithDNSServer modifies DNS server.
-// dns must be specified in <host>:<port> format
+// WithDNSServer makes the transport resolve names through the given DNS
+// server, which must be specified in <host>:<port> format.
+// When no transport has been set yet, a clone of http.DefaultTransport is
+// installed; otherwise the existing transport must be an *http.Transport
+// and its DialContext is replaced in place.
 func (c *Client) WithDNSServer(dns string) *Client {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -531,21 +576,25 @@ func (c *Client) WithDNSServer(dns string) *Client {
 	return c
 }
 
-// SetNonceProvider modifies nonce provider.
+// SetNonceProvider replaces the nonce provider. When set, Request feeds
+// every response's headers to it via SetFromHeader.
 func (c *Client) SetNonceProvider(provider NonceProvider) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	c.nonceProvider = provider
 }
 
-// GetNonceProvider returns nonce provider.
+// GetNonceProvider returns the current nonce provider, or nil.
 func (c *Client) GetNonceProvider() NonceProvider {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.nonceProvider
 }
 
-// WithNonce creates default nonce provider.
+// WithNonce installs the default nonce provider (see NewNonceProvider)
+// that fetches nonces with HEAD requests to path on the configured host
+// and reads them from the headerName response header.
+// A leading CurrentHost() prefix in path is stripped.
 func (c *Client) WithNonce(path, headerName string) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -555,7 +604,12 @@ func (c *Client) WithNonce(path, headerName string) {
 	c.nonceProvider = NewNonceProvider(c, path, headerName)
 }
 
-// DefaultPolicy returns default policy
+// DefaultPolicy returns the policy used by New: connection errors are
+// retried up to 3 times with a 2s wait, 502 and 503 up to 5 times with a 1s
+// wait, TotalRetryLimit is 5, no RequestTimeout, and
+// DefaultNonRetriableErrors are never retried.
+// Note that 429 is registered but never reached, because ShouldRetry
+// returns LimitExceeded for 429 before consulting Retries.
 func DefaultPolicy() Policy {
 	return Policy{
 		Retries: map[int]ShouldRetry{
@@ -574,7 +628,8 @@ func DefaultPolicy() Policy {
 	}
 }
 
-// RequestURL is similar to Request but uses raw URL to one host
+// RequestURL is similar to Request but takes a raw URL; the host
+// (scheme://host[:port]) and the remaining path are derived from it.
 func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -585,17 +640,17 @@ func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestB
 	return c.Request(ctx, method, host, path, requestBody, responseBody)
 }
 
-// Request sends request to the specified hosts.
-// The supplied hosts are tried in order until one succeeds.
-// It will decode the response payload into the supplied body parameter.
+// Request sends a request to the specified host and decodes the response
+// into responseBody (see DecodeResponse).
 // It returns the HTTP headers, status code, and an optional error.
-// For responses with status codes >= 300 it will try and convert the response
-// into a Go error.
-// If configured, this call will apply retry logic.
+// For responses with status codes >= 300 (except 204) it converts the
+// response into a Go error, preferably an *httperror.Error.
+// The retry Policy and RequestTimeout are applied, a correlation ID is
+// attached, and the nonce provider (if any) is fed the response headers.
 //
-// hosts should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
+// host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444
 // path should be an absolute URI path, i.e. /foo/bar/baz
-// requestBody can be io.Reader, []byte, or an object to be JSON encoded
+// requestBody can be io.Reader, []byte, string, or an object to be JSON encoded
 // responseBody can be io.Writer, or a struct to decode JSON into.
 func (c *Client) Request(ctx context.Context, method string, host string, path string, requestBody any, responseBody any) (http.Header, int, error) {
 	var body io.ReadSeeker
@@ -780,7 +835,15 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 	return r, nil
 }
 
-// Do wraps calling an HTTP method with retries.
+// Do sends r with retries according to Policy and returns the final
+// response, which the caller must close. It implements Requestor.
+// Before sending, the client headers, context-propagated headers
+// (see WithHeaders / PropagateHeadersFromRequest), the X-Correlation-ID,
+// the BeforeSendRequest hook, the caller-identity token and the DPoP proof
+// are applied; the body is buffered so it can be rewound for each retry.
+// Do does not apply Policy.RequestTimeout: bound r's context yourself.
+// When retries are exhausted the last response (or transport error) is
+// returned; a non-2xx status is not converted to an error here.
 func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	var err error
@@ -875,9 +938,13 @@ func debugResponse(w *http.Response, body bool) {
 	}
 }
 
-// DecodeResponse will look at the http response, and map it back to either
-// the body parameters, or to an error
-// [retrying rate limit errors should be done before this]
+// DecodeResponse maps an HTTP response to either the body parameter or an
+// error, and returns the response headers and status code in both cases.
+// 204 returns immediately; a status >= 300 is decoded as an *httperror.Error
+// when the body is a JSON error document with a "code", otherwise the raw
+// body text becomes the error message. For other statuses the body is
+// copied into body when it is an io.Writer, or JSON-decoded into it
+// (numbers are decoded as json.Number). It does not close resp.Body.
 func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int, error) {
 	debugResponse(resp, resp.StatusCode >= 300)
 	if resp.StatusCode == http.StatusNoContent {
@@ -912,15 +979,16 @@ func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int
 	return resp.Header, resp.StatusCode, nil
 }
 
-// DefaultShouldRetryFactory returns default ShouldRetry
+// DefaultShouldRetryFactory returns a ShouldRetry that retries with a fixed
+// wait while the retry count is <= limit, reporting reason.
 func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry {
 	return func(_ *http.Request, _ *http.Response, _ error, retries int) (bool, time.Duration, string) {
 		return (limit >= retries), wait, reason
 	}
 }
 
-// DefaultNonRetriableErrors provides a list of default errors,
-// that cleint will not retry on
+// DefaultNonRetriableErrors lists substrings of transport error messages
+// (DNS, TLS and certificate failures) that the default policy never retries.
 var DefaultNonRetriableErrors = []string{
 	"no such host",
 	"TLS handshake error",
@@ -934,7 +1002,12 @@ var DefaultNonRetriableErrors = []string{
 	"peer reset",
 }
 
-// ShouldRetry returns if connection should be retried
+// ShouldRetry decides whether the attempt should be retried and how long to
+// wait first. Order of evaluation: a cancelled or expired request context
+// is never retried; TotalRetryLimit is enforced; transport errors matching
+// NonRetriableErrors are not retried, others are delegated to Retries[0];
+// statuses < 400 succeed; 404 and 429 are not retried; other 4xx are
+// non-retriable; 5xx are delegated to Retries[status] if present.
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
 	ctx := r.Context()
 	if err != nil {
@@ -1020,8 +1093,10 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 	return false, 0, NonRetriableError
 }
 
-// PropagateHeadersFromRequest will set specified headers in the context,
-// if present in the request
+// PropagateHeadersFromRequest returns a context carrying the named headers
+// that are present in the incoming request r, so that a Client used with
+// that context forwards them on its outgoing requests (see WithHeaders).
+// A nil ctx is treated as context.Background().
 func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers ...string) context.Context {
 	values := map[string]string{}
 	for _, header := range headers {
@@ -1042,7 +1117,11 @@ func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers .
 	return ctx
 }
 
-// WithHeaders returns a copy of parent with the provided headers set
+// WithHeaders returns a copy of ctx carrying headers that a Client sets on
+// every outgoing request made with that context (overriding client-level
+// headers of the same name). It replaces, not merges, headers stored by an
+// earlier WithHeaders or PropagateHeadersFromRequest call.
+// A nil ctx is treated as context.Background().
 func WithHeaders(ctx context.Context, headers map[string]string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

@@ -22,26 +22,28 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "xhttp")
 
-// WriteHTTPResponse is for types to implement this interface to get full control
-// over how they are written out as a http response
+// WriteHTTPResponse is implemented by types that take full control over how
+// they are written as an HTTP response (httperror.Error and ManyError do).
 type WriteHTTPResponse interface {
+	// WriteHTTPResponse writes the value, including status and headers, to w.
 	WriteHTTPResponse(w http.ResponseWriter, r *http.Request)
 }
 
-// WriteJSON will serialize the supplied body parameter as a http response.
-// If the body value implements the WriteHTTPResponse interface,
-// then that will be called to have it do the response generation
-// if body implements error, then that's returned as a server error
-// use the Error type to fully specify your error response
-// otherwise body is assumed to be a succesful response, and its serialized
-// and written as a json response with a 200 status code.
+// WriteJSON serialises the first non-nil body value as the HTTP response.
+// A value implementing WriteHTTPResponse writes itself (httperror values
+// set their own status); any other error is converted with
+// httperror.NewFromPb (500 unexpected unless it carries a gRPC status) and
+// written the same way; errors other than 404 are also logged with the
+// caller's file and line. Anything else is written as application/json
+// with status 200, gzip-compressed when the request's Accept-Encoding
+// contains "gzip", and pretty-printed when the URL has a "pp" query
+// parameter. Encoding failures are logged, not reported. r must not be nil.
 //
-// multiple body parameters can be supplied, in which case the first
-// non-nil one will be used. This is useful as it allows you to do
+// Passing several values lets a handler write either the error or the
+// result in one call:
 //
-//		x, err := doSomething()
-//		WriteJSON(logger,w,r,err,x)
-//	and if there was an error, that's what'll get returned
+//	x, err := doSomething()
+//	marshal.WriteJSON(w, r, err, x)
 func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
 	var body any
 	for i := range bodies {
@@ -176,7 +178,8 @@ func logError(r *http.Request, status int, code, message string, cause error) {
 	}
 }
 
-// WritePlainJSON will serialize the supplied body parameter as a http response.
+// WritePlainJSON writes body as application/json with the given status
+// code and pretty-print setting, without gzip, error handling or logging.
 func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSetting PrettyPrintSetting) {
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(statusCode)
@@ -185,7 +188,9 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSettin
 
 }
 
-// NewRequest returns http.Request
+// NewRequest builds an http.Request whose body is req: an io.Reader, []byte
+// or string is sent as is, anything else is JSON-encoded with encoding/json.
+// No Content-Type header is set.
 func NewRequest(method string, url string, req any) (*http.Request, error) {
 	var body io.Reader
 

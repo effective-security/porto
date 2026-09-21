@@ -21,6 +21,8 @@ type Error struct {
 	// HTTPStatus contains the HTTP status code that should be used for this error
 	HTTPStatus int `json:"-"`
 
+	// RPCStatus is the gRPC status code returned by GRPCStatus; derived from
+	// Code for the well-known codes, codes.OK (0) for unknown codes.
 	RPCStatus codes.Code `json:"-"`
 
 	// Code identifies the particular error condition [for programatic consumers]
@@ -38,7 +40,9 @@ type Error struct {
 	ctx context.Context `json:"-"`
 }
 
-// New returns Error instance, building the message string along the way
+// New returns an Error with the given HTTP status and code, formatting the
+// message with fmt.Sprintf. RPCStatus is looked up from code; use one of the
+// Code* constants for a meaningful gRPC mapping.
 func New(status int, code string, msgFormat string, vals ...any) *Error {
 	return &Error{
 		HTTPStatus: status,
@@ -48,7 +52,8 @@ func New(status int, code string, msgFormat string, vals ...any) *Error {
 	}
 }
 
-// NewFromCtx returns Error instance, building the message string along the way
+// NewFromCtx is New plus WithContext: the RequestID is taken from the
+// correlation ID in ctx.
 func NewFromCtx(ctx context.Context, status int, code string, msgFormat string, vals ...any) *Error {
 	e := &Error{
 		HTTPStatus: status,
@@ -64,7 +69,8 @@ func NewFromCtx(ctx context.Context, status int, code string, msgFormat string, 
 	return e
 }
 
-// WithContext adds the context
+// WithContext records ctx on the error and copies its correlation ID into
+// RequestID. It mutates and returns the receiver.
 func (e *Error) WithContext(ctx context.Context) *Error {
 	if v := correlation.Value(ctx); v != nil {
 		e.RequestID = v.ID
@@ -73,7 +79,8 @@ func (e *Error) WithContext(ctx context.Context) *Error {
 	return e
 }
 
-// WithCause adds the cause error
+// WithCause records the underlying error (returned by Cause/Unwrap and
+// logged by marshal.WriteJSON). It mutates and returns the receiver.
 func (e *Error) WithCause(err error) *Error {
 	e.cause = err
 	return e
@@ -96,12 +103,14 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
-// Cause returns original error
+// Cause returns the underlying error set with WithCause, or nil.
 func (e *Error) Cause() error {
 	return e.cause
 }
 
-// Unwrap returns unwrapped error
+// Unwrap returns the error one level below the cause when the cause itself
+// wraps an error, otherwise the cause. This lets errors.Is/As reach through
+// both Error and a cockroachdb/pkg errors wrapper.
 func (e *Error) Unwrap() error {
 	if e.cause != nil {
 		unwrapped := goerrors.Unwrap(e.cause)
@@ -113,8 +122,8 @@ func (e *Error) Unwrap() error {
 	return nil
 }
 
-// Is implements future error.Is functionality.
-// A Error is equivalent if the code and message are identical.
+// Is reports whether target is an *Error with identical Code and Message,
+// for use with errors.Is.
 func (e *Error) Is(target error) bool {
 	tse, ok := target.(*Error)
 	if !ok {
@@ -218,8 +227,12 @@ func Timeout(msgFormat string, vals ...any) *Error {
 	return New(http.StatusRequestTimeout, CodeTimeout, msgFormat, vals...)
 }
 
-// Wrap returns Error instance with NotFound, Timeout or Internal code,
-// depending on the error from DB
+// Wrap converts any error into an *Error. An *Error or *ManyError found via
+// errors.As is preserved (returned as is when msgAndArgs is empty); a gRPC
+// status error is mapped through HTTPStatusFromRPC; otherwise the error text
+// is classified with IsNotFound (404), IsInvalidRequestError (400),
+// IsTimeout (408) or Unexpected (500). msgAndArgs optionally override the
+// message: a single string, or a format string followed by arguments.
 func Wrap(err error, msgAndArgs ...any) *Error {
 	e := &Error{}
 	if goerrors.As(err, &e) {
@@ -259,7 +272,7 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 	return Unexpected("%s", msg).WithCause(err)
 }
 
-// WrapWithCtx returns wrapped Error with Context
+// WrapWithCtx is Wrap followed by WithContext(ctx).
 func WrapWithCtx(ctx context.Context, err error, msgAndArgs ...any) *Error {
 	return Wrap(err, msgAndArgs...).WithContext(ctx)
 }
@@ -281,12 +294,14 @@ func errMsg(err string, msgAndArgs ...any) string {
 	return err
 }
 
-// IsInvalidModel returns true, if error is InvalidModel
+// IsInvalidModel reports whether the error text contains "invalid model".
 func IsInvalidModel(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "invalid model")
 }
 
-// IsInvalidRequestError returns true for Invalid request error
+// IsInvalidRequestError reports whether err (or any of errStrings) looks
+// like a client error, by substring match on "invalid", "Invalid", "bad" or
+// "400".
 func IsInvalidRequestError(err error, errStrings ...string) bool {
 	if err == nil {
 		return false
@@ -301,7 +316,9 @@ func IsInvalidRequestError(err error, errStrings ...string) bool {
 
 var invalidErrors = []string{"invalid", "Invalid", "bad", "400"}
 
-// IsTimeout returns true for timeout error
+// IsTimeout reports whether err is context.DeadlineExceeded or
+// context.Canceled, or whether err (or any of errStrings) contains a
+// timeout/deadline/cancel substring.
 func IsTimeout(err error, errStrings ...string) bool {
 	if err == nil {
 		return false
@@ -322,7 +339,8 @@ func IsTimeout(err error, errStrings ...string) bool {
 
 var timeoutErrors = []string{"timeout", "deadline", "canceling", "canceled", "Timeout"}
 
-// IsNotFound returns true for NotFound error
+// IsNotFound reports whether err is an xdb not-found error, or whether err
+// (or any of errStrings) contains "not found", "Not Found" or "404".
 func IsNotFound(err error, errStrings ...string) bool {
 	if err == nil {
 		return false
@@ -342,7 +360,9 @@ func IsNotFound(err error, errStrings ...string) bool {
 
 var notFoundErrors = []string{"not found", "Not Found", "404"}
 
-// Status returns HTTP status from error
+// Status returns the HTTP status for err: 200 for nil, HTTPStatus for a
+// direct *Error or *ManyError, otherwise the gRPC status code of err mapped
+// with HTTPStatusFromRPC (500 for non-status errors).
 func Status(err error) int {
 	if err == nil {
 		return http.StatusOK
@@ -358,7 +378,10 @@ func Status(err error) int {
 	return codeStatus[code]
 }
 
-// WriteHTTPResponse implements how to serialize this error into a HTTP Response
+// WriteHTTPResponse writes the error as an application/json body with
+// HTTPStatus, pretty-printed when the URL has a "pp" query parameter. If
+// RequestID is empty it is filled from the request's correlation ID, which
+// mutates the receiver.
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)

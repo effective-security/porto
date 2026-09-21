@@ -29,6 +29,8 @@ type ManyError struct {
 	// Message is an textual description of the error
 	Message string `json:"message,omitempty"`
 
+	// Errors holds the individual errors keyed by the caller-chosen key
+	// passed to Add (for example a field or item name).
 	Errors map[string]*Error `json:"errors,omitempty"`
 
 	// Cause is the first original error
@@ -37,11 +39,14 @@ type ManyError struct {
 	lock sync.Mutex `json:"-"`
 }
 
-// GRPCStatus returns gRPC status
+// GRPCStatus returns the gRPC status derived from Code and Message, so a
+// *ManyError can be returned from gRPC handlers.
 func (m *ManyError) GRPCStatus() *status.Status {
 	return status.New(statusCode[m.Code], m.Message)
 }
 
+// Error returns "code: message" (prefixed with the request ID when set) or,
+// when Code is empty, the nested errors joined by ";".
 func (m *ManyError) Error() string {
 	if m == nil {
 		return "nil"
@@ -78,7 +83,8 @@ func (m *ManyError) WithCause(err error) *ManyError {
 	return m
 }
 
-// NewMany builds new ManyError instance, build message string along the way
+// NewMany returns a ManyError with the given HTTP status and code and an
+// empty Errors map; add nested errors with Add.
 func NewMany(status int, code string, msgFormat string, vals ...any) *ManyError {
 	return &ManyError{
 		HTTPStatus: status,
@@ -89,7 +95,10 @@ func NewMany(status int, code string, msgFormat string, vals ...any) *ManyError 
 	}
 }
 
-// Add a single error to ManyError
+// Add records err under key (replacing any previous entry) and returns the
+// receiver. Non-*Error values are wrapped as CodeUnexpected. The first error
+// added becomes the Cause. Add is safe for concurrent use and allocates a
+// new ManyError when called on a nil receiver.
 func (m *ManyError) Add(key string, err error) *ManyError {
 	if m == nil {
 		m = new(ManyError)
@@ -121,7 +130,8 @@ func (m *ManyError) HasErrors() bool {
 	return len(m.Errors) > 0
 }
 
-// WriteHTTPResponse implements how to serialize this error into a HTTP Response
+// WriteHTTPResponse writes the error and its nested Errors as an
+// application/json body with HTTPStatus; see Error.WriteHTTPResponse.
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)

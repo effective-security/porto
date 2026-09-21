@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
-	"github.com/effective-security/x/slices"
 	"github.com/effective-security/xlog"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -385,7 +385,11 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
-		s.authz.NewUnaryInterceptor(),
+	}
+	// authz is nil when the config has no allow rules; the interceptors
+	// would dereference it on every call.
+	if s.authz != nil {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, s.authz.NewUnaryInterceptor())
 	}
 	if s.cfg.PromGrpc {
 		chainUnaryInterceptors = append(chainUnaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
@@ -398,7 +402,9 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		s.newLogStreamServerInterceptor(),
 		correlation.NewStreamServerInterceptor(),
 		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext),
-		s.authz.NewStreamServerInterceptor(),
+	}
+	if s.authz != nil {
+		chainStreamInterceptors = append(chainStreamInterceptors, s.authz.NewStreamServerInterceptor())
 	}
 	if s.cfg.PromGrpc {
 		chainStreamInterceptors = append(chainStreamInterceptors, grpc_prometheus.StreamServerInterceptor)
@@ -530,7 +536,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
 				if origin != "" {
-					if len(allowedOrigins) > 0 && !slices.ContainsString(allowedOrigins, origin) {
+					if len(allowedOrigins) > 0 && !slices.Contains(allowedOrigins, origin) {
 						logger.ContextKV(r.Context(), xlog.INFO,
 							"reason", "cors_not_allowed",
 							"method", r.Method,
@@ -618,12 +624,16 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 	marshal.WriteJSON(w, r, httperror.NotFound("%s", r.URL.Path))
 }
 
+// Validator is implemented by request messages that can validate themselves;
+// NewRequestValidationUnaryInterceptor calls it before the handler.
 type Validator interface {
+	// Validate returns an error (typically a gRPC status) when the request is invalid.
 	Validate(ctx context.Context) error
 }
 
-// NewRequestValidationUnaryInterceptor returns grpc.UnaryServerInterceptor that
-// validates the request
+// NewRequestValidationUnaryInterceptor returns a unary interceptor that calls
+// Validate on requests implementing Validator and rejects the call with the
+// returned error. It is always installed by Start.
 func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		if validator, ok := req.(Validator); ok {

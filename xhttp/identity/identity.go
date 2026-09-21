@@ -4,25 +4,36 @@ import (
 	"context"
 	"net/http"
 
+	"cmp"
+
 	"github.com/effective-security/x/netutil"
-	"github.com/effective-security/x/values"
 	"github.com/effective-security/xpki/jwt"
 )
 
 // GuestRoleName is default role name for guest
 const GuestRoleName = "guest"
 
+// AuthMethod identifies how the caller was authenticated.
 type AuthMethod int
 
+// Authentication methods reported by Identity.AuthMethod.
 const (
+	// MethodNone means the caller was not authenticated (guest).
 	MethodNone AuthMethod = iota
+	// MethodCertificate means a TLS client certificate was used.
 	MethodCertificate
+	// MethodAWS means AWS request signing was used.
 	MethodAWS
+	// MethodDPoP means a DPoP-bound access token was used.
 	MethodDPoP
+	// MethodJWT means a bearer JWT was used.
 	MethodJWT
+	// MethodJWTCookie means a JWT carried in a cookie was used.
 	MethodJWTCookie
 )
 
+// String returns the method name ("Certificate", "AWS", "DPoP", "JWT",
+// "JWTCookie"), or "None" for MethodNone and unknown values.
 func (m AuthMethod) String() string {
 	switch m {
 	case MethodCertificate:
@@ -40,27 +51,42 @@ func (m AuthMethod) String() string {
 	}
 }
 
-// Identity contains information about the identity of an API caller
+// Identity contains information about the identity of an API caller.
+// Implementations are immutable values; create them with NewIdentity.
 type Identity interface {
 	// String returns the identity as a single string value
-	// in the format of role/subject
+	// in the format of {tenant/}subject{:role}
 	String() string
+	// Role returns the role used for authorization (see restserver/authz).
 	Role() string
+	// Subject returns the caller's subject: a certificate CommonName, a JWT
+	// "email" claim, or similar.
 	Subject() string
+	// Tenant returns the tenant the identity belongs to, or "".
 	Tenant() string
+	// Claims returns a copy of the application-specific claims.
 	Claims() jwt.MapClaims
+	// AccessToken returns the raw access token presented, or "".
 	AccessToken() string
+	// TokenType returns the token type (e.g. "Bearer", "DPoP"), or "".
 	TokenType() string
+	// AuthMethod returns how the caller was authenticated.
 	AuthMethod() AuthMethod
 }
 
-// ProviderFromRequest returns Identity from supplied HTTP request
+// ProviderFromRequest maps an HTTP request to the caller's Identity. It is
+// used by NewContextHandler; returning an error rejects the request with
+// 401, returning a nil Identity yields the guest identity.
 type ProviderFromRequest func(*http.Request) (Identity, error)
 
-// ProviderFromContext returns Identity from supplied context
+// ProviderFromContext maps a gRPC request context and full method name to
+// the caller's Identity. It is used by the gRPC interceptors; returning an
+// error rejects the call with codes.PermissionDenied, returning a nil
+// Identity yields the guest identity.
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 
-// NewIdentity returns a new Identity instance with the indicated role
+// NewIdentity returns an immutable Identity with the given attributes.
+// claims may be nil; when provided they are copied.
 func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string, authMethod AuthMethod) Identity {
 	id := identity{
 		role:        role,
@@ -101,7 +127,7 @@ func (c identity) Subject() string {
 	return c.subject
 }
 
-// Subject returns the tenant that identity belongs to.
+// Tenant returns the tenant that identity belongs to, or "".
 func (c identity) Tenant() string {
 	return c.tenant
 }
@@ -116,7 +142,7 @@ func (c identity) AccessToken() string {
 	return c.accessToken
 }
 
-// TokenType returns token type for IDentity
+// TokenType returns the token type for the identity
 func (c identity) TokenType() string {
 	return c.tokenType
 }
@@ -136,7 +162,7 @@ func (c identity) Claims() jwt.MapClaims {
 // String returns the identity as a single string value
 // in the format of {tenant/}subject{:role}
 func (c identity) String() string {
-	s := values.StringsCoalesce(c.subject, "unknown")
+	s := cmp.Or(c.subject, "unknown")
 	if c.tenant != "" {
 		s = c.tenant + "/" + s
 	}
@@ -147,7 +173,9 @@ func (c identity) String() string {
 	return s
 }
 
-// GuestIdentityMapper always returns "guest" for the role
+// GuestIdentityMapper is a ProviderFromRequest that always returns the
+// guest role, with the subject set to the TLS client certificate CommonName
+// when one was presented, or "unknown". It is restserver's default mapper.
 func GuestIdentityMapper(r *http.Request) (Identity, error) {
 	var name string
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
@@ -158,12 +186,14 @@ func GuestIdentityMapper(r *http.Request) (Identity, error) {
 	return NewIdentity(GuestRoleName, name, "", nil, "", "", MethodNone), nil
 }
 
-// GuestIdentityForContext always returns "guest" for the role
+// GuestIdentityForContext is a ProviderFromContext that always returns the
+// guest role with an empty subject.
 func GuestIdentityForContext(_ context.Context, _ string) (Identity, error) {
 	return NewIdentity(GuestRoleName, "", "", nil, "", "", MethodNone), nil
 }
 
-// WithTestIdentity is used in unit tests to set HTTP request identity
+// WithTestIdentity returns a copy of r whose context carries the given
+// identity (with the local IP as client IP), for use in unit tests.
 func WithTestIdentity(r *http.Request, identity Identity) *http.Request {
 	ipaddr, _ := netutil.GetLocalIP()
 	ctx := &RequestContext{

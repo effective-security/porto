@@ -1,0 +1,453 @@
+# FINDINGS
+
+Active, actionable bugs, security issues, and correctness problems.
+Completed work and deprecation decisions are omitted.
+
+Use the **ID** when commenting or assigning work. Update **Status** in the
+same change as the code or decision, and remove the item when it is complete.
+IDs are never reused, so a gap in the numbering only means the item was
+resolved and removed.
+
+## Status
+
+| Status         | Meaning                                                |
+| -------------- | ------------------------------------------------------ |
+| Open           | Not started                                            |
+| In Progress    | Being fixed                                            |
+| Needs Approval | Behavior or compatibility change that needs a decision |
+
+Type: **security** > **bug** > **race** > **correctness** > **performance** > **docs**.
+
+Severity: **CRITICAL** > **HIGH** > **MEDIUM** > **LOW**.
+
+Line numbers refer to the tree at the time of the audit (2026-09-20) and may
+drift; the symbol name is the stable reference.
+
+Fixed during the 2026-09-20 audit and therefore not listed: STS presigned URL
+host validation and bounded client in `gserver/roles` (SSRF / identity
+forgery), nil `authz` dereference in the gserver gRPC interceptor chain,
+missing gRPC status for `httperror.Timeout`, data race on
+`restserver.HTTPServer.serving`, inverted expiry test in
+`cache.memProv.CleanExpired`, nil config dereference and swallowed sink
+error in `appinit.Metrics`, `appinit.Logs` leaving the rotating log file
+empty, `tlsconfig.KeypairReloader.Close` deadlock and unlocked timestamp
+reads, unreachable "expires_soon" warning, duplicate `metricskey.GRPCReqPerf`
+descriptor, all staticcheck SA1019 deprecated calls, and the Go 1.27 gzip
+byte-exact test.
+
+## Index
+
+| ID    | Package                                 | Location                                                                 | Title                                                                                                                                        | Type        | Severity | Status         |
+| ----- | --------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------- | -------------- |
+| P-001 | (module)                                | `go.mod` `google.golang.org/grpc v1.84.0`                                | GO-2026-6443: gRPC server panic via missing authority/Host headers                                                                           | security    | HIGH     | Fixed          |
+| P-002 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web responses get `Access-Control-Allow-Origin: *` when CORS is disabled                                                                | security    | HIGH     | Needs Approval |
+| P-003 | gserver                                 | `serve.go` `serveCtx.serve`, `server.go` `Server.Close`                  | `Close` deadlocks if a listener's `serve` fails before publishing servers                                                                    | bug         | MEDIUM   | Open           |
+| P-004 | gserver                                 | `serve.go` `configureListeners`, `server.go` `Server.Close`              | TLS keypair reloader goroutine leaked on `Close`                                                                                             | bug         | MEDIUM   | Open           |
+| P-005 | gserver                                 | `serve.go` `serveCtx.serve`                                              | cmux and `http.Server` have no read/header/idle timeouts (slowloris)                                                                         | security    | MEDIUM   | Open           |
+| P-006 | gserver                                 | `serve.go` `configureRateLimiter`                                        | `rate_limit.enabled` without `requests_per_second` blocks nearly all traffic                                                                 | correctness | MEDIUM   | Needs Approval |
+| P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Needs Approval |
+| P-008 | gserver                                 | `grpc_web_response.go` `newGrpcWebResponse`                              | `gzip.Writer` allocated per gRPC-Web request, no pooling                                                                                     | performance | MEDIUM   | Open           |
+| P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
+| P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
+| P-011 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web request from a disallowed origin returns 200 with an empty body                                                                     | correctness | LOW      | Needs Approval |
+| P-012 | gserver                                 | `grpc_web_response.go` `grpcWebResponse.prepareHeaders`                  | Configured `CORS.ExposedHeaders` overwritten for gRPC-Web responses                                                                          | correctness | LOW      | Open           |
+| P-013 | gserver/roles                           | `roles.go` `IdentityFromContext`                                         | Cookie auth over gRPC skips the CSRF check; HTTP cookie auth silently requires `cookies.csrf`                                                | security    | LOW      | Needs Approval |
+| P-014 | gserver/credentials                     | `credentials.go` `perRPCCredential.GetRequestMetadata`                   | Unsynchronized reads of `callerIdentity`/`dpopSigner`; thundering-herd token refresh                                                         | race        | LOW      | Open           |
+| P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
+| P-016 | restserver/ready                        | `ready.go` `errUnavailable`; `xhttp/httperror` `Error.WriteHTTPResponse` | Package-level error mutated per request (stale `request_id`, data race)                                                                      | race        | MEDIUM   | Open           |
+| P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Open           |
+| P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Needs Approval |
+| P-019 | restserver                              | `server.go` `StartHTTP`                                                  | No `ReadHeaderTimeout`/`ReadTimeout`; `IdleTimeout` is one hour                                                                              | security    | MEDIUM   | Needs Approval |
+| P-020 | restserver                              | `server.go` `StartHTTP`                                                  | Plain-HTTP bind failure panics on a background goroutine instead of returning an error                                                       | bug         | MEDIUM   | Open           |
+| P-021 | restserver                              | `server.go` `StopHTTP`                                                   | Services are closed before in-flight requests are drained                                                                                    | correctness | MEDIUM   | Needs Approval |
+| P-022 | restserver                              | `server.go` `HTTPServer`                                                 | `HTTPServer.Config()` panics (nil embedded `Server` interface)                                                                               | bug         | MEDIUM   | Open           |
+| P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
+| P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
+| P-025 | xhttp/marshal                           | `marshal.go` `WriteJSON`                                                 | `gzip.Writer` per response, no `Vary`, `Accept-Encoding` matched by substring                                                                | performance | MEDIUM   | Open           |
+| P-026 | xhttp/marshal, restserver               | `json.go` `DecodeBody`; `server.go` `MaxRequestSize`                     | Request bodies decoded without a size limit; `MaxRequestSize` is dead                                                                        | security    | MEDIUM   | Needs Approval |
+| P-027 | xhttp/httperror, restserver/authz       | `codes.go` `codeStatus`; `authz.go` `authHandler.ServeHTTP`              | `PermissionDenied` maps to 401; authz denies with 401 instead of 403                                                                         | correctness | LOW      | Needs Approval |
+| P-028 | restserver/authz                        | `authz.go` `authHandler.ServeHTTP`                                       | Denial error double-wrapped, duplicating the code in the message and dropping the context                                                    | correctness | LOW      | Needs Approval |
+| P-029 | xhttp/httperror                         | `errors.go` `errMsg`                                                     | Panics on a non-string format argument                                                                                                       | bug         | LOW      | Open           |
+| P-030 | xhttp/correlation                       | `correlation.go` `correlationIDFromGRPC`, `WithMetaFromRequest`          | gRPC metadata looked up and stored under a canonical-case key                                                                                | bug         | LOW      | Open           |
+| P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
+| P-032 | xhttp/marshal, xhttp/identity           | `marshal.go` `WriteJSON`; `ctx.go`                                       | Internal error text echoed to clients in 5xx/401 bodies                                                                                      | security    | LOW      | Needs Approval |
+| P-033 | restserver/authz                        | `authz.go` `checkAccess`                                                 | `OPTIONS` bypasses authz even with `OptionsPassthrough`                                                                                      | security    | LOW      | Needs Approval |
+| P-034 | restserver                              | `server.go` `StopHTTP`, `broadcast`; `config.go` `GetPort`               | `StopHTTP` before `StartHTTP` panics; `broadcast` reads handlers unlocked; `GetPort` wrong for bare IPv6                                     | bug         | LOW      | Open           |
+| P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 79.2% is below the 80% CI gate                                                                                                | docs        | LOW      | Open           |
+| P-036 | pkg/cache                               | `cache.go` `GetOrSet`                                                    | Computed value is never written to the cache (hit rate 0)                                                                                    | bug         | HIGH     | Needs Approval |
+| P-037 | pkg/tlsconfig                           | `reloader.go` `KeypairReloader.tlsCert`                                  | Process panics when the served certificate expires at runtime                                                                                | bug         | HIGH     | Needs Approval |
+| P-038 | pkg/retriable                           | `dumpreq.go` `DumpRequestOut`; `retriable.go` `debugRequest`             | `Authorization`/`DPoP` headers written to DEBUG logs                                                                                         | security    | MEDIUM   | Open           |
+| P-039 | pkg/rpcclient                           | `client.go` `newClient`, `dialSetupOpts`                                 | TLS configured but endpoint without `https://` dials plaintext with no token                                                                 | security    | MEDIUM   | Needs Approval |
+| P-040 | pkg/retriable                           | `retriable.go` `WithHeaders`, `AddHeader`, `convertRequest`              | Setters write under `RLock`; `convertRequest` reads headers and writes the token unlocked                                                    | race        | MEDIUM   | Open           |
+| P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
+| P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
+| P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
+| P-044 | pkg/redisclient, pkg/cache              | `redisclient.go` `Key`; `memory.go`, `proxy.go`, `redis.go`              | `path.Join` lets `..` in a key escape the prefix namespace                                                                                   | security    | MEDIUM   | Needs Approval |
+| P-045 | pkg/redisclient                         | `redisclient.go` `NewRedisClient`                                        | Redis URL, which may embed a password, logged at INFO                                                                                        | security    | MEDIUM   | Open           |
+| P-046 | pkg/retriable                           | `retriable.go` `New`                                                     | `request:` block without `retry_limit` silently disables retries                                                                             | correctness | MEDIUM   | Needs Approval |
+| P-047 | pkg/redisclient                         | `redisclient.go` `ReleaseLock`, `TryLock`                                | Lock release is not owner-bound and not atomic                                                                                               | correctness | MEDIUM   | Needs Approval |
+| P-048 | pkg/tasks                               | `task.go` `Run`, `ShouldRun`; `scheduler.go` `Less`                      | Task state shared between scheduler and run goroutines without locks (fails `-race`)                                                         | race        | MEDIUM   | Open           |
+| P-049 | pkg/tasks                               | `scheduler.go` `Stop`                                                    | Second `Stop` blocks forever holding the scheduler lock                                                                                      | race        | MEDIUM   | Open           |
+| P-050 | pkg/tlsconfig                           | `reloader.go` `Reload`                                                   | Sleeps up to 300ms holding the write lock, stalling every TLS handshake                                                                      | performance | MEDIUM   | Open           |
+| P-051 | pkg/tlsconfig                           | `tlsconfig.go` `HTTPTransport.RoundTrip`                                 | Writes `Transport.TLSClientConfig` on every request while dials read it                                                                      | race        | MEDIUM   | Needs Approval |
+| P-052 | pkg/transport                           | `tls.go` `TLSInfo`                                                       | `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`, `SkipClientSANVerify` are never enforced                      | security    | MEDIUM   | Needs Approval |
+| P-053 | pkg/transport                           | `keepalive_listener.go` `Accept`                                         | `errors.WithStack` on accept errors defeats `Temporary()` retry in net/http and grpc                                                         | bug         | MEDIUM   | Open           |
+| P-054 | pkg/transport                           | `listener_tls.go` `acceptLoop`                                           | TLS handshakes run with no deadline                                                                                                          | security    | MEDIUM   | Open           |
+| P-055 | pkg/appinit                             | `metrics.go` `Metrics`                                                   | Prometheus endpoint uses `http.ListenAndServe` with no timeouts and `Fatal` on bind failure                                                  | security    | MEDIUM   | Needs Approval |
+| P-056 | pkg/retriable                           | `retriable.go` `Do`                                                      | Backoff sleep ignores the request context; drained bodies are not closed                                                                     | correctness | LOW      | Open           |
+| P-057 | pkg/retriable                           | `retriable.go` `executeRequest`                                          | `RequestTimeout` cancel func discarded; timers live until the deadline                                                                       | performance | LOW      | Open           |
+| P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
+| P-059 | pkg/retriable                           | `retriable.go` `convertRequest`                                          | DPoP proof signed once and reused across retries; nil signer panics                                                                          | bug         | LOW      | Open           |
+| P-060 | pkg/retriable                           | `nonce.go` `pushNonce`, `Nonce`                                          | Cache trim drops the newest nonce; `Nonce()` ignores context                                                                                 | bug         | LOW      | Open           |
+| P-061 | pkg/retriable                           | `retriable.go` `WithTLS`, `WithDNSServer`                                | Unchecked `*http.Transport` assertion; mutates a caller-supplied transport in place                                                          | bug         | LOW      | Needs Approval |
+| P-062 | pkg/redisclient                         | `redisclient.go` `Close`                                                 | Nils the embedded client; children keep using a closed connection; close errors hidden                                                       | bug         | LOW      | Needs Approval |
+| P-063 | pkg/redisclient                         | `redisclient.go` `SAddWithEviction`, `HSetWithEviction`                  | Errors ignored; re-adds create duplicate list entries and mis-evict                                                                          | correctness | LOW      | Open           |
+| P-064 | pkg/cache                               | `memory.go` `Keys` vs `redis.go` `Keys`                                  | Memory returns prefixed names, Redis strips the prefix; pattern subsets differ                                                               | correctness | LOW      | Needs Approval |
+| P-065 | pkg/retriable                           | `retriable.go` `RequestURL`                                              | Byte-offset slicing breaks URLs with userinfo                                                                                                | bug         | LOW      | Open           |
+| P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; token folder `0755`; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                          | correctness | LOW      | Open           |
+| P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
+| P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
+| P-069 | pkg/tasks                               | `task.go` `Run`                                                          | Unused `time.NewTimer` allocated per run alongside `time.After`                                                                              | performance | LOW      | Open           |
+| P-070 | pkg/tlsconfig                           | `tlsconfig.go`                                                           | `AppendCertsFromPEM` result ignored; malformed CA files yield an empty pool silently                                                         | correctness | LOW      | Open           |
+| P-071 | pkg/tasks                               | `scheduler.go` `Count`, `List`                                           | `Count` unlocked (called from `Start` under lock); `List` shares the backing array                                                           | race        | LOW      | Open           |
+| P-072 | pkg/discovery                           | `discovery.go` `Register`, `Find`                                        | Unsynchronized map; `Register(nil)` panics                                                                                                   | race        | LOW      | Open           |
+| P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
+| P-074 | pkg/tasks, pkg/transport, pkg/tlsconfig | `scheduler.go`, `keepalive_listener.go`, `cipher_suites.go`              | Modernization: `sort.Sort` → `slices.SortFunc`; `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones | correctness | LOW      | Needs Approval |
+| P-075 | pkg/cache                               | `cache_test.go` `TestProvider/redis` (pub/sub)                           | Flaky under load: Redis `ReceiveMessage` hits a 5s i/o timeout; `require` used inside goroutines                                             | docs        | LOW      | Open           |
+
+## Details
+
+### P-001 GO-2026-6443 in google.golang.org/grpc v1.84.0
+
+- Evidence: `govulncheck ./...` reports `gserver/serve.go` `grpcHandlerFunc` calls `grpc.Server.ServeHTTP`, which reaches the vulnerable `transport.http2Server.HandleStreams`.
+- Impact: a request without `:authority`/`Host` can panic the gRPC server.
+- Fix: upgrade to the first released `google.golang.org/grpc` that contains the fix (only `v1.85.0-dev` pseudo-versions exist as of the audit). Pin a pseudo-version or wait for `v1.85.0`.
+
+### P-002 gRPC-Web wildcard `Access-Control-Allow-Origin`
+
+- Evidence: `allowedOrigins` is populated only when `cfg.CORS != nil` and the first origin is not `*`; `CORS.GetEnabled()` is never consulted. With an `Origin` header and no allowed origins the handler sets `Access-Control-Allow-Origin: *`.
+- Impact: with no `cors:` block, every TLS listener answers gRPC-Web calls with a wildcard ACAO so any web origin can read non-credentialed responses. REST only applies CORS when enabled, so the two protocols disagree.
+- Fix: emit ACAO/ACEH/ACAC only when `CORS.GetEnabled()`; treat "no allowed origins" as "do not emit ACAO".
+
+### P-003 `Server.Close` deadlock after a failed `serve`
+
+- Evidence: `serve` returns on `transport.NewTLSListener` error before `close(sctx.serversC)`; `Close` ranges over `serversC` and blocks forever. `Start`'s deferred cleanup only closes the channel when `!serving`, but `serveClients` always returns nil.
+- Impact: when TLS listener setup fails at runtime, `Err()` delivers the error and the caller's `Close()` hangs.
+- Fix: `defer close(sctx.serversC)` once at the top of `serve` (guarded by `sync.Once`).
+
+### P-004 TLS keypair reloader leaked
+
+- Evidence: `configureListeners` calls `tlsInfo.ServerTLSWithReloader()`, which starts a `tlsconfig.KeypairReloader` ticker goroutine; nothing in gserver calls `tlsInfo.Close()`.
+- Impact: one ticker goroutine per `Start`/`Close` cycle.
+- Fix: call `tlsInfo.Close()` in `Server.Close` after closing the listeners.
+
+### P-005 No read timeouts on cmux / `http.Server` (gserver)
+
+- Evidence: `cmux.New(sctx.listener)` without `SetReadTimeout`; `http.Server` created without `ReadHeaderTimeout`, `ReadTimeout` or `IdleTimeout`.
+- Impact: idle or partial connections pin a cmux goroutine and connection per listener indefinitely.
+- Fix: `m.SetReadTimeout(...)` (config-driven, default a few seconds) and set `ReadHeaderTimeout`/`IdleTimeout` on the servers.
+
+### P-006 `rate_limit.enabled` without `requests_per_second`
+
+- Evidence: `tollbooth.NewLimiter(float64(cfg.RequestsPerSecond), &ops)` with max 0 yields burst 1 that never refills.
+- Impact: one request per client key, then 429 forever; no startup validation.
+- Fix: return an error from `Start`, or apply a documented default, when `Enabled && RequestsPerSecond <= 0`.
+
+### P-007 Rate limiter keyed on `X-Forwarded-For`
+
+- Evidence: when `HeadersIPLookups` is empty tollbooth defaults to `X-Forwarded-For`, `X-Real-IP`, then `RemoteAddr`.
+- Impact: without a trusted proxy, clients bypass the limiter by rotating a fake `X-Forwarded-For`.
+- Fix: default to `["RemoteAddr"]`; document that header lookups are only safe behind a trusted proxy.
+
+### P-008 `gzip.Writer` per gRPC-Web request
+
+- Evidence: `g.gz = gzip.NewWriter(resp)` for every compressed unary gRPC-Web call.
+- Impact: hundreds of KB allocated per call on gRPC-Web heavy servers.
+- Fix: `sync.Pool` of `*gzip.Writer` with `Reset` on acquire; return in `Close`.
+
+### P-009 CSRF values in error text
+
+- Evidence: `errors.Errorf("CSRF token mismatch: passed '%s', expected '%s'", headerToken, c.Value)`; the error string is logged.
+- Impact: CSRF cookie values leak to logs.
+- Fix: drop the values from the message.
+
+### P-010 STS lookup failures not cached
+
+- Evidence: `awsIdentity` only caches successful lookups (`p.awsCache.Add` after decoding); the LRU is 100 entries keyed by the full URL.
+- Impact: repeated bad tokens each cost an outbound STS call (now bounded by a 10s timeout and 64 KiB body).
+- Fix: negatively cache failures for a short TTL.
+
+### P-011 gRPC-Web disallowed origin returns 200
+
+- Evidence: on origin mismatch the handler logs `cors_not_allowed` and returns without writing a status or trailer; `serve_test.go` asserts `http.StatusOK`.
+- Fix: `http.Error(w, "origin not allowed", http.StatusForbidden)` or a gRPC-Web trailer with `grpc-status: 7`.
+
+### P-012 `ExposedHeaders` overwritten
+
+- Evidence: `grpcHandlerFunc` sets `Access-Control-Expose-Headers` from config, then `prepareHeaders` calls `wh.Set(...)` with the response header keys plus `grpc-status, grpc-message`, replacing it and duplicating entries.
+- Fix: merge case-insensitively instead of `Set`.
+
+### P-013 Cookie auth CSRF asymmetry
+
+- Evidence: HTTP path accepts the auth cookie only when `Cookies.CSRF != ""`; the gRPC path (`md["cookie"]`) accepts it with no CSRF check.
+- Fix: validate in `New` that `Cookies.Auth` requires `Cookies.CSRF`; check `x-csrf-token` metadata on the gRPC path.
+
+### P-014 `perRPCCredential` races and thundering herd
+
+- Evidence: `rc.callerIdentity` and `rc.dpopSigner` are read without `authTokenMu` while `WithCallerIdentity`/`WithDPoP` write under it; every concurrent RPC with an expired token calls `GetCallerIdentity`.
+- Fix: read under `RLock`; use `singleflight` for the refresh.
+
+### P-015 `NewWithMode` returns `(nil, nil)`
+
+- Fix: return an error, or return the receiver.
+
+### P-016 Shared `errUnavailable` mutated per request
+
+- Evidence: `Error.WriteHTTPResponse` sets `e.RequestID` on the receiver; `ready.go` writes the package-level `errUnavailable` on every not-ready request.
+- Impact: the first 503's correlation ID is baked into the global; concurrent first requests race on a package var. Any consumer keeping `httperror.Error` values in package vars has the same hazard.
+- Fix: write from a copy (`e2 := *e`) in `WriteHTTPResponse`, or build the error per request in `ready`.
+
+### P-017 Empty client IP with private-only `X-Forwarded-For`
+
+- Evidence: the `RemoteAddr` fallback only runs when both headers are empty; after the loop finds no public IP the function returns `xRealIP`, which may be "". `realip_test.go` uses `h.Set` in a loop so a comma list is never tested.
+- Fix: fall back to the last XFF entry or `RemoteAddr`; fix the test to join the values.
+
+### P-018 Proxy headers trusted from any client
+
+- Evidence: `ClientIPFromRequest`, `ClientIPFromGRPC`, `createIdentityContext` and `GetServerURL` read `X-Forwarded-*`/`X-Real-Ip` unconditionally; gRPC variants return the raw metadata value.
+- Impact: spoofed audit IPs and attacker-chosen scheme in generated URLs.
+- Fix: opt-in trusted-proxy CIDR list or `TrustProxyHeaders` flag; validate `X-Forwarded-Proto` against `http`/`https`.
+
+### P-019 restserver `http.Server` timeouts
+
+- Evidence: `&http.Server{IdleTimeout: time.Hour, ErrorLog: xlog.Stderr}` with no `ReadHeaderTimeout`.
+- Fix: set `ReadHeaderTimeout` (about 10s) and expose timeouts through `Config` or an option.
+
+### P-020 Plain-HTTP bind failure panics asynchronously
+
+- Evidence: the TLS path calls `tls.Listen` synchronously; the plain path calls `ListenAndServe` inside the goroutine and `logger.Panicf` on any error other than `ErrServerClosed`.
+- Fix: `net.Listen` synchronously in both branches and pass the listener to `Serve`.
+
+### P-021 Services closed before drain
+
+- Evidence: `StopHTTP` calls `Service.Close()` on every service before `httpServer.Shutdown`; `IsReady` still reports ready during the drain.
+- Fix: flip `serving` to false, `Shutdown`, then close services.
+
+### P-022 `HTTPServer.Config()` panics
+
+- Evidence: `HTTPServer` embeds the `Server` interface (always nil) and implements `HTTPConfig()` but not `Config()`.
+- Fix: implement `Config()`, drop the embedded interface, add `var _ Server = (*HTTPServer)(nil)`.
+
+### P-023 Metric label cardinality
+
+- Evidence: `HTTPReqPerf.MeasureSince(start, method, status, r.URL.Path)` uses the raw path; only 404s collapse to `unknown`.
+- Fix: label with the matched route template or add a path-normalizer option.
+
+### P-024 `ResponseCapture` lacks `Unwrap`/`Hijack`
+
+- Evidence: implements only `Header/Write/WriteHeader/Flush`; inserted twice in every chain.
+- Impact: WebSocket upgrades and `http.ResponseController` deadlines are impossible behind restserver.
+- Fix: add `Unwrap() http.ResponseWriter`; make `Flush` conditional on the delegate.
+
+### P-025 `WriteJSON` gzip handling
+
+- Evidence: `gzip.NewWriter(out)` per response, no `sync.Pool`, no `Vary: Accept-Encoding`, `strings.Contains` matches `gzip;q=0`.
+- Fix: pool writers, set `Vary`, skip small payloads, honor `q` values.
+
+### P-026 Unbounded request bodies
+
+- Evidence: `DecodeBody` streams `r.Body` into the decoder; `MaxRequestSize` is declared and never used.
+- Fix: wrap with `http.MaxBytesReader` and return `RequestTooLarge` on `*http.MaxBytesError`.
+
+### P-027 `PermissionDenied` → 401
+
+- Evidence: `codeStatus[codes.PermissionDenied] = http.StatusUnauthorized`; authz denies an authenticated role with `Unauthorized`.
+- Fix: map to 403 and use `httperror.Forbidden` in authz; tests assert the current strings.
+
+### P-028 authz double-wrap
+
+- Evidence: `checkAccess` returns `httperror.Unauthorized(...).WithContext(ctx)`; the handler re-wraps with `httperror.Unauthorized("%s", err.Error())`.
+- Fix: `marshal.WriteJSON(w, r, err)` directly.
+
+### P-029 `errMsg` unchecked type assertion
+
+- Evidence: `fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)`.
+- Fix: check the assertion and fall back to `fmt.Sprint`.
+
+### P-030 Canonical-case gRPC metadata key
+
+- Evidence: `md[header.XCorrelationID]` and `metadata.MD{header.XCorrelationID: ...}`; MD keys are lowercase.
+- Fix: use `CorrelationIDgRPCHeaderName` and `md.Set`.
+
+### P-031 Granularity divide by zero
+
+- Fix: clamp to `max(1, int64(granularity))` in `NewRequestLogger`.
+
+### P-032 Internal error text echoed
+
+- Evidence: non-`httperror` errors become a 500 whose `message` is `err.Error()`; identity mapper errors are returned verbatim.
+- Fix: generic message for 5xx; keep logging the cause.
+
+### P-033 `OPTIONS` bypasses authz
+
+- Evidence: `if r.Method == http.MethodOptions { return nil }` unconditionally.
+- Fix: short-circuit only when `Access-Control-Request-Method` is present.
+
+### P-034 restserver minor bugs
+
+- `StopHTTP` dereferences a nil `httpServer` if called before `StartHTTP`; `broadcast` reads `evtHandlers` without the lock; `GetPort` uses `LastIndex(":")` and returns `1` for `::1`.
+- Fix: nil-check; `RLock`; `net.SplitHostPort`.
+
+### P-035 Coverage below CI gate
+
+- Evidence: `go tool cover -func=coverage.out` total is 79.2%; CI `MIN_TESTCOV` is 80.
+- Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
+
+### P-036 `GetOrSet` never writes back
+
+- Evidence: on `IsNotFoundError` it calls `getter()`, copies the result into `value` by reflection and returns; there is no `p.Set`. `cache_test.go` masks it by calling `Set` right after. The error path also reports `reflect.TypeOf(rv2)` of a `reflect.Value`.
+- Impact: every read-through caller hits the getter on every call.
+- Fix: `p.Set(ctx, key, res, ttl)` after a successful getter (a TTL parameter is probably needed); use `reflect.TypeOf(res)` in the error.
+
+### P-037 Reloader panics on an expired certificate
+
+- Evidence: `tlsCert` calls `logger.Panic("cert expired")` when `NotAfter` has passed; it runs inside `GetCertificate` callbacks from handshake goroutines and from the background `Reload`.
+- Impact: a late rotation terminates the process on the next handshake or poll instead of failing that handshake.
+- Fix: return an error from the callbacks and log; keep serving the previous certificate.
+
+### P-038 Bearer tokens in DEBUG request dumps
+
+- Evidence: `DumpRequestOut` is a verbatim copy of `httputil.DumpRequestOut` with no redaction (the old comment claimed auth headers were dropped); `Do` logs the dump at DEBUG.
+- Fix: clone the headers and redact `Authorization`, `DPoP` and `Cookie` before dumping.
+
+### P-039 rpcclient silent plaintext downgrade
+
+- Evidence: TLS and per-RPC credentials are applied only when `cfg.TLS != nil` and the endpoint starts with `https://` or `unixs://`; otherwise `insecure.NewCredentials()` and no token.
+- Impact: a missing scheme in config yields unauthenticated plaintext gRPC with no error.
+- Fix: return an error (or apply TLS) when `TLS` is set and the scheme is not secure.
+
+### P-040 retriable client locking
+
+- Evidence: every setter takes `RLock` and writes (`c.headers[header] = value`, `c.Policy = policy`); `convertRequest` ranges `c.headers` unlocked and writes `c.token` on refresh.
+- Impact: concurrent map read/write is a fatal runtime error under token rotation.
+- Fix: `Lock()` in setters; copy headers under `RLock`; single-flight the refresh.
+
+### P-041 Redis subscription goroutine leak
+
+- Evidence: `ReceiveMessage` spawns a goroutine sending on an unbuffered channel and selects on a 1s timer; returning through the timer branch leaves the sender blocked forever.
+- Fix: buffer the channel (size 1) and select on `ctx.Done()`.
+
+### P-042 Memory `Publish` blocks
+
+- Evidence: unconditional `s.ch <- message` inside `subs.Range`; buffer is 10; `ctx` ignored.
+- Fix: non-blocking send with drop or `ctx.Done()`.
+
+### P-043 Rate limiter starvation and non-atomic window
+
+- Evidence: `Pipeline()` (not `TxPipeline`) does `ZCard` then unconditional `ZAdd`/`Set`/`Expire`; allowed only when the count is 0.
+- Impact: a caller polling faster than the window is denied forever; two concurrent callers can both win.
+- Fix: `ZAdd` only when allowed, inside a Lua script or `WATCH` transaction.
+
+### P-044 Key namespace escape
+
+- Evidence: `path.Join(c.prefix, key)` cleans `..`, so `Key("../other/x")` under `/tenant-a/` yields `/other/x`. Same pattern in `pkg/cache`.
+- Fix: reject `..` or concatenate without cleaning.
+
+### P-045 Redis URL logged
+
+- Evidence: `logger.KV(xlog.INFO, "redis", cfg.Server)` where `Server` may be `redis://user:password@host/db`.
+- Fix: log `options.Addr` after `ParseURL`.
+
+### P-046 `request:` without `retry_limit`
+
+- Evidence: `pol.TotalRetryLimit = cfg.Request.RetryLimit` overwrites the default 5 with 0 whenever the block is present.
+- Fix: `cmp.Or(cfg.Request.RetryLimit, pol.TotalRetryLimit)` or a pointer field.
+
+### P-047 Lock release not owner-bound
+
+- Evidence: `TryLock` stores a timestamp value; `ReleaseLock` does `Exists` then `Del` without comparing the value.
+- Fix: return a token from `TryLock` and release with a compare-and-delete script.
+
+### P-048 tasks race
+
+- Evidence: `Run` writes `running`, `LastRunAt`, `NextRunAt` unlocked; the ticker goroutine reads them in `Less` and `ShouldRun`; `s.running = false` written without `s.lock`. `go test -race ./pkg/tasks/...` fails.
+- Fix: guard task state with a mutex or atomics.
+
+### P-049 `Stop` deadlock
+
+- Evidence: `Stop` holds `s.lock` and sends on `quit` (capacity 1); `running` is only cleared by the ticker goroutine after it consumes `quit`, which may itself need `s.lock`.
+- Fix: clear `running` under the lock in `Stop`; `close(quit)` via `sync.Once`.
+
+### P-050 Reload sleeps under the write lock
+
+- Evidence: `Lock()` then up to three `time.Sleep(100ms)` + file loads; every handshake takes `RLock`.
+- Fix: load outside the lock and swap under it.
+
+### P-051 `HTTPTransport.RoundTrip` mutation
+
+- Evidence: `t.transport.TLSClientConfig = cfg` under `t.lock` on every request; `http.Transport.dialConn` reads the field without that lock.
+- Fix: set `GetClientCertificate` once and never mutate `TLSClientConfig` after first use.
+
+### P-052 Unenforced `TLSInfo` fields
+
+- Evidence: the six fields are declared and documented but never read; the SAN check in `listener_tls.go` is commented out.
+- Fix: implement the checks in the `tlsCheckFunc` chain or remove the fields.
+
+### P-053 Wrapped accept errors
+
+- Evidence: `return nil, errors.WithStack(err)`; `net/http` and grpc use a plain type assertion for `Temporary()`.
+- Impact: a transient `EMFILE` stops the server instead of backing off.
+- Fix: return `err` unwrapped.
+
+### P-054 No handshake deadline
+
+- Evidence: `tlsConn.Handshake()` per connection with no `SetDeadline`; `ReadHeaderTimeout` does not cover it.
+- Fix: `SetDeadline` before `Handshake` and clear it after.
+
+### P-055 Prometheus endpoint
+
+- Evidence: `logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, promhttp.Handler()).Error())` in a goroutine.
+- Fix: an `http.Server` with `ReadHeaderTimeout`, returned through the closer; log bind errors instead of `Fatal`.
+
+### P-056 to P-066 retriable / redisclient / cache LOW items
+
+- P-056: `time.Sleep(sleepDuration)` ignores `ctx.Done()`; `consumeResponseBody` only drains.
+- P-057: `ctx, _ = c.ensureContext(...)` drops the cancel func.
+- P-058: `ShouldRetry` returns `LimitExceeded` for 429 before consulting `p.Retries`.
+- P-059: `dpop.ForRequest` runs once before the retry loop; `c.dpopSigner` may be nil.
+- P-060: `c.nonces = c.nonces[nonceCacheLimit/2 : count-1]` drops the freshest nonce; `Nonce()` uses `context.Background()`.
+- P-061: `c.httpClient.Transport.(*http.Transport)` unchecked; `http.DefaultTransport` mutated when passed in.
+- P-062: `Close` sets `c.Client = nil` and always returns nil.
+- P-063: `length, _ := c.LLen(...)`, `oldest, _ := c.LPop(...)`, `_ = c.SRem(...)`; `RPush` appends duplicates.
+- P-064: memory `Keys` appends the full name; Redis `Keys` trims the prefix; memory supports only a trailing wildcard.
+- P-065: `path := rawURL[len(host):]` with `host := u.Scheme + "://" + u.Host`.
+- P-066: `go-homedir` vs `resolve.ExpandPath`; `os.MkdirAll(c.folder, 0755)` for a credentials folder; `netutil.WaitForNetwork(time.Second)` in a constructor; `bodyCopy` of error responses unbounded.
+
+### P-067 to P-074 appinit / tasks / tlsconfig / discovery LOW items
+
+- P-067: `ctx: context.Background()` and `c.ctx.Done()` in `Close` cancels nothing.
+- P-068: `_ = pprof.StartCPUProfile(cpuf)`; closer keeps the file name, not the handle.
+- P-069: `timer := time.NewTimer(timeout)` unused; select uses `time.After`.
+- P-070: `roots.AppendCertsFromPEM(rootsBytes)` return value ignored in three places.
+- P-071: `Count` has the lock commented out because `Start` calls it while locked; `List` returns `s.tasks[:]`.
+- P-072: `d.reg[key] = ...` and range without a mutex; `reflect.TypeOf(nil).String()` panics.
+- P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
+- P-074: `sort.Sort(s)` with `Len/Swap/Less`; `SetKeepAlive`+`SetKeepAlivePeriod`; hand-maintained cipher map including RC4/3DES.
+
+### P-075 Flaky Redis pub/sub test
+
+- Evidence: one run of `go test ./...` (all packages in parallel, Redis in testcontainers) failed `TestProvider/redis` at `cache_test.go:270` with `read tcp [::1]:40600->[::1]:32789: i/o timeout`; the test passes in isolation and on rerun. The receiving goroutines call `require.NoError`, which invokes `FailNow` from a non-test goroutine.
+- Fix: use `assert` plus an error channel in the goroutines; give the subscription time to be established before `Publish` (or retry the publish); consider a longer context deadline for the container-backed subtest. Related to P-041.
+
+## Notes on items needing approval
+
+- P-002, P-011: gRPC-Web clients may rely on the implicit wildcard and the 200 response.
+- P-006, P-007, P-019, P-026: new defaults or limits that deployments may need to raise.
+- P-013, P-018, P-021, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
+- P-023: changes metric label semantics for dashboards.
+- P-036: `GetOrSet` gains a write side effect and probably a TTL parameter.
+- P-037, P-055: replace fail-fast panics/Fatal with errors; some deployments may rely on the crash.
+- P-039, P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
+- P-043, P-047: rate limiter and lock semantics change under concurrency.
+- P-044, P-064: key layout changes for keys containing `..`, `//` or a prefix.
+- P-051, P-052, P-073, P-074: public type behavior or config surface.
