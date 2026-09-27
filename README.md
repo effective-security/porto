@@ -20,34 +20,34 @@ go get github.com/effective-security/porto@latest
 
 ## Packages
 
-| Package | Purpose |
-|---|---|
-| `restserver` | httprouter-based HTTP/HTTPS server hosting `Service` plug-ins with correlation ID, identity, metrics, logging, authz, readiness and CORS middleware. |
-| `restserver/authz` | Path-segment/role access control tree (YAML-configurable) exposed as an HTTP handler and gRPC interceptors. |
-| `restserver/ready` | Readiness-gate middleware answering 503 `not_ready` until the server reports ready. |
-| `restserver/telemetry` | Request logger and request metrics middleware with skip-path filters. |
-| `gserver` | Combined gRPC + gRPC-Web + REST server with cmux multiplexing, TLS reload, CORS, rate limiting, identity/authz middleware and graceful shutdown. |
-| `gserver/credentials` | gRPC credential bundle: TLS transport credentials plus per-RPC Bearer/DPoP/AWS tokens with automatic refresh. |
-| `gserver/roles` | Identity provider mapping JWT, DPoP, AWS STS and TLS/SPIFFE callers to roles for HTTP and gRPC. |
-| `xhttp/correlation` | Correlation/request ID propagation across HTTP headers, gRPC metadata, contexts and logs. |
-| `xhttp/header` | HTTP header name and content-type constants. |
-| `xhttp/httperror` | Structured API errors with HTTP status, code, gRPC status and request ID, plus gRPC ↔ HTTP mapping. |
-| `xhttp/identity` | Caller identity, client IP and user agent extraction into request contexts for HTTP and gRPC. |
-| `xhttp/marshal` | JSON response writing (errors, gzip, pretty print) and strict JSON request decoding. |
-| `pkg/retriable` | HTTP client with retry policy, JSON marshalling, header propagation, Bearer/DPoP auth, replay nonces and token storage. See [pkg/retriable/README.md](pkg/retriable/README.md). |
-| `pkg/rpcclient` | gRPC client builder: TLS bundle, per-RPC Bearer/DPoP tokens, keepalive, message limits, optional blocking dial. |
-| `pkg/redisclient` | Prefixed go-redis wrapper with JSON values, bounded collections, a distributed lock and a per-window rate limiter. |
-| `pkg/cache` | `Provider` cache abstraction (TTL, keys, pub/sub) with in-memory, Redis and prefixing-proxy backends. |
-| `pkg/tasks` | In-process cron-like scheduler: run functions every N units, daily at hh:mm, or weekly, with overlap protection. |
-| `pkg/tlsconfig` | Build `tls.Config` from PEM files (TLS 1.2+, h2) with OCSP staple support and a file-polling certificate reloader. |
-| `pkg/transport` | TLS listener with eager handshake and CRL checks, keepalive listeners, and file-based `TLSInfo` server config. |
-| `pkg/appinit` | Service bootstrap: logging flags and rotation, Prometheus/CloudWatch metrics, CPU profiling. |
-| `pkg/appinit/config` | YAML/JSON config struct for the metrics pipeline. |
-| `pkg/discovery` | Minimal in-process service registry resolved by interface. |
-| `pkg/crlcache` | `Verifier` interface for certificate revocation checks. |
-| `pkg/streamctx` | Override a gRPC `ServerStream` context in interceptors. |
-| `metricskey` | Metric descriptors emitted by the servers. |
-| `tests/testutils`, `tests/mockappcontainer` | Test helpers: free ports, JSON comparison, dig container builder. |
+| Package                                     | Purpose                                                                                                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `restserver`                                | httprouter-based HTTP/HTTPS server hosting `Service` plug-ins with correlation ID, identity, metrics, logging, authz, readiness and CORS middleware.                            |
+| `restserver/authz`                          | Path-segment/role access control tree (YAML-configurable) exposed as an HTTP handler and gRPC interceptors.                                                                     |
+| `restserver/ready`                          | Readiness-gate middleware answering 503 `not_ready` until the server reports ready.                                                                                             |
+| `restserver/telemetry`                      | Request logger and request metrics middleware with skip-path filters.                                                                                                           |
+| `gserver`                                   | Combined gRPC + gRPC-Web + REST server with cmux multiplexing, TLS reload, CORS, rate limiting, identity/authz middleware and graceful shutdown.                                |
+| `gserver/credentials`                       | gRPC credential bundle: TLS transport credentials plus per-RPC Bearer/DPoP/AWS tokens with automatic refresh.                                                                   |
+| `gserver/roles`                             | Identity provider mapping JWT, DPoP, AWS STS and TLS/SPIFFE callers to roles for HTTP and gRPC.                                                                                 |
+| `xhttp/correlation`                         | Correlation/request ID propagation across HTTP headers, gRPC metadata, contexts and logs.                                                                                       |
+| `xhttp/header`                              | HTTP header name and content-type constants.                                                                                                                                    |
+| `xhttp/httperror`                           | Structured API errors with HTTP status, code, gRPC status and request ID, plus gRPC ↔ HTTP mapping.                                                                             |
+| `xhttp/identity`                            | Caller identity, client IP and user agent extraction into request contexts for HTTP and gRPC.                                                                                   |
+| `xhttp/marshal`                             | JSON response writing (errors, gzip, pretty print) and strict JSON request decoding.                                                                                            |
+| `pkg/retriable`                             | HTTP client with retry policy, JSON marshalling, header propagation, Bearer/DPoP auth, replay nonces and token storage. See [pkg/retriable/README.md](pkg/retriable/README.md). |
+| `pkg/rpcclient`                             | gRPC client builder: TLS bundle, per-RPC Bearer/DPoP tokens, keepalive, message limits, optional blocking dial.                                                                 |
+| `pkg/redisclient`                           | Prefixed go-redis wrapper with JSON values, bounded collections, a distributed lock and a per-window rate limiter.                                                              |
+| `pkg/cache`                                 | `Provider` cache abstraction (TTL, keys, pub/sub) with in-memory, Redis and prefixing-proxy backends.                                                                           |
+| `pkg/tasks`                                 | In-process cron-like scheduler: run functions every N units, daily at hh:mm, or weekly, with overlap protection.                                                                |
+| `pkg/tlsconfig`                             | Build `tls.Config` from PEM files (TLS 1.2+, h2) with OCSP staple support and a file-polling certificate reloader.                                                              |
+| `pkg/transport`                             | TLS listener with eager handshake and CRL checks, keepalive listeners, and file-based `TLSInfo` server config.                                                                  |
+| `pkg/appinit`                               | Service bootstrap: logging flags and rotation, Prometheus/CloudWatch metrics, CPU profiling.                                                                                    |
+| `pkg/appinit/config`                        | YAML/JSON config struct for the metrics pipeline.                                                                                                                               |
+| `pkg/discovery`                             | Minimal in-process service registry resolved by interface.                                                                                                                      |
+| `pkg/crlcache`                              | `Verifier` interface for certificate revocation checks.                                                                                                                         |
+| `pkg/streamctx`                             | Override a gRPC `ServerStream` context in interceptors.                                                                                                                         |
+| `metricskey`                                | Metric descriptors emitted by the servers.                                                                                                                                      |
+| `tests/testutils`, `tests/mockappcontainer` | Test helpers: free ports, JSON comparison, dig container builder.                                                                                                               |
 
 Every package has a `doc.go` with a usage example. The generated API
 reference lives in [Documentation/api](Documentation/api) (`make docs`), and
@@ -375,7 +375,7 @@ if mc != nil {
 - `make docs` regenerates the API reference under `Documentation/api/`.
 - `make all` runs clean, tools, generate and covtest.
 
-CI runs `make build covtest` and requires 80% total coverage. Conventions
+CI runs `make build covtest` and requires 90% total coverage. Conventions
 for contributors and agents are in [AGENTS.md](AGENTS.md); known defects
 are tracked in [FINDINGS.md](FINDINGS.md) and larger work in
 [ROADMAP.md](ROADMAP.md).

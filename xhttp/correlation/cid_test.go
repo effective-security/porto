@@ -45,6 +45,83 @@ func TestCorrelationID(t *testing.T) {
 	assert.Equal(t, cid, md[CorrelationIDgRPCHeaderName][0])
 }
 
+func TestWithMetaFromRequestCorrelationID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		headerName          string
+		headerID            string
+		correlationHeaderID string
+		wantID              string
+	}{
+		{name: "generated"},
+		{
+			name:       "request ID",
+			headerName: "X-Request-ID",
+			headerID:   "request-id",
+			wantID:     "request-id",
+		},
+		{
+			name:       "long request ID",
+			headerName: "X-Request-ID",
+			headerID:   "123456789012345",
+			wantID:     "123456789012",
+		},
+		{
+			name:                "conflicting IDs",
+			headerName:          "X-Request-ID",
+			headerID:            "other-request-id",
+			correlationHeaderID: "selected-id",
+			wantID:              "selected-id",
+		},
+		{
+			name:       "long correlation ID",
+			headerName: header.XCorrelationID,
+			headerID:   "123456789012345",
+			wantID:     "123456789012",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tt.headerName != "" {
+				req.Header.Set(tt.headerName, tt.headerID)
+			}
+			if tt.correlationHeaderID != "" {
+				req.Header.Set(header.XCorrelationID, tt.correlationHeaderID)
+			}
+			ctx := WithMetaFromRequest(req)
+			cid := ID(ctx)
+			if tt.wantID == "" {
+				require.Len(t, cid, IDSize)
+			} else {
+				require.Equal(t, tt.wantID, cid)
+			}
+
+			incoming, ok := metadata.FromIncomingContext(ctx)
+			require.True(t, ok)
+			assert.Equal(t, []string{cid}, incoming.Get(CorrelationIDgRPCHeaderName))
+			assert.NotContains(t, incoming, header.XCorrelationID)
+
+			outgoing, ok := metadata.FromOutgoingContext(ctx)
+			require.True(t, ok)
+			assert.Equal(t, []string{cid}, outgoing.Get(CorrelationIDgRPCHeaderName))
+
+			if tt.headerName == "X-Request-ID" {
+				assert.Equal(t, []string{cid}, incoming.Get(requestIDgRPCHeaderName))
+				assert.Equal(t, []string{cid}, outgoing.Get(requestIDgRPCHeaderName))
+			} else {
+				assert.NotContains(t, incoming, requestIDgRPCHeaderName)
+				assert.NotContains(t, outgoing, requestIDgRPCHeaderName)
+			}
+		})
+	}
+}
+
 func Test_grpcFromContext(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		unary := NewAuthUnaryInterceptor()

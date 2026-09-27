@@ -23,6 +23,8 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/xhttp", 
 // process-global that may be changed at startup, before any traffic.
 var CorrelationIDgRPCHeaderName = "x-correlation-id"
 
+const requestIDgRPCHeaderName = "x-request-id"
+
 type contextKey int
 
 const (
@@ -155,12 +157,12 @@ func correlationIDFromGRPC(ctx context.Context) string {
 		incomingID := ""
 		md, ok := metadata.FromIncomingContext(ctx)
 		if ok {
-			xid := md[CorrelationIDgRPCHeaderName]
+			xid := md.Get(CorrelationIDgRPCHeaderName)
 			if len(xid) == 0 {
-				xid = md["x-request-id"]
+				xid = md.Get(requestIDgRPCHeaderName)
 			}
 			if len(xid) == 0 {
-				xid = md[header.XCorrelationID]
+				xid = md.Get(header.XCorrelationID)
 			}
 			if len(xid) > 0 {
 				incomingID = xid[0]
@@ -246,7 +248,7 @@ func WithID(ctx context.Context) context.Context {
 // client call.
 func WithMetaFromContext(ctx context.Context) context.Context {
 	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok || md == nil || len(md[CorrelationIDgRPCHeaderName]) == 0 {
+	if !ok || len(md.Get(CorrelationIDgRPCHeaderName)) == 0 {
 		v := ctx.Value(keyContext)
 		if v == nil {
 			rctx := &RequestContext{
@@ -273,13 +275,22 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 	}
 	ctx := context.WithValue(req.Context(), keyContext, rctx)
 	ctx = xlog.ContextWithKV(ctx, "ctx", rctx.ID)
-	md := metadata.MD{
-		header.XCorrelationID: []string{cid},
-	}
-	kv := []string{header.XCorrelationID, cid}
+	md := metadata.MD{}
+	md.Set(CorrelationIDgRPCHeaderName, cid)
+	kv := []string{CorrelationIDgRPCHeaderName, cid}
+	grpcCorrelationKey := strings.ToLower(CorrelationIDgRPCHeaderName)
+	httpCorrelationKey := strings.ToLower(header.XCorrelationID)
+	forwardRequestID := false
 	for key, values := range req.Header {
 		// Normalize the header key to lowercase for gRPC metadata
 		grpcKey := strings.ToLower(key)
+		if grpcKey == grpcCorrelationKey || grpcKey == httpCorrelationKey {
+			continue
+		}
+		if grpcKey == requestIDgRPCHeaderName {
+			forwardRequestID = true
+			continue
+		}
 		isX := strings.HasPrefix(grpcKey, "x-")
 		isGRPC := strings.HasPrefix(grpcKey, "grpc-")
 		if isX || isGRPC || grpcKey == "authorization" || grpcKey == "date" || grpcKey == "timestamp" {
@@ -289,6 +300,10 @@ func WithMetaFromRequest(req *http.Request) context.Context {
 				md.Append(grpcKey, value)
 			}
 		}
+	}
+	if forwardRequestID {
+		md.Set(requestIDgRPCHeaderName, cid)
+		kv = append(kv, requestIDgRPCHeaderName, cid)
 	}
 
 	// create both Incoming and Outgoing metadata

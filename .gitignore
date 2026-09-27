@@ -8,6 +8,7 @@ bin/
 .DS_Store
 .codebase-memory
 CLAUDE.md
+INTENT.md
 
 debug
 debug.test
