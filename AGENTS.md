@@ -137,7 +137,7 @@ Do not start by grepping the tree.
 - `make all` : clean, tools, generate, covtest
 
 CI (`.github/workflows/unittest.yml`) runs `make build covtest` and requires
-**80%** total coverage (`MIN_TESTCOV`). CI does not run `make lint` or the
+**90%** total coverage (`MIN_TESTCOV`). CI does not run `make lint` or the
 race detector; run both locally. Pushes to `main` that change `.VERSION`
 create a tag `<.VERSION>.<commit count>`.
 

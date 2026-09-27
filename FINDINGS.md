@@ -68,7 +68,6 @@ byte-exact test.
 | P-027 | xhttp/httperror, restserver/authz       | `codes.go` `codeStatus`; `authz.go` `authHandler.ServeHTTP`              | `PermissionDenied` maps to 401; authz denies with 401 instead of 403                                                                         | correctness | LOW      | Needs Approval |
 | P-028 | restserver/authz                        | `authz.go` `authHandler.ServeHTTP`                                       | Denial error double-wrapped, duplicating the code in the message and dropping the context                                                    | correctness | LOW      | Needs Approval |
 | P-029 | xhttp/httperror                         | `errors.go` `errMsg`                                                     | Panics on a non-string format argument                                                                                                       | bug         | LOW      | Open           |
-| P-030 | xhttp/correlation                       | `correlation.go` `correlationIDFromGRPC`, `WithMetaFromRequest`          | gRPC metadata looked up and stored under a canonical-case key                                                                                | bug         | LOW      | Open           |
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-032 | xhttp/marshal, xhttp/identity           | `marshal.go` `WriteJSON`; `ctx.go`                                       | Internal error text echoed to clients in 5xx/401 bodies                                                                                      | security    | LOW      | Needs Approval |
 | P-033 | restserver/authz                        | `authz.go` `checkAccess`                                                 | `OPTIONS` bypasses authz even with `OptionsPassthrough`                                                                                      | security    | LOW      | Needs Approval |
@@ -273,11 +272,6 @@ byte-exact test.
 
 - Evidence: `fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)`.
 - Fix: check the assertion and fall back to `fmt.Sprint`.
-
-### P-030 Canonical-case gRPC metadata key
-
-- Evidence: `md[header.XCorrelationID]` and `metadata.MD{header.XCorrelationID: ...}`; MD keys are lowercase.
-- Fix: use `CorrelationIDgRPCHeaderName` and `md.Set`.
 
 ### P-031 Granularity divide by zero
 
