@@ -29,6 +29,11 @@
 // expiry (Redis KEEPTTL). The memory provider never evicts on its own: the
 // caller must run CleanExpired periodically, and NowFunc can be overridden
 // in tests to control its clock.
+// GetOrSet reads through the cache on a miss and stores a successful getter
+// result with the provider's default TTL. The getter returns a pointer to the
+// value to store. On a miss, the destination must point to a concrete type;
+// providers cannot reliably restore values into interface destinations.
+// Concurrent misses may run the getter more than once.
 //
 // Pub/Sub: Subscribe returns a Subscription whose ReceiveMessage blocks
 // until a message arrives or the context is done (checked about once a

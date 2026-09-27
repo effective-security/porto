@@ -40,6 +40,8 @@ if err := s.Start(); err != nil { // spawns the ticker goroutine
 defer s.Stop() // signals the ticker to exit; does not wait for running tasks
 ```
 
+Scheduler.List returns a copy of the task slice, and Task.Schedule returns a snapshot of schedule state. New copies its input Schedule. Use Add/Clear and SetNextRun/UpdateSchedule to change live state. Stop is idempotent, and a stopped scheduler may be started again.
+
 The constructors NewTaskOnWeekday, NewTaskDaily and Task.Do panic on invalid input \(out\-of\-range time, non\-function callback, wrong parameter count\); NewTask and ParseSchedule return an error for an invalid format string.
 
 Package\-level state: TimeNow \(the clock, overridable in tests\) and the time location set by SetGlobalLocation are process\-global and not synchronized.
@@ -105,7 +107,7 @@ func SetGlobalLocation(newLocation *time.Location)
 SetGlobalLocation sets the process\-global time location used when computing daily and weekly run times \(NewTaskDaily, NewTaskOnWeekday, "hh:mm" formats\). It is not synchronized; call it before creating tasks.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L286-L288>)
+## type [Option](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L283-L285>)
 
 Option configures a Scheduler \(NewScheduler\) or a Task \(New, NewTask\*\). Options not applicable to the receiver are silently ignored: WithTickerInterval applies only to schedulers, WithID and WithRunTimeout only to tasks, and WithPublisher to both.
 
@@ -116,7 +118,7 @@ type Option interface {
 ```
 
 <a name="WithID"></a>
-### func [WithID](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L320>)
+### func [WithID](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L317>)
 
 ```go
 func WithID(id string) Option
@@ -125,7 +127,7 @@ func WithID(id string) Option
 WithID sets the task ID instead of the generated UUIDv7. Task\-only.
 
 <a name="WithPublisher"></a>
-### func [WithPublisher](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L336>)
+### func [WithPublisher](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L333>)
 
 ```go
 func WithPublisher(publisher Publisher) Option
@@ -134,7 +136,7 @@ func WithPublisher(publisher Publisher) Option
 WithPublisher sets the Publisher for a scheduler \(propagated to its tasks\) or for an individual task.
 
 <a name="WithRunTimeout"></a>
-### func [WithRunTimeout](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L328>)
+### func [WithRunTimeout](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L325>)
 
 ```go
 func WithRunTimeout(runTimeout time.Duration) Option
@@ -143,7 +145,7 @@ func WithRunTimeout(runTimeout time.Duration) Option
 WithRunTimeout sets how long Task.Run waits to acquire the task's run lock before giving up \(default DefaultRunTimeoutInterval\). Task\-only.
 
 <a name="WithTickerInterval"></a>
-### func [WithTickerInterval](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L313>)
+### func [WithTickerInterval](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L310>)
 
 ```go
 func WithTickerInterval(tickerInterval time.Duration) Option
@@ -164,9 +166,9 @@ type Publisher interface {
 ```
 
 <a name="Schedule"></a>
-## type [Schedule](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L85-L103>)
+## type [Schedule](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L86-L104>)
 
-Schedule describes when a task runs. Fields are exported for inspection \(e.g. by a Publisher\) and are mutated by Run and UpdateNextRun without locking.
+Schedule describes when a task runs. Fields are exported for inspection \(e.g. by a Publisher\). Task.Schedule returns a snapshot of these fields.
 
 ```go
 type Schedule struct {
@@ -190,7 +192,7 @@ type Schedule struct {
 ```
 
 <a name="ParseSchedule"></a>
-### func [ParseSchedule](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L437>)
+### func [ParseSchedule](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L485>)
 
 ```go
 func ParseSchedule(format string) (*Schedule, error)
@@ -206,7 +208,7 @@ ParseSchedule parses a case\-insensitive, space\-separated schedule string:
 "hh:mm" alone means daily at that time; with a weekday it means weekly. It returns an error when the format is ambiguous or the unit is missing.
 
 <a name="Schedule.Duration"></a>
-### func \(\*Schedule\) [Duration](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L572>)
+### func \(\*Schedule\) [Duration](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L620>)
 
 ```go
 func (s *Schedule) Duration() time.Duration
@@ -215,7 +217,7 @@ func (s *Schedule) Duration() time.Duration
 Duration returns Interval\*Unit as a time.Duration \(0 for Never\). The value is cached on first call, so later changes to Interval/Unit are not reflected.
 
 <a name="Schedule.Equal"></a>
-### func \(\*Schedule\) [Equal](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L107>)
+### func \(\*Schedule\) [Equal](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L108>)
 
 ```go
 func (s *Schedule) Equal(other *Schedule) bool
@@ -224,7 +226,7 @@ func (s *Schedule) Equal(other *Schedule) bool
 Equal reports whether the two schedules have the same Interval, Unit, StartDay and Format; run state is ignored.
 
 <a name="Schedule.GetLastRun"></a>
-### func \(\*Schedule\) [GetLastRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L116>)
+### func \(\*Schedule\) [GetLastRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L117>)
 
 ```go
 func (s *Schedule) GetLastRun() *time.Time
@@ -233,7 +235,7 @@ func (s *Schedule) GetLastRun() *time.Time
 GetLastRun returns LastRunAt, or nil if the task has never actually run \(RunCount == 0\), even when LastRunAt was set as a schedule anchor.
 
 <a name="Schedule.ShouldRun"></a>
-### func \(\*Schedule\) [ShouldRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L544>)
+### func \(\*Schedule\) [ShouldRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L592>)
 
 ```go
 func (s *Schedule) ShouldRun() bool
@@ -242,7 +244,7 @@ func (s *Schedule) ShouldRun() bool
 ShouldRun reports whether TimeNow\(\) is past NextRunAt.
 
 <a name="Schedule.UpdateNextRun"></a>
-### func \(\*Schedule\) [UpdateNextRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L551>)
+### func \(\*Schedule\) [UpdateNextRun](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L599>)
 
 ```go
 func (s *Schedule) UpdateNextRun() time.Time
@@ -253,7 +255,7 @@ UpdateNextRun sets NextRunAt to LastRunAt\+Duration and returns it. When LastRun
 <a name="Scheduler"></a>
 ## type [Scheduler](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L32-L59>)
 
-Scheduler owns a set of tasks and a ticker goroutine that starts due tasks. All methods are safe for concurrent use except Count, which reads without a lock.
+Scheduler owns a set of tasks and a ticker goroutine that starts due tasks. Its methods are safe for concurrent use.
 
 ```go
 type Scheduler interface {
@@ -265,8 +267,8 @@ type Scheduler interface {
     Add(Task) Scheduler
     // Get returns the task with the given ID, or nil if not found.
     Get(id string) Task
-    // List returns the registered tasks. The returned slice shares the
-    // scheduler's backing array; do not modify it.
+    // List returns a snapshot of the registered task slice. Changes to the
+    // returned slice do not change scheduler membership.
     List() []Task
     // Clear removes all tasks from the pool. Tasks already started keep running.
     Clear()
@@ -279,7 +281,7 @@ type Scheduler interface {
     // It returns an error if the scheduler is already running.
     Start() error
     // Stop signals the ticker goroutine to exit. It does not wait for the
-    // goroutine or for in-flight tasks. It returns an error if not running.
+    // goroutine or for in-flight tasks. Repeated calls succeed.
     Stop() error
     // Publish calls Publish on every registered task.
     Publish()
@@ -287,7 +289,7 @@ type Scheduler interface {
 ```
 
 <a name="NewScheduler"></a>
-### func [NewScheduler](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L102>)
+### func [NewScheduler](<https://github.com/effective-security/porto/blob/main/pkg/tasks/scheduler.go#L82>)
 
 ```go
 func NewScheduler(ops ...Option) Scheduler
@@ -296,9 +298,9 @@ func NewScheduler(ops ...Option) Scheduler
 NewScheduler creates a stopped scheduler. Only WithTickerInterval and WithPublisher are meaningful here; task\-level options are ignored.
 
 <a name="Task"></a>
-## type [Task](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L48-L81>)
+## type [Task](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L49-L82>)
 
-Task is a scheduled unit of work: a Schedule plus a callback bound with Do. Create one with New, NewTask, NewTaskAtIntervals, NewTaskOnWeekday or NewTaskDaily, bind the callback with Do, then hand it to Scheduler.Add. Tasks are not internally synchronized beyond the run lock; status fields are written by the goroutine executing Run.
+Task is a scheduled unit of work: a Schedule plus a callback bound with Do. Create one with New, NewTask, NewTaskAtIntervals, NewTaskOnWeekday or NewTaskDaily, bind the callback with Do, then hand it to Scheduler.Add. Task methods synchronize run state. Schedule returns a snapshot; use SetNextRun or UpdateSchedule to change a task's schedule.
 
 ```go
 type Task interface {
@@ -309,7 +311,7 @@ type Task interface {
     Name() string
     // RunCount returns how many times Run has started the callback.
     RunCount() uint32
-    // Schedule returns the live schedule (not a copy).
+    // Schedule returns a snapshot of the current schedule and run state.
     Schedule() *Schedule
     // UpdateSchedule replaces the schedule with one parsed from format
     // (see ParseSchedule); the next run is recomputed on the next Run.
@@ -338,16 +340,16 @@ type Task interface {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L210>)
+### func [New](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L213>)
 
 ```go
 func New(s *Schedule, ops ...Option) Task
 ```
 
-New wraps an existing Schedule in a Task. Use WithID, WithRunTimeout and WithPublisher to customize; the callback must still be bound with Do.
+New copies a Schedule into a Task. Later changes to the input do not affect the task. Use WithID, WithRunTimeout and WithPublisher to customize; the callback must still be bound with Do.
 
 <a name="NewTask"></a>
-### func [NewTask](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L199>)
+### func [NewTask](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L201>)
 
 ```go
 func NewTask(format string, ops ...Option) (Task, error)
@@ -356,7 +358,7 @@ func NewTask(format string, ops ...Option) (Task, error)
 NewTask creates a task from a schedule string \(see ParseSchedule\), e.g. "every 5 minutes", "every day 11:15", "16:18", "monday", "saturday 23:13". It returns an error for an invalid format.
 
 <a name="NewTaskAtIntervals"></a>
-### func [NewTaskAtIntervals](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L149>)
+### func [NewTaskAtIntervals](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L151>)
 
 ```go
 func NewTaskAtIntervals(interval uint64, unit TimeUnit, ops ...Option) Task
@@ -365,7 +367,7 @@ func NewTaskAtIntervals(interval uint64, unit TimeUnit, ops ...Option) Task
 NewTaskAtIntervals creates a task that runs every interval\*unit, starting one interval after Do is called. An interval of 0 yields a zero Duration and the task becomes due on every tick.
 
 <a name="NewTaskDaily"></a>
-### func [NewTaskDaily](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L180>)
+### func [NewTaskDaily](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L182>)
 
 ```go
 func NewTaskDaily(hour, minute int, ops ...Option) Task
@@ -374,7 +376,7 @@ func NewTaskDaily(hour, minute int, ops ...Option) Task
 NewTaskDaily creates a task that runs every day at hour:minute in the package location. It panics if hour or minute is out of range.
 
 <a name="NewTaskOnWeekday"></a>
-### func [NewTaskOnWeekday](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L162>)
+### func [NewTaskOnWeekday](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L164>)
 
 ```go
 func NewTaskOnWeekday(startDay time.Weekday, hour, minute int, ops ...Option) Task
@@ -383,7 +385,7 @@ func NewTaskOnWeekday(startDay time.Weekday, hour, minute int, ops ...Option) Ta
 NewTaskOnWeekday creates a weekly task that runs on startDay at hour:minute in the package location. It panics if hour or minute is out of range.
 
 <a name="TimeUnit"></a>
-## type [TimeUnit](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L21>)
+## type [TimeUnit](<https://github.com/effective-security/porto/blob/main/pkg/tasks/task.go#L22>)
 
 TimeUnit is the unit of a Schedule interval \(Seconds, Minutes, ...\).
 

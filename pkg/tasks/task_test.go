@@ -310,44 +310,49 @@ func panicTask() {
 
 func Test_TaskLongTime(t *testing.T) {
 	pub := &testPublisher{}
-	job1 := NewTaskAtIntervals(1, Seconds, WithPublisher(pub)).Do("longTask1", longTask).(*task)
-	job2 := NewTaskAtIntervals(1, Seconds).Do("longTask2", longTask).SetPublisher(pub).(*task)
-
-	var wg sync.WaitGroup
-
-	executed := 0
-	skipped := 0
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if job1.Run() {
-				executed++
-			} else {
-				skipped++
-			}
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if job2.Run() {
-				executed++
-			} else {
-				skipped++
-			}
-		}()
+	const runTimeout = 25 * time.Millisecond
+	started1 := make(chan struct{})
+	started2 := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	job1 := NewTaskAtIntervals(1, Seconds, WithPublisher(pub), WithRunTimeout(runTimeout)).Do("longTask1", func() {
+		close(started1)
+		<-release
+	}).(*task)
+	job2 := NewTaskAtIntervals(1, Seconds, WithRunTimeout(runTimeout)).Do("longTask2", func() {
+		close(started2)
+		<-release
+	}).SetPublisher(pub).(*task)
+	results := make(chan bool, 6)
+	go func() { results <- job1.Run() }()
+	go func() { results <- job2.Run() }()
+	select {
+	case <-started1:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first callback did not start")
 	}
-	wg.Wait()
-	assert.Equal(t, 2, executed)
-	assert.Equal(t, 4, skipped)
-	assert.Equal(t, 2, len(pub.published))
-	assert.GreaterOrEqual(t, pub.runCount, 2)
-	assert.GreaterOrEqual(t, pub.stopCount, 2)
-}
+	select {
+	case <-started2:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second callback did not start")
+	}
 
-func longTask() {
-	logger.Info("TEST: slow task started")
-	time.Sleep(3 * time.Second)
+	for range 2 {
+		go func() { results <- job1.Run() }()
+		go func() { results <- job2.Run() }()
+	}
+	for range 4 {
+		assert.False(t, <-results)
+	}
+	releaseOnce.Do(func() { close(release) })
+	for range 2 {
+		assert.True(t, <-results)
+	}
+	published, runCount, stopCount := pub.snapshot()
+	assert.Equal(t, 2, len(published))
+	assert.GreaterOrEqual(t, runCount, 2)
+	assert.GreaterOrEqual(t, stopCount, 2)
 }
 
 func Test_TaskUpdate(t *testing.T) {
@@ -361,7 +366,7 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.Equal(t, time.Weekday(0), sch.StartDay)
 	assert.Equal(t, time.Duration(0), sch.period)
 	assert.Equal(t, 2*time.Hour, tsk.Schedule().Duration())
-	assert.Equal(t, 2*time.Hour, sch.period)
+	assert.Equal(t, time.Duration(0), sch.period)
 
 	tsk.UpdateSchedule("every 7 days")
 	require.NoError(t, err)
@@ -373,7 +378,7 @@ func Test_TaskUpdate(t *testing.T) {
 	assert.Equal(t, time.Weekday(0), sch.StartDay)
 	assert.Equal(t, time.Duration(0), sch.period)
 	assert.Equal(t, 7*24*time.Hour, tsk.Schedule().Duration())
-	assert.Equal(t, 7*24*time.Hour, sch.period)
+	assert.Equal(t, time.Duration(0), sch.period)
 	//assert.Equal(t, time.Unix(0, 0), sch.NextRunAt)
 }
 

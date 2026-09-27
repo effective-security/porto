@@ -89,34 +89,56 @@ type Provider interface {
 
 // GetOrSet decodes the cached value for key into value (a non-nil pointer).
 // On a miss it calls getter, which must return a pointer, and copies the
-// pointed-to result into value. Note that the result is NOT written back to
-// the cache; callers must Set it themselves. Errors other than a miss are
-// returned as-is.
+// pointed-to result into value. A successful result is also stored with the
+// provider's default TTL (Set with ttl 0). A cache write failure is returned
+// without changing value. Interface destinations are unsupported on a miss
+// because providers cannot reliably restore the getter's concrete type.
+// Concurrent misses may call getter more than once.
+// Errors other than a miss are returned as-is.
 func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error {
 	rv := reflect.ValueOf(value)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return &json.InvalidUnmarshalError{Type: reflect.TypeOf(value)}
 	}
 
-	var res any
 	err := p.Get(ctx, key, value)
-	if err != nil {
-		if IsNotFoundError(err) {
-			res, err = getter()
-			if err == nil {
-				rv2 := reflect.ValueOf(res)
-				if rv2.Kind() != reflect.Pointer || rv2.IsNil() {
-					return &json.InvalidUnmarshalError{Type: reflect.TypeOf(rv2)}
-				}
-				rv2 = reflect.Indirect(rv2)
-				if rv2.Kind() == reflect.Interface {
-					rv2 = rv2.Elem()
-				}
-				rv.Elem().Set(rv2)
-			}
-		}
+	if err == nil || !IsNotFoundError(err) {
+		return err
 	}
-	return err
+	if rv.Elem().Kind() == reflect.Interface {
+		return errors.New("cache miss requires a concrete destination type")
+	}
+	if getter == nil {
+		return errors.New("getter is nil")
+	}
+
+	res, err := getter()
+	if err != nil {
+		return err
+	}
+	result := reflect.ValueOf(res)
+	if result.Kind() != reflect.Pointer || result.IsNil() {
+		return &json.InvalidUnmarshalError{Type: reflect.TypeOf(res)}
+	}
+	result = result.Elem()
+	if result.Kind() == reflect.Interface {
+		if result.IsNil() {
+			return errors.New("getter returned nil value")
+		}
+		result = result.Elem()
+	}
+	target := rv.Elem()
+	if !result.Type().AssignableTo(target.Type()) {
+		return errors.Errorf("getter returned %s, cannot assign to %s", result.Type(), target.Type())
+	}
+	if !result.CanInterface() {
+		return errors.Errorf("getter result of type %s cannot be cached", result.Type())
+	}
+	if err := p.Set(ctx, key, result.Interface(), 0); err != nil {
+		return errors.Wrapf(err, "failed to cache key %s", key)
+	}
+	target.Set(result)
+	return nil
 }
 
 // ErrNotFound is returned by Get for a missing or expired key.

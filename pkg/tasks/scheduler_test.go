@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"maps"
 	"sync"
 	"testing"
 	"time"
@@ -43,32 +44,42 @@ func (p *testPublisher) Publish(task Task) {
 	}
 }
 
-func Test_StartAndStop(t *testing.T) {
-	// xlog.SetFormatter(xlog.NewPrettyFormatter(os.Stdout))
-	// xlog.SetGlobalLogLevel(xlog.DEBUG)
+func (p *testPublisher) snapshot() (map[string]Task, int, int) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return maps.Clone(p.published), p.runCount, p.stopCount
+}
 
+func Test_StartAndStop(t *testing.T) {
 	pub := &testPublisher{}
-	scheduler := NewScheduler().(*scheduler)
+	scheduler := NewScheduler(WithTickerInterval(time.Millisecond)).(*scheduler)
 	require.NotNil(t, scheduler)
 	defer scheduler.Stop()
 
-	scheduler.Add(NewTaskAtIntervals(1, Seconds).Do("test", testTask))
-	scheduler.Add(NewTaskAtIntervals(1, Seconds).Do("test", taskWithParams, 1, "hello"))
-	assert.Equal(t, 2, scheduler.Len())
+	first := NewTaskAtIntervals(0, Seconds).Do("first", func() {})
+	second := NewTaskAtIntervals(0, Seconds).Do("second", func() {})
+	scheduler.Add(first)
+	scheduler.Add(second)
+	assert.Equal(t, 2, scheduler.Count())
 
-	assert.Empty(t, pub.published)
+	published, _, _ := pub.snapshot()
+	assert.Empty(t, published)
 	scheduler.SetPublisher(pub)
 
 	err := scheduler.Start()
 	require.NoError(t, err)
-	time.Sleep(5 * time.Second)
+	require.Eventually(t, func() bool {
+		_, runCount, stopCount := pub.snapshot()
+		return first.RunCount() >= 3 && second.RunCount() >= 3 && runCount >= 6 && stopCount >= 6
+	}, 5*time.Second, 5*time.Millisecond)
 
 	err = scheduler.Stop()
 	require.NoError(t, err)
-
-	// Let running tasks to complete
-	time.Sleep(2 * time.Second)
 	assert.False(t, scheduler.IsRunning())
+	require.Eventually(t, func() bool {
+		return !first.IsRunning() && !second.IsRunning()
+	}, time.Second, time.Millisecond)
+	published, runCount, stopCount := pub.snapshot()
 
 	tasks := scheduler.List()
 	assert.Equal(t, 2, len(tasks))
@@ -76,10 +87,10 @@ func Test_StartAndStop(t *testing.T) {
 		assert.False(t, j.IsRunning())
 		count := j.RunCount()
 		assert.GreaterOrEqual(t, count, uint32(3), "Expected count >= 3, actual %d, name: %s", count, j.Name())
-		assert.NotNil(t, pub.published[j.ID()])
+		assert.NotNil(t, published[j.ID()])
 	}
-	assert.GreaterOrEqual(t, pub.runCount, 6)
-	assert.GreaterOrEqual(t, pub.stopCount, 6)
+	assert.GreaterOrEqual(t, runCount, 6)
+	assert.GreaterOrEqual(t, stopCount, 6)
 
 	assert.False(t, scheduler.IsRunning())
 }
