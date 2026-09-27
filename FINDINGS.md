@@ -75,9 +75,7 @@ byte-exact test.
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 79.2% is below the 80% CI gate                                                                                                | docs        | LOW      | Open           |
 | P-036 | pkg/cache                               | `cache.go` `GetOrSet`                                                    | Computed value is never written to the cache (hit rate 0)                                                                                    | bug         | HIGH     | Needs Approval |
 | P-037 | pkg/tlsconfig                           | `reloader.go` `KeypairReloader.tlsCert`                                  | Process panics when the served certificate expires at runtime                                                                                | bug         | HIGH     | Needs Approval |
-| P-038 | pkg/retriable                           | `dumpreq.go` `DumpRequestOut`; `retriable.go` `debugRequest`             | `Authorization`/`DPoP` headers written to DEBUG logs                                                                                         | security    | MEDIUM   | Open           |
 | P-039 | pkg/rpcclient                           | `client.go` `newClient`, `dialSetupOpts`                                 | TLS configured but endpoint without `https://` dials plaintext with no token                                                                 | security    | MEDIUM   | Needs Approval |
-| P-040 | pkg/retriable                           | `retriable.go` `WithHeaders`, `AddHeader`, `convertRequest`              | Setters write under `RLock`; `convertRequest` reads headers and writes the token unlocked                                                    | race        | MEDIUM   | Open           |
 | P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
 | P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
 | P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
@@ -96,14 +94,13 @@ byte-exact test.
 | P-056 | pkg/retriable                           | `retriable.go` `Do`                                                      | Backoff sleep ignores the request context; drained bodies are not closed                                                                     | correctness | LOW      | Open           |
 | P-057 | pkg/retriable                           | `retriable.go` `executeRequest`                                          | `RequestTimeout` cancel func discarded; timers live until the deadline                                                                       | performance | LOW      | Open           |
 | P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
-| P-059 | pkg/retriable                           | `retriable.go` `convertRequest`                                          | DPoP proof signed once and reused across retries; nil signer panics                                                                          | bug         | LOW      | Open           |
 | P-060 | pkg/retriable                           | `nonce.go` `pushNonce`, `Nonce`                                          | Cache trim drops the newest nonce; `Nonce()` ignores context                                                                                 | bug         | LOW      | Open           |
 | P-061 | pkg/retriable                           | `retriable.go` `WithTLS`, `WithDNSServer`                                | Unchecked `*http.Transport` assertion; mutates a caller-supplied transport in place                                                          | bug         | LOW      | Needs Approval |
 | P-062 | pkg/redisclient                         | `redisclient.go` `Close`                                                 | Nils the embedded client; children keep using a closed connection; close errors hidden                                                       | bug         | LOW      | Needs Approval |
 | P-063 | pkg/redisclient                         | `redisclient.go` `SAddWithEviction`, `HSetWithEviction`                  | Errors ignored; re-adds create duplicate list entries and mis-evict                                                                          | correctness | LOW      | Open           |
 | P-064 | pkg/cache                               | `memory.go` `Keys` vs `redis.go` `Keys`                                  | Memory returns prefixed names, Redis strips the prefix; pattern subsets differ                                                               | correctness | LOW      | Needs Approval |
 | P-065 | pkg/retriable                           | `retriable.go` `RequestURL`                                              | Byte-offset slicing breaks URLs with userinfo                                                                                                | bug         | LOW      | Open           |
-| P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; token folder `0755`; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                          | correctness | LOW      | Open           |
+| P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                                               | correctness | LOW      | Open           |
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
 | P-069 | pkg/tasks                               | `task.go` `Run`                                                          | Unused `time.NewTimer` allocated per run alongside `time.After`                                                                              | performance | LOW      | Open           |
@@ -309,22 +306,11 @@ byte-exact test.
 - Impact: a late rotation terminates the process on the next handshake or poll instead of failing that handshake.
 - Fix: return an error from the callbacks and log; keep serving the previous certificate.
 
-### P-038 Bearer tokens in DEBUG request dumps
-
-- Evidence: `DumpRequestOut` is a verbatim copy of `httputil.DumpRequestOut` with no redaction (the old comment claimed auth headers were dropped); `Do` logs the dump at DEBUG.
-- Fix: clone the headers and redact `Authorization`, `DPoP` and `Cookie` before dumping.
-
 ### P-039 rpcclient silent plaintext downgrade
 
 - Evidence: TLS and per-RPC credentials are applied only when `cfg.TLS != nil` and the endpoint starts with `https://` or `unixs://`; otherwise `insecure.NewCredentials()` and no token.
 - Impact: a missing scheme in config yields unauthenticated plaintext gRPC with no error.
 - Fix: return an error (or apply TLS) when `TLS` is set and the scheme is not secure.
-
-### P-040 retriable client locking
-
-- Evidence: every setter takes `RLock` and writes (`c.headers[header] = value`, `c.Policy = policy`); `convertRequest` ranges `c.headers` unlocked and writes `c.token` on refresh.
-- Impact: concurrent map read/write is a fatal runtime error under token rotation.
-- Fix: `Lock()` in setters; copy headers under `RLock`; single-flight the refresh.
 
 ### P-041 Redis subscription goroutine leak
 
@@ -408,14 +394,13 @@ byte-exact test.
 - P-056: `time.Sleep(sleepDuration)` ignores `ctx.Done()`; `consumeResponseBody` only drains.
 - P-057: `ctx, _ = c.ensureContext(...)` drops the cancel func.
 - P-058: `ShouldRetry` returns `LimitExceeded` for 429 before consulting `p.Retries`.
-- P-059: `dpop.ForRequest` runs once before the retry loop; `c.dpopSigner` may be nil.
 - P-060: `c.nonces = c.nonces[nonceCacheLimit/2 : count-1]` drops the freshest nonce; `Nonce()` uses `context.Background()`.
 - P-061: `c.httpClient.Transport.(*http.Transport)` unchecked; `http.DefaultTransport` mutated when passed in.
 - P-062: `Close` sets `c.Client = nil` and always returns nil.
 - P-063: `length, _ := c.LLen(...)`, `oldest, _ := c.LPop(...)`, `_ = c.SRem(...)`; `RPush` appends duplicates.
 - P-064: memory `Keys` appends the full name; Redis `Keys` trims the prefix; memory supports only a trailing wildcard.
 - P-065: `path := rawURL[len(host):]` with `host := u.Scheme + "://" + u.Host`.
-- P-066: `go-homedir` vs `resolve.ExpandPath`; `os.MkdirAll(c.folder, 0755)` for a credentials folder; `netutil.WaitForNetwork(time.Second)` in a constructor; `bodyCopy` of error responses unbounded.
+- P-066: `go-homedir` vs `resolve.ExpandPath`; `netutil.WaitForNetwork(time.Second)` in a constructor; `bodyCopy` of error responses unbounded.
 
 ### P-067 to P-074 appinit / tasks / tlsconfig / discovery LOW items
 

@@ -207,7 +207,7 @@ var DefaultNonRetriableErrors = []string{
 ```
 
 <a name="DumpRequestOut"></a>
-## func [DumpRequestOut](<https://github.com/effective-security/porto/blob/main/pkg/retriable/dumpreq.go#L23>)
+## func [DumpRequestOut](<https://github.com/effective-security/porto/blob/main/pkg/retriable/dumpreq.go#L28>)
 
 ```go
 func DumpRequestOut(req *http.Request, body bool) ([]byte, error)
@@ -215,10 +215,10 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error)
 
 DumpRequestOut returns the wire representation of an outgoing client request, like httputil.DumpRequestOut: it includes any headers that the standard http.Transport adds, such as User\-Agent. When body is true the request body is read into memory and restored on req.
 
-NOTE: this is a copy of the Go standard library implementation, kept in this package so it can be adapted. It does not redact the Authorization or DPoP headers; the client only calls it at DEBUG log level.
+Sensitive credential headers are redacted in the dump without changing req. A nil request or URL returns an error. This is adapted from the Go standard library implementation.
 
 <a name="HostFolderName"></a>
-## func [HostFolderName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/config.go#L339>)
+## func [HostFolderName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/config.go#L349>)
 
 ```go
 func HostFolderName(host string) string
@@ -227,7 +227,7 @@ func HostFolderName(host string) string
 HostFolderName returns the storage sub\-folder name derived from a host URL: the host\[:port\] part with ":" replaced by "\_", e.g. "https://foo.bar:3444" \-\> "foo.bar\_3444".
 
 <a name="PropagateHeadersFromRequest"></a>
-## func [PropagateHeadersFromRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1100>)
+## func [PropagateHeadersFromRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1211>)
 
 ```go
 func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers ...string) context.Context
@@ -236,7 +236,7 @@ func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers .
 PropagateHeadersFromRequest returns a context carrying the named headers that are present in the incoming request r, so that a Client used with that context forwards them on its outgoing requests \(see WithHeaders\). A nil ctx is treated as context.Background\(\).
 
 <a name="WithHeaders"></a>
-## func [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1125>)
+## func [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1236>)
 
 ```go
 func WithHeaders(ctx context.Context, headers map[string]string) context.Context
@@ -245,7 +245,7 @@ func WithHeaders(ctx context.Context, headers map[string]string) context.Context
 WithHeaders returns a copy of ctx carrying headers that a Client sets on every outgoing request made with that context \(overriding client\-level headers of the same name\). It replaces, not merges, headers stored by an earlier WithHeaders or PropagateHeadersFromRequest call. A nil ctx is treated as context.Background\(\).
 
 <a name="AuthToken"></a>
-## type [AuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L121-L135>)
+## type [AuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L227-L241>)
 
 AuthToken is a parsed access token as stored in .auth\_token or an environment variable; see ParseAuthToken.
 
@@ -268,7 +268,7 @@ type AuthToken struct {
 ```
 
 <a name="LoadAuthToken"></a>
-### func [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L110>)
+### func [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L216>)
 
 ```go
 func LoadAuthToken(dir string) (*AuthToken, string, error)
@@ -277,7 +277,7 @@ func LoadAuthToken(dir string) (*AuthToken, string, error)
 LoadAuthToken reads and parses the ".auth\_token" file in dir. It returns the token, the file location \(also on error\) and an error when the file is missing or malformed. Expiry is not checked; use AuthToken.Expired.
 
 <a name="ParseAuthToken"></a>
-### func [ParseAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L148>)
+### func [ParseAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L254>)
 
 ```go
 func ParseAuthToken(rawToken, location string) (*AuthToken, string, error)
@@ -286,7 +286,7 @@ func ParseAuthToken(rawToken, location string) (*AuthToken, string, error)
 ParseAuthToken parses a token string. A value without "=" is an opaque Bearer access token; otherwise it is parsed as a query string with the keys access\_token \(or id\_token, or token\), refresh\_token, dpop\_jkt and exp \(unix seconds\). location is passed through for the caller's logging. Expiry is parsed but not validated.
 
 <a name="AuthToken.Expired"></a>
-### func \(\*AuthToken\) [Expired](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L139>)
+### func \(\*AuthToken\) [Expired](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L245>)
 
 ```go
 func (t *AuthToken) Expired() bool
@@ -295,7 +295,7 @@ func (t *AuthToken) Expired() bool
 Expired returns true if expiry is present on the token, and is behind the current time
 
 <a name="BeforeSendRequest"></a>
-## type [BeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L176>)
+## type [BeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L177>)
 
 BeforeSendRequest is a hook invoked once per request \(before retries\) that may modify or replace the outgoing request.
 
@@ -304,7 +304,7 @@ type BeforeSendRequest func(r *http.Request) *http.Request
 ```
 
 <a name="Client"></a>
-## type [Client](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L326-L346>)
+## type [Client](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L327-L348>)
 
 Client is an HTTP client with retries, JSON marshalling, header propagation and token\-based authorization on top of \*http.Client. Create it with New, Default, LoadClient or a Factory.
 
@@ -323,7 +323,7 @@ type Client struct {
 ```
 
 <a name="Default"></a>
-### func [Default](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L350>)
+### func [Default](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L357>)
 
 ```go
 func Default(host string) (*Client, error)
@@ -341,7 +341,7 @@ func LoadClient(file string) (*Client, error)
 LoadClient reads a single YAML ClientConfig from file \(with \~ and $VAR expansion of all paths\) and returns a Client built with New.
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L358>)
+### func [New](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L365>)
 
 ```go
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error)
@@ -359,7 +359,7 @@ func NewForHost(cfg, host string) (*Client, error)
 NewForHost loads a Factory from the cfg file and returns its client for host. When the config file cannot be loaded, a Default client for host is returned instead; only a failure to build the configured client is an error.
 
 <a name="Client.AddHeader"></a>
-### func \(\*Client\) [AddHeader](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L435>)
+### func \(\*Client\) [AddHeader](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L444>)
 
 ```go
 func (c *Client) AddHeader(header, value string) *Client
@@ -368,7 +368,7 @@ func (c *Client) AddHeader(header, value string) *Client
 AddHeader adds a header that is sent with every request, replacing any previous value for the same name.
 
 <a name="Client.CurrentHost"></a>
-### func \(\*Client\) [CurrentHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L412>)
+### func \(\*Client\) [CurrentHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L421>)
 
 ```go
 func (c *Client) CurrentHost() string
@@ -377,7 +377,7 @@ func (c *Client) CurrentHost() string
 CurrentHost returns the configured host \(scheme://host\[:port\]\).
 
 <a name="Client.DecodeResponse"></a>
-### func \(\*Client\) [DecodeResponse](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L948>)
+### func \(\*Client\) [DecodeResponse](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1059>)
 
 ```go
 func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int, error)
@@ -395,13 +395,13 @@ func (c *Client) Delete(ctx context.Context, path string, body any) (http.Header
 Delete makes an HTTP DELETE to the configured host \(see Request\) and decodes the response into body \(io.Writer or JSON target\). Statuses \>= 300 are returned as an error, with retries applied per the client Policy. path should be an absolute URI path, i.e. /foo/bar/baz
 
 <a name="Client.Do"></a>
-### func \(\*Client\) [Do](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L847>)
+### func \(\*Client\) [Do](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L945>)
 
 ```go
 func (c *Client) Do(r *http.Request) (*http.Response, error)
 ```
 
-Do sends r with retries according to Policy and returns the final response, which the caller must close. It implements Requestor. Before sending, the client headers, context\-propagated headers \(see WithHeaders / PropagateHeadersFromRequest\), the X\-Correlation\-ID, the BeforeSendRequest hook, the caller\-identity token and the DPoP proof are applied; the body is buffered so it can be rewound for each retry. Do does not apply Policy.RequestTimeout: bound r's context yourself. When retries are exhausted the last response \(or transport error\) is returned; a non\-2xx status is not converted to an error here.
+Do sends r with retries according to Policy and returns the final response, which the caller must close. It implements Requestor. Before sending, the client headers, context\-propagated headers \(see WithHeaders / PropagateHeadersFromRequest\), the X\-Correlation\-ID, the BeforeSendRequest hook and caller\-identity token are applied once; the DPoP proof is signed for each attempt. The body is buffered so it can be rewound for each retry. Do does not apply Policy.RequestTimeout: bound r's context yourself. When retries are exhausted the last response \(or transport error\) is returned; a non\-2xx status is not converted to an error here.
 
 <a name="Client.Get"></a>
 ### func \(\*Client\) [Get](<https://github.com/effective-security/porto/blob/main/pkg/retriable/client.go#L51>)
@@ -413,7 +413,7 @@ func (c *Client) Get(ctx context.Context, path string, body any) (http.Header, i
 Get makes an HTTP GET to the configured host \(see Request\) and decodes the response into body \(io.Writer or JSON target\). Statuses \>= 300 are returned as an error, with retries applied per the client Policy. path should be an absolute URI path, i.e. /foo/bar/baz
 
 <a name="Client.GetNonceProvider"></a>
-### func \(\*Client\) [GetNonceProvider](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L588>)
+### func \(\*Client\) [GetNonceProvider](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L608>)
 
 ```go
 func (c *Client) GetNonceProvider() NonceProvider
@@ -422,7 +422,7 @@ func (c *Client) GetNonceProvider() NonceProvider
 GetNonceProvider returns the current nonce provider, or nil.
 
 <a name="Client.HTTPClient"></a>
-### func \(\*Client\) [HTTPClient](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L401>)
+### func \(\*Client\) [HTTPClient](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L408>)
 
 ```go
 func (c *Client) HTTPClient() *http.Client
@@ -469,7 +469,7 @@ func (c *Client) Put(ctx context.Context, path string, requestBody any, response
 Put makes an HTTP PUT to the configured host \(see Request\). requestBody is sent as\-is for io.Reader, \[\]byte and string, otherwise JSON encoded; the response is decoded into responseBody and statuses \>= 300 are returned as an error, with retries applied per the client Policy. path should be an absolute URI path, i.e. /foo/bar/baz
 
 <a name="Client.Request"></a>
-### func \(\*Client\) [Request](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L655>)
+### func \(\*Client\) [Request](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L675>)
 
 ```go
 func (c *Client) Request(ctx context.Context, method string, host string, path string, requestBody any, responseBody any) (http.Header, int, error)
@@ -480,7 +480,7 @@ Request sends a request to the specified host and decodes the response into resp
 host should include all the protocol/host/port preamble, e.g. https://foo.bar:3444 path should be an absolute URI path, i.e. /foo/bar/baz requestBody can be io.Reader, \[\]byte, string, or an object to be JSON encoded responseBody can be io.Writer, or a struct to decode JSON into.
 
 <a name="Client.RequestURL"></a>
-### func \(\*Client\) [RequestURL](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L633>)
+### func \(\*Client\) [RequestURL](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L653>)
 
 ```go
 func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error)
@@ -489,7 +489,7 @@ func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestB
 RequestURL is similar to Request but takes a raw URL; the host \(scheme://host\[:port\]\) and the remaining path are derived from it.
 
 <a name="Client.SetAuthorization"></a>
-### func \(\*Client\) [SetAuthorization](<https://github.com/effective-security/porto/blob/main/pkg/retriable/config.go#L275>)
+### func \(\*Client\) [SetAuthorization](<https://github.com/effective-security/porto/blob/main/pkg/retriable/config.go#L277>)
 
 ```go
 func (c *Client) SetAuthorization() error
@@ -498,7 +498,7 @@ func (c *Client) SetAuthorization() error
 SetAuthorization adds the Authorization header from Config.AuthToken, loading it from Storage when not yet set. For DPoP tokens the private key named by the token's dpop\_jkt is loaded from Storage and every request is signed. It is a no\-op for hosts that are not https:// or unixs://, and an error when the token is missing or expired.
 
 <a name="Client.SetNonceProvider"></a>
-### func \(\*Client\) [SetNonceProvider](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L581>)
+### func \(\*Client\) [SetNonceProvider](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L601>)
 
 ```go
 func (c *Client) SetNonceProvider(provider NonceProvider)
@@ -507,7 +507,7 @@ func (c *Client) SetNonceProvider(provider NonceProvider)
 SetNonceProvider replaces the nonce provider. When set, Request feeds every response's headers to it via SetFromHeader.
 
 <a name="Client.Storage"></a>
-### func \(\*Client\) [Storage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L407>)
+### func \(\*Client\) [Storage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L414>)
 
 ```go
 func (c *Client) Storage() *Storage
@@ -516,7 +516,7 @@ func (c *Client) Storage() *Storage
 Storage returns the token/key storage of the client's Config, creating it from Config.StorageFolder on first use.
 
 <a name="Client.WithBeforeSendRequest"></a>
-### func \(\*Client\) [WithBeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L474>)
+### func \(\*Client\) [WithBeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L489>)
 
 ```go
 func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client
@@ -525,7 +525,7 @@ func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client
 WithBeforeSendRequest installs a hook that is invoked once per request \(before retries\) to modify or replace the outgoing request.
 
 <a name="Client.WithCallerIdentity"></a>
-### func \(\*Client\) [WithCallerIdentity](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L484>)
+### func \(\*Client\) [WithCallerIdentity](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L499>)
 
 ```go
 func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client
@@ -534,7 +534,7 @@ func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client
 WithCallerIdentity installs a token provider. Before each request the client calls GetCallerIdentity when it has no token or the cached token has expired, and sets the Authorization header from the result.
 
 <a name="Client.WithDNSServer"></a>
-### func \(\*Client\) [WithDNSServer](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L551>)
+### func \(\*Client\) [WithDNSServer](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L571>)
 
 ```go
 func (c *Client) WithDNSServer(dns string) *Client
@@ -543,7 +543,7 @@ func (c *Client) WithDNSServer(dns string) *Client
 WithDNSServer makes the transport resolve names through the given DNS server, which must be specified in \<host\>:\<port\> format. When no transport has been set yet, a clone of http.DefaultTransport is installed; otherwise the existing transport must be an \*http.Transport and its DialContext is replaced in place.
 
 <a name="Client.WithHeaders"></a>
-### func \(\*Client\) [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L419>)
+### func \(\*Client\) [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L428>)
 
 ```go
 func (c *Client) WithHeaders(headers map[string]string) *Client
@@ -552,7 +552,7 @@ func (c *Client) WithHeaders(headers map[string]string) *Client
 WithHeaders adds headers that are sent with every request.
 
 <a name="Client.WithHost"></a>
-### func \(\*Client\) [WithHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L465>)
+### func \(\*Client\) [WithHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L480>)
 
 ```go
 func (c *Client) WithHost(host string) *Client
@@ -561,7 +561,7 @@ func (c *Client) WithHost(host string) *Client
 WithHost sets the host \(scheme://host\[:port\]\) used by the Head/Get/Post/Put/Delete helpers.
 
 <a name="Client.WithName"></a>
-### func \(\*Client\) [WithName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L448>)
+### func \(\*Client\) [WithName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L457>)
 
 ```go
 func (c *Client) WithName(name string) *Client
@@ -570,7 +570,7 @@ func (c *Client) WithName(name string) *Client
 WithName modifies client's name for logging purposes.
 
 <a name="Client.WithNonce"></a>
-### func \(\*Client\) [WithNonce](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L598>)
+### func \(\*Client\) [WithNonce](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L618>)
 
 ```go
 func (c *Client) WithNonce(path, headerName string)
@@ -579,7 +579,7 @@ func (c *Client) WithNonce(path, headerName string)
 WithNonce installs the default nonce provider \(see NewNonceProvider\) that fetches nonces with HEAD requests to path on the configured host and reads them from the headerName response header. A leading CurrentHost\(\) prefix in path is stripped.
 
 <a name="Client.WithPolicy"></a>
-### func \(\*Client\) [WithPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L456>)
+### func \(\*Client\) [WithPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L465>)
 
 ```go
 func (c *Client) WithPolicy(policy Policy) *Client
@@ -597,7 +597,7 @@ func (c *Client) WithStorage(storage *Storage) *Client
 WithStorage replaces the token/key storage used by SetAuthorization.
 
 <a name="Client.WithTLS"></a>
-### func \(\*Client\) [WithTLS](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L495>)
+### func \(\*Client\) [WithTLS](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L515>)
 
 ```go
 func (c *Client) WithTLS(tlsConfig *tls.Config) *Client
@@ -606,7 +606,7 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client
 WithTLS sets the TLS configuration of the transport. When no transport has been set yet, a clone of http.DefaultTransport with 100 max \(idle\) connections per host is installed; otherwise the existing transport is modified in place and must be an \*http.Transport.
 
 <a name="Client.WithTimeout"></a>
-### func \(\*Client\) [WithTimeout](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L527>)
+### func \(\*Client\) [WithTimeout](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L547>)
 
 ```go
 func (c *Client) WithTimeout(timeout time.Duration) *Client
@@ -615,7 +615,7 @@ func (c *Client) WithTimeout(timeout time.Duration) *Client
 WithTimeout sets Policy.RequestTimeout, the per\-call timeout applied by Request and the Get/Post/Put/Delete/Head helpers \(not by Do\).
 
 <a name="Client.WithTransport"></a>
-### func \(\*Client\) [WithTransport](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L518>)
+### func \(\*Client\) [WithTransport](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L538>)
 
 ```go
 func (c *Client) WithTransport(transport http.RoundTripper) *Client
@@ -624,7 +624,7 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client
 WithTransport replaces the HTTP transport. Call it before WithTLS or WithDNSServer, which modify the transport in place.
 
 <a name="Client.WithUserAgent"></a>
-### func \(\*Client\) [WithUserAgent](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L537>)
+### func \(\*Client\) [WithUserAgent](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L557>)
 
 ```go
 func (c *Client) WithUserAgent(name string) *Client
@@ -699,7 +699,7 @@ func (c *ClientConfig) Storage() *Storage
 Storage returns the token/key storage rooted at StorageFolder, creating it on first use.
 
 <a name="ClientOption"></a>
-## type [ClientOption](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L203-L205>)
+## type [ClientOption](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L204-L206>)
 
 A ClientOption modifies the default behavior of Client. Options are applied by New after the ClientConfig has been processed.
 
@@ -710,7 +710,7 @@ type ClientOption interface {
 ```
 
 <a name="WithBeforeSendRequest"></a>
-### func [WithBeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L301>)
+### func [WithBeforeSendRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L302>)
 
 ```go
 func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption
@@ -719,7 +719,7 @@ func WithBeforeSendRequest(hook BeforeSendRequest) ClientOption
 WithBeforeSendRequest is a ClientOption that installs a hook to modify the request before it's sent.
 
 <a name="WithCallerIdentity"></a>
-### func [WithCallerIdentity](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L317>)
+### func [WithCallerIdentity](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L318>)
 
 ```go
 func WithCallerIdentity(ci credentials.CallerIdentity) ClientOption
@@ -728,7 +728,7 @@ func WithCallerIdentity(ci credentials.CallerIdentity) ClientOption
 WithCallerIdentity is a ClientOption that installs a token provider used to obtain \(and refresh on expiry\) the Authorization header for each request.
 
 <a name="WithDNSServer"></a>
-### func [WithDNSServer](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L284>)
+### func [WithDNSServer](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L285>)
 
 ```go
 func WithDNSServer(dns string) ClientOption
@@ -745,7 +745,7 @@ This option cannot be provided for constructors which produce result objects. No
 retriable.New\(retriable.WithTransport\(t\).WithDNSServer\(dns\)\)
 
 <a name="WithHost"></a>
-### func [WithHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L293>)
+### func [WithHost](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L294>)
 
 ```go
 func WithHost(host string) ClientOption
@@ -758,7 +758,7 @@ retriable.New(retriable.WithHost(host))
 ```
 
 <a name="WithName"></a>
-### func [WithName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L217>)
+### func [WithName](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L218>)
 
 ```go
 func WithName(name string) ClientOption
@@ -773,7 +773,7 @@ retriable.New(retriable.WithName("tlsclient"))
 This option cannot be provided for constructors which produce result objects.
 
 <a name="WithPolicy"></a>
-### func [WithPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L229>)
+### func [WithPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L230>)
 
 ```go
 func WithPolicy(policy Policy) ClientOption
@@ -788,7 +788,7 @@ retriable.New(retriable.WithPolicy(p))
 This option cannot be provided for constructors which produce result objects.
 
 <a name="WithTLS"></a>
-### func [WithTLS](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L241>)
+### func [WithTLS](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L242>)
 
 ```go
 func WithTLS(tlsConfig *tls.Config) ClientOption
@@ -803,7 +803,7 @@ retriable.New(retriable.WithTLS(t))
 This option cannot be provided for constructors which produce result objects.
 
 <a name="WithTimeout"></a>
-### func [WithTimeout](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L265>)
+### func [WithTimeout](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L266>)
 
 ```go
 func WithTimeout(timeout time.Duration) ClientOption
@@ -818,7 +818,7 @@ retriable.New(retriable.WithTimeout(t))
 This option cannot be provided for constructors which produce result objects.
 
 <a name="WithTransport"></a>
-### func [WithTransport](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L253>)
+### func [WithTransport](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L254>)
 
 ```go
 func WithTransport(transport http.RoundTripper) ClientOption
@@ -833,7 +833,7 @@ retriable.New(retriable.WithTransport(t))
 This option cannot be provided for constructors which produce result objects.
 
 <a name="WithUserAgent"></a>
-### func [WithUserAgent](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L309>)
+### func [WithUserAgent](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L310>)
 
 ```go
 func WithUserAgent(name string) ClientOption
@@ -854,7 +854,7 @@ type Config struct {
 ```
 
 <a name="DeleteRequester"></a>
-## type [DeleteRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L124-L130>)
+## type [DeleteRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L125-L131>)
 
 DeleteRequester defines the HTTP DELETE helper against the configured host.
 
@@ -925,7 +925,7 @@ func (f *Factory) ForHost(hostname string) (*Client, error)
 ForHost returns a Client for the specified host URL. If the host is not found in the configuration, a Default client for that host is returned.
 
 <a name="GenericHTTP"></a>
-## type [GenericHTTP](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L59-L83>)
+## type [GenericHTTP](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L60-L84>)
 
 GenericHTTP defines request helpers that take an explicit host, for callers that need to address a server other than the configured one.
 
@@ -958,7 +958,7 @@ type GenericHTTP interface {
 ```
 
 <a name="GetRequester"></a>
-## type [GetRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L93-L99>)
+## type [GetRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L94-L100>)
 
 GetRequester defines the HTTP GET helper against the configured host.
 
@@ -973,7 +973,7 @@ type GetRequester interface {
 ```
 
 <a name="HTTPClient"></a>
-## type [HTTPClient](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L135-L141>)
+## type [HTTPClient](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L136-L142>)
 
 HTTPClient is the union of the per\-method helpers \(Head, Get, Post, Put, Delete\) that operate against the client's configured host. \*Client implements it.
 
@@ -988,7 +988,7 @@ type HTTPClient interface {
 ```
 
 <a name="HTTPClientWithNonce"></a>
-## type [HTTPClientWithNonce](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L157-L161>)
+## type [HTTPClientWithNonce](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L158-L162>)
 
 HTTPClientWithNonce is the full client surface: explicit\-host requests, configured\-host helpers and nonce management. \*Client implements it.
 
@@ -1001,7 +1001,7 @@ type HTTPClientWithNonce interface {
 ```
 
 <a name="HeadRequester"></a>
-## type [HeadRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L86-L90>)
+## type [HeadRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L87-L91>)
 
 HeadRequester defines the HTTP HEAD helper against the configured host.
 
@@ -1014,7 +1014,7 @@ type HeadRequester interface {
 ```
 
 <a name="KeyInfo"></a>
-## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L225-L236>)
+## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L331-L342>)
 
 KeyInfo describes a stored DPoP private key.
 
@@ -1034,7 +1034,7 @@ type KeyInfo struct {
 ```
 
 <a name="NewKeyInfo"></a>
-### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L240>)
+### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L346>)
 
 ```go
 func NewKeyInfo(k *jose.JSONWebKey) (*KeyInfo, error)
@@ -1067,7 +1067,7 @@ func NewNonceProvider(client HTTPClient, noncePath, headerName string) NonceProv
 NewNonceProvider returns the default NonceProvider: it keeps a bounded LIFO cache \(64 entries\) of nonces seen in headerName response headers, and when empty fetches one with a HEAD request to noncePath through client. It is safe for concurrent use.
 
 <a name="NonceRequester"></a>
-## type [NonceRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L145-L153>)
+## type [NonceRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L146-L154>)
 
 NonceRequester is implemented by clients that can attach a replay\-nonce provider; see NonceProvider.
 
@@ -1084,7 +1084,7 @@ type NonceRequester interface {
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L180-L199>)
+## type [Policy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L181-L200>)
 
 Policy represents the retry policy of a Client. Use DefaultPolicy as a starting point.
 
@@ -1112,7 +1112,7 @@ type Policy struct {
 ```
 
 <a name="DefaultPolicy"></a>
-### func [DefaultPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L613>)
+### func [DefaultPolicy](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L633>)
 
 ```go
 func DefaultPolicy() Policy
@@ -1121,7 +1121,7 @@ func DefaultPolicy() Policy
 DefaultPolicy returns the policy used by New: connection errors are retried up to 3 times with a 2s wait, 502 and 503 up to 5 times with a 1s wait, TotalRetryLimit is 5, no RequestTimeout, and DefaultNonRetriableErrors are never retried. Note that 429 is registered but never reached, because ShouldRetry returns LimitExceeded for 429 before consulting Retries.
 
 <a name="Policy.ShouldRetry"></a>
-### func \(\*Policy\) [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1011>)
+### func \(\*Policy\) [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1122>)
 
 ```go
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string)
@@ -1130,7 +1130,7 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 ShouldRetry decides whether the attempt should be retried and how long to wait first. Order of evaluation: a cancelled or expired request context is never retried; TotalRetryLimit is enforced; transport errors matching NonRetriableErrors are not retried, others are delegated to Retries\[0\]; statuses \< 400 succeed; 404 and 429 are not retried; other 4xx are non\-retriable; 5xx are delegated to Retries\[status\] if present.
 
 <a name="PostRequester"></a>
-## type [PostRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L102-L110>)
+## type [PostRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L103-L111>)
 
 PostRequester defines the HTTP POST helper against the configured host.
 
@@ -1147,7 +1147,7 @@ type PostRequester interface {
 ```
 
 <a name="PutRequester"></a>
-## type [PutRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L113-L121>)
+## type [PutRequester](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L114-L122>)
 
 PutRequester defines the HTTP PUT helper against the configured host.
 
@@ -1242,7 +1242,7 @@ type Requestor interface {
 ```
 
 <a name="ShouldRetry"></a>
-## type [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L172>)
+## type [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L173>)
 
 ShouldRetry specifies a policy for handling retries. It is called following each request with the response, error values returned by the http.Client and the number of already made retries \(0 on the first call\). It returns whether to retry, how long to sleep before the next attempt, and a short reason string used for logging \(see the Success, LimitExceeded, ... constants\). If ShouldRetry returns false, the Client stops retrying and returns the response to the caller. The Client drains the response body when retrying, but when it stops it is up to the caller of Do to close the returned response body.
 
@@ -1251,7 +1251,7 @@ type ShouldRetry func(r *http.Request, resp *http.Response, err error, retries i
 ```
 
 <a name="DefaultShouldRetryFactory"></a>
-### func [DefaultShouldRetryFactory](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L984>)
+### func [DefaultShouldRetryFactory](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1095>)
 
 ```go
 func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry
@@ -1260,7 +1260,7 @@ func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) Sho
 DefaultShouldRetryFactory returns a ShouldRetry that retries with a fixed wait while the retry count is \<= limit, reporting reason.
 
 <a name="Storage"></a>
-## type [Storage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L34-L36>)
+## type [Storage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L37-L39>)
 
 Storage is a folder holding the client's credentials: the access token in ".auth\_token" \(0600\) and DPoP private keys in "\<thumbprint\>.jwk", plus arbitrary JSON/YAML documents via Marshal/Unmarshal.
 
@@ -1271,16 +1271,16 @@ type Storage struct {
 ```
 
 <a name="NewStorage"></a>
-### func [NewStorage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L40>)
+### func [NewStorage](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L45>)
 
 ```go
 func NewStorage(baseFolder string) *Storage
 ```
 
-NewStorage returns a Storage rooted at baseFolder; a leading "\~" is expanded to the home directory. The folder is created lazily on write.
+NewStorage returns a Storage rooted at baseFolder; a leading "\~" is expanded to the home directory. An empty folder uses the working directory. A missing folder is created lazily on write with mode 0700; the mode of an existing folder is not changed.
 
 <a name="Storage.Clean"></a>
-### func \(\*Storage\) [Clean](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L52>)
+### func \(\*Storage\) [Clean](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L57>)
 
 ```go
 func (c *Storage) Clean()
@@ -1289,7 +1289,7 @@ func (c *Storage) Clean()
 Clean removes the whole storage folder, including tokens and keys. Errors are ignored.
 
 <a name="Storage.Folder"></a>
-### func \(\*Storage\) [Folder](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L57>)
+### func \(\*Storage\) [Folder](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L62>)
 
 ```go
 func (c *Storage) Folder() string
@@ -1298,7 +1298,7 @@ func (c *Storage) Folder() string
 Folder returns the storage folder path.
 
 <a name="Storage.ListKeys"></a>
-### func \(\*Storage\) [ListKeys](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L182>)
+### func \(\*Storage\) [ListKeys](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L288>)
 
 ```go
 func (c *Storage) ListKeys() ([]*KeyInfo, error)
@@ -1307,7 +1307,7 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error)
 ListKeys returns the DPoP keys found in the storage folder \(walked recursively, "\*.jwk" files\). Unreadable or unsupported keys are skipped and a missing folder yields an empty list; the error is always nil.
 
 <a name="Storage.LoadAuthToken"></a>
-### func \(\*Storage\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L103>)
+### func \(\*Storage\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L209>)
 
 ```go
 func (c *Storage) LoadAuthToken() (*AuthToken, string, error)
@@ -1316,7 +1316,7 @@ func (c *Storage) LoadAuthToken() (*AuthToken, string, error)
 LoadAuthToken reads and parses the .auth\_token file in the storage folder; see the package\-level LoadAuthToken.
 
 <a name="Storage.LoadKey"></a>
-### func \(\*Storage\) [LoadKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L90>)
+### func \(\*Storage\) [LoadKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L97>)
 
 ```go
 func (c *Storage) LoadKey(label string) (*jose.JSONWebKey, string, error)
@@ -1325,7 +1325,7 @@ func (c *Storage) LoadKey(label string) (*jose.JSONWebKey, string, error)
 LoadKey loads the DPoP private key stored as "\<label\>.jwk" \(label is normally the key thumbprint\) and returns the key and its file path.
 
 <a name="Storage.Marshal"></a>
-### func \(\*Storage\) [Marshal](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L69>)
+### func \(\*Storage\) [Marshal](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L74>)
 
 ```go
 func (c *Storage) Marshal(file string, v any) error
@@ -1334,25 +1334,25 @@ func (c *Storage) Marshal(file string, v any) error
 Marshal encodes v as JSON \(".json" suffix\) or YAML into file, relative to the storage folder. The folder must already exist.
 
 <a name="Storage.SaveAuthToken"></a>
-### func \(\*Storage\) [SaveAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L78>)
+### func \(\*Storage\) [SaveAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L84>)
 
 ```go
 func (c *Storage) SaveAuthToken(token string) (string, error)
 ```
 
-SaveAuthToken writes the raw token to the .auth\_token file \(mode 0600\), creating the folder if needed, and returns the file location. The token can be an opaque string, or form encoded as access\_token=\{token\}&exp=\{unix\_time\}&dpop\_jkt=\{jkt\}&token\_type=\{Bearer|DPoP\} \(see ParseAuthToken\).
+SaveAuthToken writes the raw token to the .auth\_token file \(mode 0600\), creating the folder if needed, and returns the file location. An existing file or symlink is atomically replaced with a private regular file. The token can be an opaque string, or form encoded as access\_token=\{token\}&exp=\{unix\_time\}&dpop\_jkt=\{jkt\}&token\_type=\{Bearer|DPoP\} \(see ParseAuthToken\).
 
 <a name="Storage.SaveKey"></a>
-### func \(\*Storage\) [SaveKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L97>)
+### func \(\*Storage\) [SaveKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L105>)
 
 ```go
 func (c *Storage) SaveKey(k *jose.JSONWebKey) (string, error)
 ```
 
-SaveKey writes the DPoP private key to "\<thumbprint\>.jwk" in the storage folder \(created with mode 0700 if needed\) and returns the file path.
+SaveKey writes the DPoP private key to "\<thumbprint\>.jwk" in the storage folder \(created with mode 0700 if needed\) and returns the file path. An existing file or symlink is atomically replaced with a private regular file.
 
 <a name="Storage.Unmarshal"></a>
-### func \(\*Storage\) [Unmarshal](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L63>)
+### func \(\*Storage\) [Unmarshal](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L68>)
 
 ```go
 func (c *Storage) Unmarshal(file string, v any) error

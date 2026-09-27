@@ -263,6 +263,8 @@ func LoadClient(file string) (*Client, error) {
 
 // WithStorage replaces the token/key storage used by SetAuthorization.
 func (c *Client) WithStorage(storage *Storage) *Client {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.Config.storage = storage
 	return c
 }
@@ -273,7 +275,9 @@ func (c *Client) WithStorage(storage *Storage) *Client {
 // signed. It is a no-op for hosts that are not https:// or unixs://, and an
 // error when the token is missing or expired.
 func (c *Client) SetAuthorization() error {
-	host := c.CurrentHost()
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	host := c.host
 	// Allow to use Bearer only over TLS connection
 	if !strings.HasPrefix(host, "https") &&
 		!strings.HasPrefix(host, "unixs") {
@@ -288,10 +292,6 @@ func (c *Client) SetAuthorization() error {
 		}
 	}
 	at := c.Config.AuthToken
-	if at.Expired() {
-		return errors.Errorf("authorization: token expired")
-	}
-
 	logger.KV(xlog.DEBUG,
 		"token_location", c.Config.TokenLocation,
 		"expires", at.Expires)
@@ -300,6 +300,8 @@ func (c *Client) SetAuthorization() error {
 		return errors.Errorf("authorization: token expired")
 	}
 
+	tokenType := at.TokenType
+	var signer dpop.Signer
 	if at.DpopJkt != "" {
 		storage := c.Config.Storage()
 		if storage == nil {
@@ -309,17 +311,25 @@ func (c *Client) SetAuthorization() error {
 		if err != nil {
 			return errors.WithMessagef(err, "unable to load key for DPoP: %s", at.DpopJkt)
 		}
-		at.TokenType = "DPoP"
-		c.dpopSigner, err = dpop.NewSigner(k.Key.(crypto.Signer))
+		privateKey, ok := k.Key.(crypto.Signer)
+		if !ok {
+			return errors.New("DPoP key is not a private signer")
+		}
+		tokenType = "DPoP"
+		signer, err = dpop.NewSigner(privateKey)
 		if err != nil {
 			return errors.WithMessage(err, "unable to create DPoP signer")
 		}
 	}
 	authHeader := at.AccessToken
-	if at.TokenType != "" {
-		authHeader = at.TokenType + " " + authHeader
+	if tokenType != "" {
+		authHeader = tokenType + " " + authHeader
 	}
-	c.AddHeader(header.Authorization, authHeader)
+	if c.headers == nil {
+		c.headers = map[string]string{}
+	}
+	c.headers[header.Authorization] = authHeader
+	c.dpopSigner = signer
 
 	return nil
 }
