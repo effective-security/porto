@@ -4,9 +4,9 @@
 // WriteJSON is the single response path used by porto handlers: it writes
 // errors (anything implementing WriteHTTPResponse, such as
 // httperror.Error) with their own status code, and everything else as a
-// 200 application/json body, gzip-compressed when the client sent
-// Accept-Encoding: gzip and pretty-printed when the URL has a "?pp" query
-// parameter.
+// 200 application/json body, gzip-compressed when it is at least 1 KiB and
+// the client accepts gzip, and pretty-printed when the URL has a "?pp" query
+// parameter. Success responses include Vary: Accept-Encoding.
 //
 //	func (s *svc) get(w http.ResponseWriter, r *http.Request, _ restserver.Params) {
 //		var req ItemRequest

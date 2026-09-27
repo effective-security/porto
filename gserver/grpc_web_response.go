@@ -8,10 +8,21 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xlog"
 )
+
+var grpcWebGzipWriters = sync.Pool{
+	New: func() any { return gzip.NewWriter(io.Discard) },
+}
+
+// errWriteAfterClose is returned for body writes to a compressed response
+// after Close: the gzip footer is already written, so appending bytes would
+// corrupt the body.
+var errWriteAfterClose = errors.New("gRPC-Web response: write after close")
 
 // grpcWebResponse implements http.ResponseWriter.
 type grpcWebResponse struct {
@@ -22,7 +33,9 @@ type grpcWebResponse struct {
 	wrapped http.ResponseWriter
 
 	compress bool
-	gz       *gzip.Writer
+	// gz is the pooled gzip writer of a compressed response; Close returns
+	// it to the pool and sets it to nil.
+	gz *gzip.Writer
 
 	// contentType is the content type of the response.
 	// It can be either "application/grpc-web+proto" or "application/grpc-web-text".
@@ -47,7 +60,8 @@ func newGrpcWebResponse(resp http.ResponseWriter, ct string, compress bool) *grp
 
 	if compress {
 		g.compress = true
-		g.gz = gzip.NewWriter(resp)
+		g.gz = grpcWebGzipWriters.Get().(*gzip.Writer)
+		g.gz.Reset(resp)
 		// The Content-Encoding header must be set before headers are written.
 		resp.Header().Set(header.ContentEncoding, header.Gzip)
 	}
@@ -59,19 +73,16 @@ func (w *grpcWebResponse) Header() http.Header {
 }
 
 func (w *grpcWebResponse) Write(b []byte) (int, error) {
+	dest, err := w.sink()
+	if err != nil {
+		return 0, err
+	}
+
 	// Ensure headers have been sent once.
 	if !w.wroteHeaders {
 		w.prepareHeaders()
 	}
 	w.wroteBody, w.wroteHeaders = true, true
-
-	// Select the final sink – either a gzip writer or the raw http.ResponseWriter.
-	var dest io.Writer
-	if w.compress && w.gz != nil {
-		dest = w.gz
-	} else {
-		dest = io.Writer(w.wrapped)
-	}
 
 	// grpc-web-text requires base64 encoding of the message body.
 	if w.contentType == header.ApplicationGRPCWebText {
@@ -80,6 +91,20 @@ func (w *grpcWebResponse) Write(b []byte) (int, error) {
 
 	// Binary gRPC-Web – write directly.
 	return dest.Write(b)
+}
+
+// sink returns the destination for body bytes: the gzip writer for a
+// compressed response, otherwise the wrapped http.ResponseWriter. A
+// compressed response that has been closed returns errWriteAfterClose
+// instead of falling back to the uncompressed writer.
+func (w *grpcWebResponse) sink() (io.Writer, error) {
+	if !w.compress {
+		return w.wrapped, nil
+	}
+	if w.gz == nil {
+		return nil, errors.WithStack(errWriteAfterClose)
+	}
+	return w.gz, nil
 }
 
 // writeTextPayload writes a grpc-web-text message body (base64). If gzip is
@@ -138,7 +163,11 @@ func (w *grpcWebResponse) Flush() {
 
 func (w *grpcWebResponse) Close() {
 	if w.compress && w.gz != nil {
-		err := w.gz.Close()
+		gz := w.gz
+		w.gz = nil
+		err := gz.Close()
+		gz.Reset(io.Discard)
+		grpcWebGzipWriters.Put(gz)
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_close_gzip",
@@ -175,31 +204,29 @@ func (w *grpcWebResponse) finishRequest() {
 
 	// Finalize gzip writer (if any) to flush remaining bytes and write the footer.
 	if w.compress && w.gz != nil {
-		err := w.gz.Close()
-		if err != nil {
-			logger.KV(xlog.ERROR,
-				"reason", "failed_to_flush_gzip",
-				"err", err.Error())
-		}
+		w.Close()
 	} else {
 		flushWriter(w.wrapped)
 	}
 }
 
 func (w *grpcWebResponse) copyTrailersToPayload() {
+	// Decide where the bytes go: gzip writer (if enabled) or the original response writer.
+	dest, err := w.sink()
+	if err != nil {
+		logger.KV(xlog.ERROR,
+			"reason", "failed_to_write_frame",
+			"err", err.Error())
+		return
+	}
+
 	// Build the binary gRPC-Web trailer frame once.
 	frame := buildTrailerFrame(extractTrailingHeaders(w.headers, w.wrapped.Header()))
-
-	// Decide where the bytes go: gzip writer (if enabled) or the original response writer.
-	dest := io.Writer(w.wrapped)
-	if w.compress && w.gz != nil {
-		dest = w.gz
-	}
 
 	// For text mode we must base64-encode the frame before sending it (and *then* optionally gzip it).
 	if w.contentType == header.ApplicationGRPCWebText {
 		enc := base64.NewEncoder(base64.StdEncoding, dest)
-		_, err := enc.Write(frame)
+		_, err = enc.Write(frame)
 		if err != nil {
 			logger.KV(xlog.ERROR,
 				"reason", "failed_to_write_base64_frame",
@@ -215,7 +242,7 @@ func (w *grpcWebResponse) copyTrailersToPayload() {
 	}
 
 	// Binary mode – write frame directly.
-	_, err := dest.Write(frame)
+	_, err = dest.Write(frame)
 	if err != nil {
 		logger.KV(xlog.ERROR,
 			"reason", "failed_to_write_frame",

@@ -180,6 +180,9 @@ func TestGrpcWebResponse_GzipProto(t *testing.T) {
 	require.NoError(t, err)
 
 	g.finishRequest()
+	closedLength := resp.Body.Len()
+	g.Close()
+	assert.Equal(t, closedLength, resp.Body.Len())
 
 	// Content-Encoding header must be set
 	assert.Equal(t, header.Gzip, resp.Header().Get(header.ContentEncoding))
@@ -187,6 +190,47 @@ func TestGrpcWebResponse_GzipProto(t *testing.T) {
 	decompressed := mustGunzip(resp.Body.Bytes())
 	// The decompressed stream should start with the original payload
 	assert.True(t, bytes.HasPrefix(decompressed, payload))
+}
+
+func TestGrpcWebResponse_GzipWriteAfterClose(t *testing.T) {
+	t.Parallel()
+	for _, ct := range []string{header.ApplicationGRPCWebProto, header.ApplicationGRPCWebText} {
+		t.Run(ct, func(t *testing.T) {
+			t.Parallel()
+			resp := httptest.NewRecorder()
+			g := newGrpcWebResponse(resp, ct, true)
+
+			_, err := g.Write([]byte("hello gzip"))
+			require.NoError(t, err)
+			g.finishRequest()
+			closed := bytes.Clone(resp.Body.Bytes())
+
+			n, err := g.Write([]byte("late"))
+			require.ErrorIs(t, err, errWriteAfterClose)
+			assert.Zero(t, n)
+			g.finishRequest()
+			g.Close()
+
+			assert.Equal(t, closed, resp.Body.Bytes())
+			assert.Equal(t, header.Gzip, resp.Header().Get(header.ContentEncoding))
+			assert.NotEmpty(t, mustGunzip(resp.Body.Bytes()))
+		})
+	}
+}
+
+func TestGrpcWebResponse_GzipConcurrent(t *testing.T) {
+	for range 16 {
+		t.Run("response", func(t *testing.T) {
+			t.Parallel()
+			resp := httptest.NewRecorder()
+			g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, true)
+			payload := []byte("independent response")
+			_, err := g.Write(payload)
+			require.NoError(t, err)
+			g.finishRequest()
+			assert.True(t, bytes.HasPrefix(mustGunzip(resp.Body.Bytes()), payload))
+		})
+	}
 }
 
 func TestGrpcWebResponse_GzipTextStreaming(t *testing.T) {

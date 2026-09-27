@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/xhttp/marshal"
 
 Package marshal provides helpers to write JSON HTTP responses and to decode JSON request bodies, using github.com/ugorji/go/codec.
 
-WriteJSON is the single response path used by porto handlers: it writes errors \(anything implementing WriteHTTPResponse, such as httperror.Error\) with their own status code, and everything else as a 200 application/json body, gzip\-compressed when the client sent Accept\-Encoding: gzip and pretty\-printed when the URL has a "?pp" query parameter.
+WriteJSON is the single response path used by porto handlers: it writes errors \(anything implementing WriteHTTPResponse, such as httperror.Error\) with their own status code, and everything else as a 200 application/json body, gzip\-compressed when it is at least 1 KiB and the client accepts gzip, and pretty\-printed when the URL has a "?pp" query parameter. Success responses include Vary: Accept\-Encoding.
 
 ```
 func (s *svc) get(w http.ResponseWriter, r *http.Request, _ restserver.Params) {
@@ -93,7 +93,7 @@ func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder
 NewEncoder returns a JSON encoder writing to w, pretty\-printing when the request URL has a "pp" query parameter. r must not be nil.
 
 <a name="NewRequest"></a>
-## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L194>)
+## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L319>)
 
 ```go
 func NewRequest(method string, url string, req any) (*http.Request, error)
@@ -102,13 +102,13 @@ func NewRequest(method string, url string, req any) (*http.Request, error)
 NewRequest builds an http.Request whose body is req: an io.Reader, \[\]byte or string is sent as is, anything else is JSON\-encoded with encoding/json. No Content\-Type header is set.
 
 <a name="WriteJSON"></a>
-## func [WriteJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L47>)
+## func [WriteJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L56>)
 
 ```go
 func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any)
 ```
 
-WriteJSON serialises the first non\-nil body value as the HTTP response. A value implementing WriteHTTPResponse writes itself \(httperror values set their own status\); any other error is converted with httperror.NewFromPb \(500 unexpected unless it carries a gRPC status\) and written the same way; errors other than 404 are also logged with the caller's file and line. Anything else is written as application/json with status 200, gzip\-compressed when the request's Accept\-Encoding contains "gzip", and pretty\-printed when the URL has a "pp" query parameter. Encoding failures are logged, not reported. r must not be nil.
+WriteJSON serialises the first non\-nil body value as the HTTP response. A value implementing WriteHTTPResponse writes itself \(httperror values set their own status\); any other error is converted with httperror.NewFromPb \(500 unexpected unless it carries a gRPC status\) and written the same way; errors other than 404 are also logged with the caller's file and line. Anything else is written as application/json with status 200, gzip\-compressed for payloads of at least 1 KiB when the request accepts gzip, and pretty\-printed when the URL has a "pp" query parameter. Success responses vary by Accept\-Encoding. Encoding and write failures are logged, not reported. r must not be nil.
 
 Passing several values lets a handler write either the error or the result in one call:
 
@@ -118,7 +118,7 @@ marshal.WriteJSON(w, r, err, x)
 ```
 
 <a name="WritePlainJSON"></a>
-## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L183>)
+## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L308>)
 
 ```go
 func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSetting PrettyPrintSetting)
@@ -149,7 +149,7 @@ const (
 ```
 
 <a name="WriteHTTPResponse"></a>
-## type [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L27-L30>)
+## type [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L35-L38>)
 
 WriteHTTPResponse is implemented by types that take full control over how they are written as an HTTP response \(httperror.Error and ManyError do\).
 

@@ -566,6 +566,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				// header.XGRPCStream header; gzip-ing a stream forces the body
 				// to be buffered (fixed Content-Length) and swallows per-message
 				// flushes, which breaks streaming.
+				// Accept-Encoding is matched by substring, so q-values are
+				// ignored (FINDINGS P-076).
 				isStream := r.Header.Get(header.XGRPCStream) != ""
 				compress := !isStream && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip)
 				w = newGrpcWebResponse(w, ct, compress)

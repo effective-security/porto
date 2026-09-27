@@ -212,7 +212,7 @@ Files:
 - `doc.go` — package overview and usage example.
 - `server.go` — `Server`/`GServer`, `Start`, service registry, `Close`, error channel.
 - `serve.go` — `configureListeners` (URL schemes, TLS, keepalive), `serveCtx.serve` (cmux split), `configureHandlers` (HTTP chain), `configureRateLimiter`, `grpcServer` (interceptor chain), `grpcHandlerFunc` (gRPC / gRPC-Web / REST mux on TLS listeners), `NewRequestValidationUnaryInterceptor`, `panicInterceptor`.
-- `grpc_web_response.go` — `grpcWebResponse`: `http.ResponseWriter` that rewrites gRPC responses into gRPC-Web framing (trailer frame, base64 for `-text`, optional gzip for unary).
+- `grpc_web_response.go` — `grpcWebResponse`: `http.ResponseWriter` that rewrites gRPC responses into gRPC-Web framing (trailer frame, base64 for `-text`, pooled optional gzip for unary).
 - `header.go` — `copyHeader` and option helpers used for gRPC → gRPC-Web header/trailer translation.
 - `logs.go` — gRPC request logging/metrics interceptors.
 - `config.go` — `Config`, `TLSInfo`, `KeepAliveCfg`, `CORS`, `RateLimit`, `SwaggerCfg`.
@@ -234,6 +234,8 @@ Invariants:
 - Plain listeners: cmux routes HTTP/2 → gRPC (h2c), HTTP/1 → REST; gRPC-Web and `HTTPHeaders` are only handled on TLS listeners, where everything goes through `http.Server` and `grpcHandlerFunc` selects by `Content-Type`.
 - HTTP chain (outer → inner): rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
 - Headers read: `Content-Type`, `Origin`, `Accept-Encoding`, `X-GRPC-Stream`. Headers written: `Access-Control-Allow-Origin/Expose-Headers/Allow-Credentials` for gRPC-Web (see FINDINGS P-002), `Content-Encoding: gzip`, `Config.HTTPHeaders`.
+- gRPC-Web compression is enabled when `Accept-Encoding` contains `gzip` as a substring (q-values ignored, P-076) and `X-GRPC-Stream` is absent.
+- Compressed gRPC-Web responses borrow a gzip writer from a pool; `Close` is idempotent because both `finishRequest` and the handler's deferred cleanup call it. Writers are reset before reuse and release the previous response writer on return to the pool. After `Close`, body writes to a compressed response return `errWriteAfterClose` and late trailer writes are logged and dropped, so raw bytes never follow the gzip footer.
 - Close ordering: services `Close()` → `stopc` → per-listener `http.Shutdown` + `grpc.Stop`/`GracefulStop` within `Timeout.Request` (default 3s) → listeners closed. `Err()` is buffered and never closed. The TLS reloader is not closed (P-004).
 - Keepalive: `MaxConnectionIdle` fixed at 5m; enforcement `MinTime` only if >0; `Time/Timeout` only if both >0.
 
@@ -373,7 +375,7 @@ Invariants:
 
 ### github.com/effective-security/porto/xhttp/header
 
-Purpose: constants for HTTP header names and content-type values. No imports. `X-Forwarded-For` and `X-Real-Ip` are not defined here; `identity` uses literals.
+Purpose: constants for HTTP header names and content-type values, including `Vary` for response negotiation. No imports. `X-Forwarded-For` and `X-Real-Ip` are not defined here; `identity` uses literals.
 
 ### github.com/effective-security/porto/xhttp/httperror
 
@@ -411,11 +413,11 @@ Files: `marshal.go` (`WriteJSON`, `WritePlainJSON`, `WriteHTTPResponse`, `NewReq
 Invariants:
 
 - First non-nil body wins; `WriteHTTPResponse` implementers write themselves; other errors → 500 `unexpected` with `err.Error()` as message (P-032); non-404 errors are logged.
-- Success: 200, `application/json`, gzip when `Accept-Encoding` contains `gzip` (no `Vary`, P-025), pretty when `?pp`. `r` must be non-nil.
+- Success: 200, `application/json`, gzip for payloads of at least 1 KiB when `Accept-Encoding` allows gzip with positive quality (a missing `q` means 1, a malformed or out-of-range `q` means 0; explicit gzip denial overrides `*`), pretty when `?pp`. `Vary: Accept-Encoding` is merged with existing values; gzip writers are pooled. `r` must be non-nil.
 - Decoding is strict (`ErrorIfNoField`), maps → `map[string]any`, no size limit (P-026).
 - Encoder handles are package globals initialised in `init`.
 
-Tests: `marshal_test.go` compares decompressed gzip payloads and derives expected log line numbers from `runtime.Caller`.
+Tests: `marshal_test.go` covers negotiation, the compression threshold, `Vary`, decompressed payloads, and log line numbers derived from `runtime.Caller`; `marshal_bench_test.go` measures compressed responses.
 
 ### github.com/effective-security/porto/pkg/retriable
 
@@ -563,7 +565,7 @@ Purpose: tiny in-process service registry resolved by interface type (gserver ex
 
 Entry points: `New()`, `Register(server, svc)`, `Find(server, *iface)`, `ForEach(*iface, fn)`.
 
-Invariants: key `<server>/<concrete type>`; duplicate `Register` → error; `Find` requires a non-nil pointer-to-interface, server `""` means any; map iteration order makes multiple matches arbitrary; no locking and `Register(nil)` panics (P-072).
+Invariants: key `<server>/<concrete type>`; duplicate or nil `Register` → error; `Find` requires a non-nil pointer-to-interface, server `""` means any; map iteration order makes multiple matches arbitrary. An RWMutex protects registration and lookup; `ForEach` snapshots matching entries before invoking callbacks so callbacks may register services. The caller owns synchronization of the destination interface value.
 
 ### github.com/effective-security/porto/pkg/crlcache
 

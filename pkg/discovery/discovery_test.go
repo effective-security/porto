@@ -1,6 +1,8 @@
 package discovery_test
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -10,6 +12,7 @@ import (
 )
 
 func TestDiscovery(t *testing.T) {
+	t.Parallel()
 	f := &fooImpl{}
 	b := &barImpl{}
 
@@ -62,6 +65,107 @@ func TestDiscovery(t *testing.T) {
 		return errors.Errorf("callback failed")
 	})
 	require.EqualError(t, err, "failed to execute callback for *discovery_test.barImpl: callback failed")
+}
+
+func TestRegisterRejectsNil(t *testing.T) {
+	t.Parallel()
+
+	var typedNil *fooImpl
+	for _, service := range []any{nil, typedNil} {
+		d := discovery.New()
+		err := d.Register("server", service)
+		require.EqualError(t, err, "service is nil")
+
+		var found foo
+		err = d.Find("server", &found)
+		require.EqualError(t, err, "not implemented: <discovery_test.foo Value>")
+	}
+}
+
+func TestConcurrentRegisterAndLookup(t *testing.T) {
+	t.Parallel()
+
+	d := discovery.New()
+	require.NoError(t, d.Register("initial", &fooImpl{}))
+
+	const registrations = 100
+	start := make(chan struct{})
+	results := make(chan error, 3)
+	var workers sync.WaitGroup
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		<-start
+		for i := range registrations {
+			if err := d.Register(fmt.Sprintf("server-%d", i), &fooImpl{}); err != nil {
+				results <- err
+				return
+			}
+		}
+		results <- nil
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range registrations {
+			var found foo
+			if err := d.Find("", &found); err != nil {
+				results <- err
+				return
+			}
+			if found == nil {
+				results <- errors.New("Find returned no service")
+				return
+			}
+		}
+		results <- nil
+	}()
+	go func() {
+		defer workers.Done()
+		<-start
+		for range registrations {
+			var found foo
+			count := 0
+			if err := d.ForEach(&found, func(string) error {
+				count++
+				return nil
+			}); err != nil {
+				results <- err
+				return
+			}
+			if count == 0 {
+				results <- errors.New("ForEach returned no services")
+				return
+			}
+		}
+		results <- nil
+	}()
+
+	close(start)
+	workers.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+}
+
+func TestForEachCallbackCanRegister(t *testing.T) {
+	t.Parallel()
+
+	d := discovery.New()
+	require.NoError(t, d.Register("initial", &fooImpl{}))
+	var found foo
+	count := 0
+	err := d.ForEach(&found, func(string) error {
+		count++
+		return d.Register("from-callback", &fooImpl{})
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	err = d.Find("from-callback", &found)
+	require.NoError(t, err)
+	assert.NotNil(t, found)
 }
 
 type foo interface {

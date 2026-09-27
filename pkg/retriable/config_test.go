@@ -13,7 +13,7 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
-	jose "github.com/go-jose/go-jose/v3"
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

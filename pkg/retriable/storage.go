@@ -21,7 +21,7 @@ import (
 	"github.com/effective-security/x/configloader"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
-	jose "github.com/go-jose/go-jose/v3"
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/mitchellh/go-homedir"
 )
 
