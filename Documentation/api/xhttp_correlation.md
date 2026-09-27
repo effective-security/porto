@@ -54,7 +54,7 @@ var CorrelationIDgRPCHeaderName = "x-correlation-id"
 ```
 
 <a name="ID"></a>
-## func [ID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L220>)
+## func [ID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L222>)
 
 ```go
 func ID(ctx context.Context) string
@@ -63,7 +63,7 @@ func ID(ctx context.Context) string
 ID returns the correlation ID stored in ctx, or "" if none.
 
 <a name="NewAuthUnaryInterceptor"></a>
-## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L84>)
+## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L86>)
 
 ```go
 func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor
@@ -72,7 +72,7 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor
 NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that adds the correlation ID \(from incoming metadata or newly generated\) to the context and xlog fields, and recovers panics from the handler, logging them and returning an "unhandled exception" error.
 
 <a name="NewFromContext"></a>
-## func [NewFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L303>)
+## func [NewFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L318>)
 
 ```go
 func NewFromContext(ctx context.Context) context.Context
@@ -81,7 +81,7 @@ func NewFromContext(ctx context.Context) context.Context
 NewFromContext returns a fresh context.Background \(detached from ctx's cancellation and deadline\) that carries ctx's correlation ID, or a new one, both as a context value and as outgoing gRPC metadata. Use it for background work that should outlive the request.
 
 <a name="NewHandler"></a>
-## func [NewHandler](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L57>)
+## func [NewHandler](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L59>)
 
 ```go
 func NewHandler(delegate http.Handler) http.Handler
@@ -90,7 +90,7 @@ func NewHandler(delegate http.Handler) http.Handler
 NewHandler returns middleware that reads the correlation ID from the X\-Correlation\-ID or X\-Request\-ID request header \(or generates one\), stores it in the request context, adds it to the xlog context as "ctx" and sets the X\-Correlation\-ID response header before calling delegate. An ID already present in the context is reused.
 
 <a name="NewStreamServerInterceptor"></a>
-## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L117>)
+## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L119>)
 
 ```go
 func NewStreamServerInterceptor() grpc.StreamServerInterceptor
@@ -99,7 +99,7 @@ func NewStreamServerInterceptor() grpc.StreamServerInterceptor
 NewStreamServerInterceptor returns the streaming counterpart of NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext so handlers see the enriched context.
 
 <a name="WithID"></a>
-## func [WithID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L231>)
+## func [WithID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L233>)
 
 ```go
 func WithID(ctx context.Context) context.Context
@@ -108,7 +108,7 @@ func WithID(ctx context.Context) context.Context
 WithID returns a context carrying a newly generated correlation ID \(also added to the xlog fields\). If ctx already has one, ctx is returned as is.
 
 <a name="WithMetaFromContext"></a>
-## func [WithMetaFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L247>)
+## func [WithMetaFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L249>)
 
 ```go
 func WithMetaFromContext(ctx context.Context) context.Context
@@ -117,7 +117,7 @@ func WithMetaFromContext(ctx context.Context) context.Context
 WithMetaFromContext ensures the outgoing gRPC metadata of ctx carries the correlation ID under CorrelationIDgRPCHeaderName, generating and storing a new ID in the context when none exists. Use it before making a gRPC client call.
 
 <a name="WithMetaFromRequest"></a>
-## func [WithMetaFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L269>)
+## func [WithMetaFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L271>)
 
 ```go
 func WithMetaFromRequest(req *http.Request) context.Context
@@ -126,7 +126,7 @@ func WithMetaFromRequest(req *http.Request) context.Context
 WithMetaFromRequest returns context with Correlation ID for the outgoing gRPC call, on wire or in memory. Both Incoming and Outgoing metadata are created out of HTTP request headers with x\- and grpc\- prefixes.
 
 <a name="Correlator"></a>
-## type [Correlator](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L39-L42>)
+## type [Correlator](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L41-L44>)
 
 Correlator is implemented by values \(such as httperror.Error\) that carry a correlation ID.
 
@@ -138,7 +138,7 @@ type Correlator interface {
 ```
 
 <a name="RequestContext"></a>
-## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L47-L50>)
+## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L49-L52>)
 
 RequestContext is the value stored in the context by this package; it holds the request ID, aka Request\-ID or Correlation\-ID \(for cross system request correlation\). Retrieve it with Value or ID.
 
@@ -150,7 +150,7 @@ type RequestContext struct {
 ```
 
 <a name="Value"></a>
-### func [Value](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L211>)
+### func [Value](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L213>)
 
 ```go
 func Value(ctx context.Context) *RequestContext

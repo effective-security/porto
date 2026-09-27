@@ -28,7 +28,7 @@ svc := pb.NewMyServiceClient(client.Conn())
 res, err := svc.Call(ctx, req, client.Opts()...)
 ```
 
-Endpoint accepts https://, http://, unixs:// and unix:// prefixes, or a bare host\[:port\]; the scheme is stripped before dialing and ":443" is appended when no port is given. TLS and the Authorization token are only applied when TLS is configured and the endpoint uses the https:// or unixs:// scheme; other endpoints are dialed with insecure credentials.
+Endpoint accepts https://, http://, unixs:///path and unix:///path, or a bare host\[:port\]. Host schemes are stripped and ":443" is appended when no port is given; Unix targets use gRPC's unix resolver. TLS and the Authorization token apply when TLS is configured and the endpoint uses the https:// or unixs:// scheme. New rejects TLS with any other endpoint; nil TLS dials without security.
 
 Config has no yaml/json tags and is populated programmatically. All constructors return errors rather than panic.
 
@@ -60,13 +60,13 @@ type Client struct {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L67>)
+### func [New](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L68>)
 
 ```go
 func New(cfg *Config) (*Client, error)
 ```
 
-New creates a client from cfg \(see Config for the fields\). It returns an error when Endpoint is empty, the DPoP key cannot be loaded, the AuthToken has expired, or \(when DialTimeout \> 0\) the connection is not ready in time.
+New creates a client from cfg \(see Config for the fields\). It returns an error when Endpoint is empty, TLS is set for a non\-secure endpoint, the DPoP key cannot be loaded, the AuthToken has expired, or \(when DialTimeout \> 0\) the connection is not ready in time.
 
 <a name="NewFromURL"></a>
 ### func [NewFromURL](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L58>)
@@ -78,7 +78,7 @@ func NewFromURL(url string) (*Client, error)
 NewFromURL creates a client for the endpoint with default settings: no TLS, no authentication, lazy \(non\-blocking\) connect.
 
 <a name="Client.Close"></a>
-### func \(\*Client\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L72>)
+### func \(\*Client\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L73>)
 
 ```go
 func (c *Client) Close() error
@@ -87,7 +87,7 @@ func (c *Client) Close() error
 Close cancels the client context and closes the gRPC connection.
 
 <a name="Client.Conn"></a>
-### func \(\*Client\) [Conn](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L82>)
+### func \(\*Client\) [Conn](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L83>)
 
 ```go
 func (c *Client) Conn() *grpc.ClientConn
@@ -96,7 +96,7 @@ func (c *Client) Conn() *grpc.ClientConn
 Conn returns the gRPC connection, to be passed to generated service client constructors.
 
 <a name="Client.Opts"></a>
-### func \(\*Client\) [Opts](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L88>)
+### func \(\*Client\) [Opts](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/client.go#L89>)
 
 ```go
 func (c *Client) Opts() []grpc.CallOption
@@ -105,14 +105,15 @@ func (c *Client) Opts() []grpc.CallOption
 Opts returns the call options to pass on each RPC: WaitForReady\(true\) and the send/receive message size limits, or Config.CallOptions when set.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L17-L77>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L17-L78>)
 
 Config describes how to build a Client. It is populated programmatically \(no yaml/json tags\); only Endpoint is required.
 
 ```go
 type Config struct {
-    // Endpoint of the server: https://host[:port], http://, unixs://, unix://
-    // or a bare host[:port]. ":443" is appended when no port is given.
+    // Endpoint of the server: https://host[:port], http://, unixs:///path,
+    // unix:///path, or a bare host[:port]. ":443" is appended to host targets
+    // when no port is given.
     Endpoint string
 
     // DialTimeout, when > 0, makes New block until the connection is Ready
@@ -127,9 +128,9 @@ type Config struct {
     // keep-alive probe. If the response is not received in this time, the connection is closed.
     DialKeepAliveTimeout time.Duration
 
-    // TLS holds the client TLS configuration. It is only used, together with
-    // CallerIdentity/AuthToken, when Endpoint starts with https:// or
-    // unixs://; otherwise the connection is dialed with insecure credentials.
+    // TLS holds the client TLS configuration. When set, Endpoint must start
+    // with https:// or unixs://; otherwise New returns an error. CallerIdentity
+    // and AuthToken are applied with TLS. A nil TLS dials without security.
     TLS *tls.Config
 
     // DialOptions is a list of extra dial options for the grpc client
@@ -173,7 +174,7 @@ type Config struct {
 ```
 
 <a name="Config.CheckAuthTokenFromEnv"></a>
-### func \(\*Config\) [CheckAuthTokenFromEnv](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L83>)
+### func \(\*Config\) [CheckAuthTokenFromEnv](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L84>)
 
 ```go
 func (c *Config) CheckAuthTokenFromEnv(env string) (bool, error)
@@ -182,7 +183,7 @@ func (c *Config) CheckAuthTokenFromEnv(env string) (bool, error)
 CheckAuthTokenFromEnv loads AuthToken from the named environment variable \(see retriable.ParseAuthToken for the accepted formats\). It returns false when the variable is unset or empty, and an error when the value is malformed or the token has expired.
 
 <a name="Config.LoadAuthToken"></a>
-### func \(\*Config\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L115>)
+### func \(\*Config\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L116>)
 
 ```go
 func (c *Config) LoadAuthToken() error
@@ -191,7 +192,7 @@ func (c *Config) LoadAuthToken() error
 LoadAuthToken sets AuthToken and TokenLocation from the .auth\_token file in Storage. It does not check expiry; New does.
 
 <a name="Config.LoadAuthTokenOrFromEnv"></a>
-### func \(\*Config\) [LoadAuthTokenOrFromEnv](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L102>)
+### func \(\*Config\) [LoadAuthTokenOrFromEnv](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L103>)
 
 ```go
 func (c *Config) LoadAuthTokenOrFromEnv(env string) error
@@ -200,7 +201,7 @@ func (c *Config) LoadAuthTokenOrFromEnv(env string) error
 LoadAuthTokenOrFromEnv sets AuthToken from the named environment variable when it is set, otherwise from the .auth\_token file in Storage.
 
 <a name="Config.SetStorage"></a>
-### func \(\*Config\) [SetStorage](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L135>)
+### func \(\*Config\) [SetStorage](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L136>)
 
 ```go
 func (c *Config) SetStorage(storage *retriable.Storage)
@@ -209,7 +210,7 @@ func (c *Config) SetStorage(storage *retriable.Storage)
 SetStorage replaces the storage returned by Storage.
 
 <a name="Config.Storage"></a>
-### func \(\*Config\) [Storage](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L127>)
+### func \(\*Config\) [Storage](<https://github.com/effective-security/porto/blob/main/pkg/rpcclient/config.go#L128>)
 
 ```go
 func (c *Config) Storage() *retriable.Storage

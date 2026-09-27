@@ -62,8 +62,9 @@ func NewFromURL(url string) (*Client, error) {
 }
 
 // New creates a client from cfg (see Config for the fields). It returns an
-// error when Endpoint is empty, the DPoP key cannot be loaded, the AuthToken
-// has expired, or (when DialTimeout > 0) the connection is not ready in time.
+// error when Endpoint is empty, TLS is set for a non-secure endpoint, the DPoP
+// key cannot be loaded, the AuthToken has expired, or (when DialTimeout > 0)
+// the connection is not ready in time.
 func New(cfg *Config) (*Client, error) {
 	return newClient(cfg)
 }
@@ -92,6 +93,11 @@ func (c *Client) Opts() []grpc.CallOption {
 func newClient(cfg *Config) (*Client, error) {
 	if cfg == nil || len(cfg.Endpoint) == 0 {
 		return nil, errors.Errorf("endpoint is required in client config")
+	}
+	secureEndpoint := strings.HasPrefix(cfg.Endpoint, "https://") ||
+		strings.HasPrefix(cfg.Endpoint, "unixs://")
+	if cfg.TLS != nil && !secureEndpoint {
+		return nil, errors.New("TLS requires an https:// or unixs:// endpoint")
 	}
 
 	// use a temporary skeleton client to bootstrap first connection
@@ -132,8 +138,7 @@ func newClient(cfg *Config) (*Client, error) {
 		dopts = append(dopts, grpc.WithUserAgent(cfg.UserAgent))
 	}
 
-	if cfg.TLS != nil &&
-		(strings.HasPrefix(dialEndpoint, "https://") || strings.HasPrefix(dialEndpoint, "unixs://")) {
+	if cfg.TLS != nil {
 
 		bundle := tcredentials.NewBundle(tcredentials.Config{TLSConfig: cfg.TLS})
 		creds = bundle.TransportCredentials()
@@ -184,8 +189,6 @@ func newClient(cfg *Config) (*Client, error) {
 	return client, nil
 }
 
-var removePrefix = strings.NewReplacer("https://", "", "http://", "", "unixs://", "", "unix://", "")
-
 // dial configures and dials any grpc balancer target.
 func (c *Client) dial(target string, creds credentials.TransportCredentials, dopts ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opts, err := c.dialSetupOpts(creds, dopts...)
@@ -195,9 +198,16 @@ func (c *Client) dial(target string, creds credentials.TransportCredentials, dop
 
 	opts = append(opts, c.cfg.DialOptions...)
 
-	target = removePrefix.Replace(target)
-	if !strings.Contains(target, ":") {
-		target += ":443"
+	switch {
+	case strings.HasPrefix(target, "unixs://"):
+		target = "unix://" + strings.TrimPrefix(target, "unixs://")
+	case strings.HasPrefix(target, "unix://"):
+		// Keep the unix resolver scheme and socket path intact.
+	default:
+		target = strings.TrimPrefix(strings.TrimPrefix(target, "https://"), "http://")
+		if !strings.Contains(target, ":") {
+			target += ":443"
+		}
 	}
 
 	logger.KV(xlog.DEBUG, "target", target, "timeout", c.cfg.DialTimeout)

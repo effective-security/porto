@@ -30,4 +30,12 @@ func Test_GetPortAndHost(t *testing.T) {
 	bindAddr = "hostname:7865"
 	assert.Equal(t, "7865", rest.GetPort(bindAddr))
 	assert.Equal(t, "hostname", rest.GetHostName(bindAddr))
+
+	bindAddr = "::1"
+	assert.Equal(t, "443", rest.GetPort(bindAddr))
+	assert.Equal(t, "::1", rest.GetHostName(bindAddr))
+
+	bindAddr = "[::1]:7865"
+	assert.Equal(t, "7865", rest.GetPort(bindAddr))
+	assert.Equal(t, "::1", rest.GetHostName(bindAddr))
 }

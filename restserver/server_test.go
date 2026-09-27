@@ -151,6 +151,7 @@ func Test_NewServer(t *testing.T) {
 	assert.False(t, server.IsReady())
 	assert.NotNil(t, server.HTTPConfig())
 	assert.Equal(t, cfg, server.HTTPConfig())
+	assert.Same(t, cfg, server.Config())
 
 	assert.Equal(t, fmt.Sprintf("http://%s:%s", server.HostName(), server.Port()), rest.GetServerBaseURL(server).String())
 
@@ -341,6 +342,52 @@ func Test_GetServerURL(t *testing.T) {
 
 		assert.Equal(t, "https://localhost/another/location", u.String())
 	})
+}
+
+func Test_GetServerBaseURL(t *testing.T) {
+	t.Parallel()
+
+	tcases := []struct {
+		bindAddr string
+		expHost  string
+		expURL   string
+	}{
+		{
+			bindAddr: "hostname:8081",
+			expHost:  "hostname",
+			expURL:   "http://hostname:8081",
+		},
+		{
+			bindAddr: "[::1]:8443",
+			expHost:  "::1",
+			expURL:   "http://[::1]:8443",
+		},
+		{
+			bindAddr: "::1",
+			expHost:  "::1",
+			expURL:   "http://[::1]:443",
+		},
+	}
+
+	for _, tc := range tcases {
+		t.Run(tc.bindAddr, func(t *testing.T) {
+			t.Parallel()
+
+			server, err := rest.New("v1.0.123", "", &serverConfig{BindAddr: tc.bindAddr}, nil)
+			require.NoError(t, err)
+
+			base := rest.GetServerBaseURL(server)
+			assert.Equal(t, tc.expURL, base.String())
+			assert.Equal(t, tc.expHost, base.Hostname())
+			assert.Equal(t, server.Port(), base.Port())
+
+			// without a request host, GetServerURL falls back to the bind address
+			r, err := http.NewRequest(http.MethodGet, "/get/GET", nil)
+			require.NoError(t, err)
+			u := rest.GetServerURL(server, r, "/another/location")
+			assert.Equal(t, tc.expURL+"/another/location", u.String())
+		})
+	}
 }
 
 type testMuxer struct {

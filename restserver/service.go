@@ -8,7 +8,8 @@ type Service interface {
 	Name() string
 	// Register adds the service's routes to the router.
 	Register(Router)
-	// Close releases the service's resources; called once by StopHTTP.
+	// Close releases the service's resources after StopHTTP drains requests.
+	// It is called once, even when the shutdown deadline expires.
 	Close()
 	// IsReady indicates that service is ready to serve its end-points;
 	// while any service returns false the server answers 503 to all requests.

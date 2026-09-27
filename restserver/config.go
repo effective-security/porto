@@ -1,6 +1,7 @@
 package restserver
 
 import (
+	"net"
 	"os"
 	"strings"
 )
@@ -34,9 +35,14 @@ type Config interface {
 }
 
 // GetPort returns the port from an HTTP bind address ("host:port" or ":port"),
-// or "443" when the address contains no colon. Unbracketed IPv6 literals
-// without a port are not supported (the last group is returned).
+// or "443" when the address has no port, including a bare IPv6 literal.
 func GetPort(bindAddr string) string {
+	if _, port, err := net.SplitHostPort(bindAddr); err == nil {
+		return port
+	}
+	if net.ParseIP(strings.Trim(bindAddr, "[]")) != nil {
+		return "443"
+	}
 	i := strings.LastIndex(bindAddr, ":")
 	if i >= 0 {
 		return bindAddr[i+1:]
@@ -45,11 +51,15 @@ func GetPort(bindAddr string) string {
 }
 
 // GetHostName returns the host part of an HTTP bind address, or the OS
-// hostname when the address has no host (for example ":8080").
+// hostname when the address has no host (for example ":8080"). IPv6 literals
+// are returned without brackets; use net.JoinHostPort to rebuild host:port.
 func GetHostName(bindAddr string) string {
 	hn := bindAddr
-	i := strings.LastIndex(bindAddr, ":")
-	if i >= 0 {
+	if host, _, err := net.SplitHostPort(bindAddr); err == nil {
+		hn = host
+	} else if net.ParseIP(strings.Trim(bindAddr, "[]")) != nil {
+		hn = strings.Trim(bindAddr, "[]")
+	} else if i := strings.LastIndex(bindAddr, ":"); i >= 0 {
 		hn = bindAddr[:i]
 	}
 	if hn == "" {

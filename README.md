@@ -246,7 +246,7 @@ clients:
 
 ```go
 cfg := &rpcclient.Config{
-	Endpoint:    "https://api.example.com:443", // TLS and tokens apply only to https:// or unixs://
+	Endpoint:    "https://api.example.com:443", // TLS requires https:// or unixs://
 	TLS:         tlsCfg,
 	DialTimeout: 5 * time.Second, // 0 = lazy connect
 }

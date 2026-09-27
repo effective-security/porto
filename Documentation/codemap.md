@@ -102,6 +102,8 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | handshake failure callback                  | pkg/transport                              | tls.go                           | `TLSInfo.HandshakeFailure`                                                 |
 | graceful shutdown / request timeout         | gserver, restserver                        | server.go                        | `Server.Close`, `HTTPServer.StopHTTP`, `WithShutdownTimeout`               |
 | server lifecycle events                     | restserver                                 | server.go                        | `OnEvent`, `ServerEvent`                                                   |
+| REST bind address helpers                    | restserver                                 | config.go                        | `GetPort`, `GetHostName`                                                   |
+| REST server config access                    | restserver                                 | server.go                        | `HTTPServer.Config`, `HTTPConfig`                                          |
 | custom middleware / interceptors            | gserver, restserver                        | options.go, server.go            | `WithMiddleware`, `WithUnaryServerInterceptor`, `WithMuxFactory`           |
 | service registration (REST/gRPC)            | gserver, restserver                        | server.go, service.go            | `RouteRegistrator`, `GRPCRegistrator`, `ServiceFactory`, `Service`         |
 | service registry / DI lookup                | pkg/discovery                              | discovery.go                     | `Discovery.Register/Find`                                                  |
@@ -163,6 +165,7 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | DPoP proof (client)                         | gserver/credentials, pkg/retriable         | credentials.go, retriable.go     | `Bundle.WithDPoP`, `Client.Do`                                              |
 | OAuth fixed token                           | gserver/credentials                        | oauth.go                         | `NewOauthAccess`                                                           |
 | gRPC client construction                    | pkg/rpcclient                              | client.go                        | `New`, `NewFromURL`                                                        |
+| gRPC client TLS endpoint validation         | pkg/rpcclient                              | client.go                        | `New`, `Config.TLS`                                                        |
 | gRPC blocking dial timeout                  | pkg/rpcclient                              | client.go                        | `Client.dial`, `Config.DialTimeout`                                        |
 | retry policy / backoff                      | pkg/retriable                              | retriable.go                     | `Policy`, `DefaultPolicy`, `ShouldRetry`, `DefaultShouldRetryFactory`      |
 | non-retriable errors (TLS/DNS)              | pkg/retriable                              | retriable.go                     | `DefaultNonRetriableErrors`                                                |
@@ -308,11 +311,12 @@ Entry points:
 
 Invariants:
 
-- `StartHTTP` is non-blocking. TLS bind errors are returned synchronously; plain-HTTP bind errors panic on the goroutine (P-020).
+- `StartHTTP` binds HTTP and HTTPS listeners synchronously and returns bind errors; serving remains asynchronous. A failed bind can be retried, but a successfully started instance cannot be restarted.
 - `AddService` panics on duplicate names; `NewMux` panics if the authz handler cannot be built.
 - Chain (outer → inner): correlation → identity → metrics → request logger → authz (if set) → ready → CORS (if set) → router. Default identity mapper is `identity.GuestIdentityMapper`; logger granularity is `time.Millisecond`.
-- `StopHTTP`: broadcast Stopping → `Service.Close()` for all → `Shutdown` with `shutdownTimeout` (default 5s) → broadcast Stopped (P-021). Must follow `StartHTTP`.
-- `serving` is an `atomic.Bool`; `IsReady` reads services under `lock.RLock`. `HTTPServer` embeds a nil `Server` interface, so `Config()` is unimplemented (P-022); use `HTTPConfig()`.
+- `StopHTTP`: mark unready → wait for Started callbacks → broadcast Stopping → `Shutdown` with `shutdownTimeout` (default 5s) → `Service.Close()` for all → broadcast Stopped. Calls before start do nothing; concurrent and repeated calls wait for the first shutdown. A timeout still closes services after `Shutdown` returns. Lifecycle callbacks must not call `StopHTTP` synchronously.
+- `serving` is an `atomic.Bool`; `IsReady` reads services under `lock.RLock`. `HTTPServer.Config()` and `HTTPConfig()` return the same configuration. Event handlers are copied under `lock.RLock` before callbacks run, so callbacks may register handlers.
+- `GetPort` uses `net.SplitHostPort` for host:port and defaults bare IPv6 literals to port 443. `GetHostName` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` rebuild host:port with `net.JoinHostPort`.
 - Headers read: `X-Forwarded-Proto` in `GetServerURL`. 404 → JSON `not_found`. `MaxRequestSize` (64 MiB) is advisory only (P-026).
 
 Tests: `rest_test.go` suite builds CA/server/client chains with `xpki/testca` in a temp dir; `server_test.go` uses random ports via `tests/testutils`; `router_test.go` CORS; `example_test.go` uses `testdata/test-server*.pem`.
@@ -450,8 +454,8 @@ Files: `doc.go`, `client.go` (`Client`, `New`/`NewFromURL`, `newClient`, `dial`)
 
 Invariants:
 
-- Scheme prefixes are stripped; `:443` appended when no port.
-- TLS and Authorization are applied only when `cfg.TLS != nil` AND the endpoint starts with `https://`/`unixs://`; otherwise `insecure.NewCredentials()` (P-039).
+- HTTP(S) scheme prefixes are stripped and `:443` is appended when no host port is given. `unixs:///path` is converted to gRPC's `unix:///path` resolver target; `unix:///path` is preserved.
+- When `cfg.TLS != nil`, the endpoint must start with `https://` or `unixs://`; `New` otherwise returns an error. A nil TLS config uses `insecure.NewCredentials()`.
 - Defaults: `WaitForReady(true)`, send limit 10 MiB, recv limit `math.MaxInt32`; `Config.CallOptions` replaces them.
 - `DialTimeout > 0` waits for `connectivity.Ready`; otherwise lazy. Uses `grpc.NewClient`.
 - `Config` has no yaml/json tags.

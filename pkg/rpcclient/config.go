@@ -15,8 +15,9 @@ import (
 // Config describes how to build a Client. It is populated programmatically
 // (no yaml/json tags); only Endpoint is required.
 type Config struct {
-	// Endpoint of the server: https://host[:port], http://, unixs://, unix://
-	// or a bare host[:port]. ":443" is appended when no port is given.
+	// Endpoint of the server: https://host[:port], http://, unixs:///path,
+	// unix:///path, or a bare host[:port]. ":443" is appended to host targets
+	// when no port is given.
 	Endpoint string
 
 	// DialTimeout, when > 0, makes New block until the connection is Ready
@@ -31,9 +32,9 @@ type Config struct {
 	// keep-alive probe. If the response is not received in this time, the connection is closed.
 	DialKeepAliveTimeout time.Duration
 
-	// TLS holds the client TLS configuration. It is only used, together with
-	// CallerIdentity/AuthToken, when Endpoint starts with https:// or
-	// unixs://; otherwise the connection is dialed with insecure credentials.
+	// TLS holds the client TLS configuration. When set, Endpoint must start
+	// with https:// or unixs://; otherwise New returns an error. CallerIdentity
+	// and AuthToken are applied with TLS. A nil TLS dials without security.
 	TLS *tls.Config
 
 	// DialOptions is a list of extra dial options for the grpc client

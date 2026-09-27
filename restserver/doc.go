@@ -20,7 +20,7 @@
 //	if err := srv.StartHTTP(); err != nil { // non-blocking, serves in a goroutine
 //		return err
 //	}
-//	defer srv.StopHTTP()                  // graceful shutdown, closes services
+//	defer srv.StopHTTP()                  // drains requests, then closes services
 //
 // A Service registers its routes on the Router passed to Register:
 //
