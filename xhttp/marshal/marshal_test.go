@@ -62,20 +62,73 @@ func TestWriteJSON(t *testing.T) {
 	WriteJSON(w, r, v)
 	assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
 	assert.Equal(t, `{"A":"a","B":"b"}`, w.Body.String())
+	assert.Empty(t, w.Header().Get(header.ContentEncoding))
+	assert.Equal(t, header.AcceptEncoding, w.Header().Get(header.Vary))
+}
 
-	r.Header.Set(header.AcceptEncoding, header.Gzip)
-	w = httptest.NewRecorder()
-	WriteJSON(w, r, v)
-	assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
-	assert.Equal(t, header.Gzip, w.Header().Get(header.ContentEncoding))
-	// The exact compressed bytes depend on the compress/flate implementation
-	// of the Go release, so compare the decompressed payload instead.
-	gz, err := gzip.NewReader(w.Body)
-	require.NoError(t, err)
-	decoded, err := io.ReadAll(gz)
-	require.NoError(t, err)
-	assert.Equal(t, `{"A":"a","B":"b"}`, string(decoded))
-	require.NoError(t, gz.Close())
+func TestWriteJSONCompression(t *testing.T) {
+	const jsonOverhead = len(`{"Data":""}`)
+	tcases := []struct {
+		name     string
+		accept   string
+		size     int
+		wantGzip bool
+	}{
+		{name: "small gzip", accept: "gzip", size: minGzipSize - 1},
+		{name: "threshold gzip", accept: "gzip", size: minGzipSize, wantGzip: true},
+		{name: "large no accept", size: minGzipSize + 1},
+		{name: "gzip disabled", accept: "gzip;q=0", size: minGzipSize + 1},
+		{name: "gzip quality", accept: "br, gzip;q=0.5", size: minGzipSize + 1, wantGzip: true},
+		{name: "gzip case", accept: "GZIP;Q=0.5", size: minGzipSize + 1, wantGzip: true},
+		{name: "wildcard", accept: "*;q=0.5", size: minGzipSize + 1, wantGzip: true},
+		{name: "explicit denial", accept: "gzip;q=0, *;q=1", size: minGzipSize + 1},
+		{name: "substring", accept: "xgzip", size: minGzipSize + 1},
+		{name: "invalid quality", accept: "gzip;q=bogus", size: minGzipSize + 1},
+		{name: "out of range quality", accept: "gzip;q=2", size: minGzipSize + 1},
+		{name: "empty quality", accept: "gzip;q", size: minGzipSize + 1},
+		{name: "non-quality parameter", accept: "gzip;level=1", size: minGzipSize + 1, wantGzip: true},
+		{name: "trailing semicolon", accept: "gzip;", size: minGzipSize + 1, wantGzip: true},
+		{name: "quality after parameter", accept: "gzip;level=1;q=0", size: minGzipSize + 1},
+		{name: "wildcard parameter", accept: "*;level=1", size: minGzipSize + 1, wantGzip: true},
+	}
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := struct{ Data string }{Data: strings.Repeat("x", tc.size-jsonOverhead)}
+			plain, err := EncodeBytes(DontPrettyPrint, payload)
+			require.NoError(t, err)
+			require.Len(t, plain, tc.size)
+
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.Header.Set(header.AcceptEncoding, tc.accept)
+			w := httptest.NewRecorder()
+			w.Header().Set(header.Vary, "Origin")
+			WriteJSON(w, r, payload)
+			assert.Equal(t, []string{"Origin", header.AcceptEncoding}, w.Header().Values(header.Vary))
+			assert.Equal(t, header.ApplicationJSON, w.Header().Get(header.ContentType))
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			actual := w.Body.Bytes()
+			if tc.wantGzip {
+				assert.Equal(t, header.Gzip, w.Header().Get(header.ContentEncoding))
+				gz, err := gzip.NewReader(bytes.NewReader(actual))
+				require.NoError(t, err)
+				actual, err = io.ReadAll(gz)
+				require.NoError(t, err)
+				require.NoError(t, gz.Close())
+			} else {
+				assert.Empty(t, w.Header().Get(header.ContentEncoding))
+			}
+			assert.Equal(t, plain, actual)
+		})
+	}
+}
+
+func TestWriteJSONVaryExisting(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	w.Header().Set(header.Vary, "Origin, accept-encoding")
+	WriteJSON(w, r, struct{}{})
+	assert.Equal(t, []string{"Origin, accept-encoding"}, w.Header().Values(header.Vary))
 }
 
 func TestWriteJSON_Error(t *testing.T) {

@@ -10,11 +10,15 @@
 
 - Synchronize retriable client setters and token refresh; missing or public-only DPoP signing keys now return errors.
 
+- Make discovery registration and lookup safe for concurrent use; nil services now return an error, and iteration callbacks may register services.
+
 ### Correctness and interoperability
 
 - Sign a fresh DPoP proof for each retry attempt.
 
 - Forward a normalized correlation ID from HTTP requests to gRPC metadata, including the `x-request-id` alias when present.
+
+- Honor gzip quality values for JSON responses, skip compression below 1 KiB, and add `Vary: Accept-Encoding`. Compressed JSON and unary gRPC-Web responses now reuse gzip writers.
 
 ### Tests and tooling
 

@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"path"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/header"
@@ -21,6 +23,12 @@ import (
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "xhttp")
+
+const minGzipSize = 1024
+
+var jsonGzipWriters = sync.Pool{
+	New: func() any { return gzip.NewWriter(io.Discard) },
+}
 
 // WriteHTTPResponse is implemented by types that take full control over how
 // they are written as an HTTP response (httperror.Error and ManyError do).
@@ -35,9 +43,10 @@ type WriteHTTPResponse interface {
 // httperror.NewFromPb (500 unexpected unless it carries a gRPC status) and
 // written the same way; errors other than 404 are also logged with the
 // caller's file and line. Anything else is written as application/json
-// with status 200, gzip-compressed when the request's Accept-Encoding
-// contains "gzip", and pretty-printed when the URL has a "pp" query
-// parameter. Encoding failures are logged, not reported. r must not be nil.
+// with status 200, gzip-compressed for payloads of at least 1 KiB when the
+// request accepts gzip, and pretty-printed when the URL has a "pp" query
+// parameter. Success responses vary by Accept-Encoding. Encoding and write
+// failures are logged, not reported. r must not be nil.
 //
 // Passing several values lets a handler write either the error or the
 // result in one call:
@@ -77,20 +86,137 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
 		return
 
 	default:
-		w.Header().Set(header.ContentType, header.ApplicationJSON)
+		h := w.Header()
+		h.Set(header.ContentType, header.ApplicationJSON)
+		addVaryAcceptEncoding(h)
 		var out io.Writer = w
-		if r != nil && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip) {
-			w.Header().Set(header.ContentEncoding, header.Gzip)
-			gz := gzip.NewWriter(out)
-			out = gz
-			defer gz.Close()
+		var compressed *thresholdGzipWriter
+		if acceptsGzip(r.Header) {
+			compressed = &thresholdGzipWriter{w: w}
+			out = compressed
 		}
 		bw := bufio.NewWriter(out)
-		if err := NewEncoder(bw, r).Encode(body); err != nil {
-			logger.ContextKV(r.Context(), xlog.WARNING, "reason", "encode", "type", body, "err", err.Error())
+		encodeErr := NewEncoder(bw, r).Encode(body)
+		flushErr := bw.Flush()
+		var closeErr error
+		if compressed != nil {
+			closeErr = compressed.Close()
 		}
-		bw.Flush()
+		if encodeErr != nil {
+			logger.ContextKV(r.Context(), xlog.WARNING, "reason", "encode", "type", body, "err", encodeErr.Error())
+		}
+		if flushErr != nil {
+			logger.ContextKV(r.Context(), xlog.WARNING, "reason", "flush_json", "err", flushErr.Error())
+		}
+		if closeErr != nil {
+			logger.ContextKV(r.Context(), xlog.WARNING, "reason", "close_json", "err", closeErr.Error())
+		}
 	}
+}
+
+// thresholdGzipWriter keeps at most minGzipSize-1 bytes before deciding
+// whether to compress. Once the threshold is reached, it streams to gzip.
+type thresholdGzipWriter struct {
+	w      http.ResponseWriter
+	buffer [minGzipSize]byte
+	used   int
+	gz     *gzip.Writer
+}
+
+func (tw *thresholdGzipWriter) Write(p []byte) (int, error) {
+	if tw.gz != nil {
+		return tw.gz.Write(p)
+	}
+	if tw.used+len(p) < minGzipSize {
+		tw.used += copy(tw.buffer[tw.used:], p)
+		return len(p), nil
+	}
+	tw.w.Header().Set(header.ContentEncoding, header.Gzip)
+	tw.gz = jsonGzipWriters.Get().(*gzip.Writer)
+	tw.gz.Reset(tw.w)
+	if tw.used > 0 {
+		if _, err := tw.gz.Write(tw.buffer[:tw.used]); err != nil {
+			return 0, errors.WithMessage(err, "unable to write compressed JSON prefix")
+		}
+		tw.used = 0
+	}
+	return tw.gz.Write(p)
+}
+
+func (tw *thresholdGzipWriter) Close() error {
+	if tw.gz == nil {
+		if tw.used == 0 {
+			return nil
+		}
+		_, err := tw.w.Write(tw.buffer[:tw.used])
+		tw.used = 0
+		if err != nil {
+			return errors.WithMessage(err, "unable to write JSON")
+		}
+		return nil
+	}
+	gz := tw.gz
+	tw.gz = nil
+	err := gz.Close()
+	gz.Reset(io.Discard)
+	jsonGzipWriters.Put(gz)
+	if err != nil {
+		return errors.WithMessage(err, "unable to close compressed JSON")
+	}
+	return nil
+}
+
+func addVaryAcceptEncoding(h http.Header) {
+	for _, field := range h.Values(header.Vary) {
+		for value := range strings.SplitSeq(field, ",") {
+			value = strings.TrimSpace(value)
+			if value == "*" || strings.EqualFold(value, header.AcceptEncoding) {
+				return
+			}
+		}
+	}
+	h.Add(header.Vary, header.AcceptEncoding)
+}
+
+func acceptsGzip(h http.Header) bool {
+	var gzipQuality, wildcardQuality float64
+	var gzipSeen, wildcardSeen bool
+	for _, field := range h.Values(header.AcceptEncoding) {
+		for item := range strings.SplitSeq(field, ",") {
+			coding, parameters, _ := strings.Cut(strings.TrimSpace(item), ";")
+			coding = strings.TrimSpace(coding)
+			isGzip := strings.EqualFold(coding, header.Gzip)
+			if !isGzip && coding != "*" {
+				continue
+			}
+			// Quality defaults to 1 when no q parameter is present; a
+			// malformed or out-of-range q value is treated as a refusal.
+			quality := 1.0
+			for parameter := range strings.SplitSeq(parameters, ";") {
+				name, value, _ := strings.Cut(parameter, "=")
+				if !strings.EqualFold(strings.TrimSpace(name), "q") {
+					continue
+				}
+				quality = 0
+				parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+				if err == nil && parsed >= 0 && parsed <= 1 {
+					quality = parsed
+				}
+				break
+			}
+			if isGzip {
+				gzipSeen = true
+				gzipQuality = max(gzipQuality, quality)
+			} else {
+				wildcardSeen = true
+				wildcardQuality = max(wildcardQuality, quality)
+			}
+		}
+	}
+	if gzipSeen {
+		return gzipQuality > 0
+	}
+	return wildcardSeen && wildcardQuality > 0
 }
 
 func httpError(bv any, r *http.Request) {

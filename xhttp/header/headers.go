@@ -54,6 +54,8 @@ const (
 	TextPlain = "text/plain"
 	// UserAgent is HTTP header value for "User-Agent"
 	UserAgent = "User-Agent"
+	// Vary lists request headers that select a response representation.
+	Vary = "Vary"
 	// XHostname contains the name of the HTTP header to indicate which host requested the signature
 	XHostname = "X-HostName"
 	// XCorrelationID is HTTP header for "X-Correlation-ID"

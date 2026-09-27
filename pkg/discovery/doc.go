@@ -20,7 +20,9 @@
 //		return closer.Close()
 //	})
 //
-// The registry is a plain map with no locking: perform all Register calls
-// before concurrent Find/ForEach use. When several registered services
-// implement the requested interface, Find returns an arbitrary one.
+// Register, Find, and ForEach may run concurrently. ForEach visits a snapshot
+// of matching services, so callbacks may register more services without
+// changing the current iteration. Callers must synchronize destination values
+// shared between goroutines. When several registered services implement the
+// requested interface, Find returns an arbitrary one.
 package discovery

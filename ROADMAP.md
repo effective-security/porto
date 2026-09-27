@@ -72,3 +72,13 @@ Coverage sits at 79.2% against an 80% gate. `pkg/crlcache`,
 `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils` and
 `appinit.Metrics` have no tests; `gserver/roles` has no STS tests beyond
 URL validation. Retires P-035.
+
+## 11. Follow up after xpki v1.0 upgrade
+
+There are two DPoP follow-ups if those behaviors matter to your deployment:
+
+HTTP proof verification (gserver/roles/roles.go:293) assumes an https origin when the request URL has no scheme. Plain HTTP or a different public origin needs an explicit trusted external URL.
+
+Proof verification (gserver/roles/roles.go:518) and client proof signing (pkg/retriable/retriable.go:983) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
+
+The stricter JWT time, algorithm, and key checks may reject previously accepted tokens; Porto parses tokens supplied by callers and does not issue them here.

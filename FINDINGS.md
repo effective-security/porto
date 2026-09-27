@@ -46,7 +46,6 @@ byte-exact test.
 | P-005 | gserver                                 | `serve.go` `serveCtx.serve`                                              | cmux and `http.Server` have no read/header/idle timeouts (slowloris)                                                                         | security    | MEDIUM   | Open           |
 | P-006 | gserver                                 | `serve.go` `configureRateLimiter`                                        | `rate_limit.enabled` without `requests_per_second` blocks nearly all traffic                                                                 | correctness | MEDIUM   | Needs Approval |
 | P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Needs Approval |
-| P-008 | gserver                                 | `grpc_web_response.go` `newGrpcWebResponse`                              | `gzip.Writer` allocated per gRPC-Web request, no pooling                                                                                     | performance | MEDIUM   | Open           |
 | P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
 | P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
 | P-011 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web request from a disallowed origin returns 200 with an empty body                                                                     | correctness | LOW      | Needs Approval |
@@ -63,7 +62,6 @@ byte-exact test.
 | P-022 | restserver                              | `server.go` `HTTPServer`                                                 | `HTTPServer.Config()` panics (nil embedded `Server` interface)                                                                               | bug         | MEDIUM   | Open           |
 | P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
-| P-025 | xhttp/marshal                           | `marshal.go` `WriteJSON`                                                 | `gzip.Writer` per response, no `Vary`, `Accept-Encoding` matched by substring                                                                | performance | MEDIUM   | Open           |
 | P-026 | xhttp/marshal, restserver               | `json.go` `DecodeBody`; `server.go` `MaxRequestSize`                     | Request bodies decoded without a size limit; `MaxRequestSize` is dead                                                                        | security    | MEDIUM   | Needs Approval |
 | P-027 | xhttp/httperror, restserver/authz       | `codes.go` `codeStatus`; `authz.go` `authHandler.ServeHTTP`              | `PermissionDenied` maps to 401; authz denies with 401 instead of 403                                                                         | correctness | LOW      | Needs Approval |
 | P-028 | restserver/authz                        | `authz.go` `authHandler.ServeHTTP`                                       | Denial error double-wrapped, duplicating the code in the message and dropping the context                                                    | correctness | LOW      | Needs Approval |
@@ -106,10 +104,10 @@ byte-exact test.
 | P-069 | pkg/tasks                               | `task.go` `Run`                                                          | Unused `time.NewTimer` allocated per run alongside `time.After`                                                                              | performance | LOW      | Open           |
 | P-070 | pkg/tlsconfig                           | `tlsconfig.go`                                                           | `AppendCertsFromPEM` result ignored; malformed CA files yield an empty pool silently                                                         | correctness | LOW      | Open           |
 | P-071 | pkg/tasks                               | `scheduler.go` `Count`, `List`                                           | `Count` unlocked (called from `Start` under lock); `List` shares the backing array                                                           | race        | LOW      | Open           |
-| P-072 | pkg/discovery                           | `discovery.go` `Register`, `Find`                                        | Unsynchronized map; `Register(nil)` panics                                                                                                   | race        | LOW      | Open           |
 | P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
 | P-074 | pkg/tasks, pkg/transport, pkg/tlsconfig | `scheduler.go`, `keepalive_listener.go`, `cipher_suites.go`              | Modernization: `sort.Sort` → `slices.SortFunc`; `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones | correctness | LOW      | Needs Approval |
 | P-075 | pkg/cache                               | `cache_test.go` `TestProvider/redis` (pub/sub)                           | Flaky under load: Redis `ReceiveMessage` hits a 5s i/o timeout; `require` used inside goroutines                                             | docs        | LOW      | Open           |
+| P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
 
 ## Details
 
@@ -154,12 +152,6 @@ byte-exact test.
 - Evidence: when `HeadersIPLookups` is empty tollbooth defaults to `X-Forwarded-For`, `X-Real-IP`, then `RemoteAddr`.
 - Impact: without a trusted proxy, clients bypass the limiter by rotating a fake `X-Forwarded-For`.
 - Fix: default to `["RemoteAddr"]`; document that header lookups are only safe behind a trusted proxy.
-
-### P-008 `gzip.Writer` per gRPC-Web request
-
-- Evidence: `g.gz = gzip.NewWriter(resp)` for every compressed unary gRPC-Web call.
-- Impact: hundreds of KB allocated per call on gRPC-Web heavy servers.
-- Fix: `sync.Pool` of `*gzip.Writer` with `Reset` on acquire; return in `Close`.
 
 ### P-009 CSRF values in error text
 
@@ -244,11 +236,6 @@ byte-exact test.
 - Evidence: implements only `Header/Write/WriteHeader/Flush`; inserted twice in every chain.
 - Impact: WebSocket upgrades and `http.ResponseController` deadlines are impossible behind restserver.
 - Fix: add `Unwrap() http.ResponseWriter`; make `Flush` conditional on the delegate.
-
-### P-025 `WriteJSON` gzip handling
-
-- Evidence: `gzip.NewWriter(out)` per response, no `sync.Pool`, no `Vary: Accept-Encoding`, `strings.Contains` matches `gzip;q=0`.
-- Fix: pool writers, set `Vary`, skip small payloads, honor `q` values.
 
 ### P-026 Unbounded request bodies
 
@@ -409,7 +396,6 @@ byte-exact test.
 - P-069: `timer := time.NewTimer(timeout)` unused; select uses `time.After`.
 - P-070: `roots.AppendCertsFromPEM(rootsBytes)` return value ignored in three places.
 - P-071: `Count` has the lock commented out because `Start` calls it while locked; `List` returns `s.tasks[:]`.
-- P-072: `d.reg[key] = ...` and range without a mutex; `reflect.TypeOf(nil).String()` panics.
 - P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
 - P-074: `sort.Sort(s)` with `Len/Swap/Less`; `SetKeepAlive`+`SetKeepAlivePeriod`; hand-maintained cipher map including RC4/3DES.
 
@@ -417,6 +403,12 @@ byte-exact test.
 
 - Evidence: one run of `go test ./...` (all packages in parallel, Redis in testcontainers) failed `TestProvider/redis` at `cache_test.go:270` with `read tcp [::1]:40600->[::1]:32789: i/o timeout`; the test passes in isolation and on rerun. The receiving goroutines call `require.NoError`, which invokes `FailNow` from a non-test goroutine.
 - Fix: use `assert` plus an error channel in the goroutines; give the subscription time to be established before `Publish` (or retry the publish); consider a longer context deadline for the container-backed subtest. Related to P-041.
+
+### P-076 gRPC-Web gzip ignores quality values
+
+- Evidence: `compress := !isStream && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip)`. `Accept-Encoding: gzip;q=0` and `xgzip` enable compression, and a second `Accept-Encoding` header line is not read. `marshal.WriteJSON` negotiates with `acceptsGzip`, which honors q-values, so the JSON and gRPC-Web paths disagree for the same request.
+- Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
+- Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
 ## Notes on items needing approval
 

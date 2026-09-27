@@ -27,7 +27,7 @@ err := d.ForEach(&closer, func(key string) error { // key is "<server>/<type>"
 })
 ```
 
-The registry is a plain map with no locking: perform all Register calls before concurrent Find/ForEach use. When several registered services implement the requested interface, Find returns an arbitrary one.
+Register, Find, and ForEach may run concurrently. ForEach visits a snapshot of matching services, so callbacks may register more services without changing the current iteration. Callers must synchronize destination values shared between goroutines. When several registered services implement the requested interface, Find returns an arbitrary one.
 
 ## Index
 
@@ -36,14 +36,15 @@ The registry is a plain map with no locking: perform all Register calls before c
 
 
 <a name="Discovery"></a>
-## type [Discovery](<https://github.com/effective-security/porto/blob/main/pkg/discovery/discovery.go#L23-L36>)
+## type [Discovery](<https://github.com/effective-security/porto/blob/main/pkg/discovery/discovery.go#L25-L39>)
 
-Discovery is an in\-process registry of service implementations, resolved by the interface a caller needs. Not safe for concurrent modification; register everything before concurrent lookups.
+Discovery is an in\-process registry of service implementations, resolved by the interface a caller needs. Its methods are safe for concurrent use. Callers must synchronize access to destination values passed to Find and ForEach if they share them between goroutines.
 
 ```go
 type Discovery interface {
     // Register adds service under server; the key is "<server>/<concrete type>".
-    // It returns an error if the same server/type pair is already registered.
+    // It returns an error for a nil service or if the same server/type pair
+    // is already registered.
     Register(server string, service any) error
     // Find sets *v (v must be a non-nil pointer to an interface) to a
     // registered service that implements that interface. server "" matches
@@ -58,7 +59,7 @@ type Discovery interface {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/pkg/discovery/discovery.go#L43>)
+### func [New](<https://github.com/effective-security/porto/blob/main/pkg/discovery/discovery.go#L47>)
 
 ```go
 func New() Discovery
