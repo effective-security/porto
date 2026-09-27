@@ -9,6 +9,7 @@ bin/
 .codebase-memory
 CLAUDE.md
 INTENT.md
+PR_REVIEW.md
 
 debug
 debug.test

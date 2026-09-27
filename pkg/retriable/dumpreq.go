@@ -10,43 +10,66 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/xhttp/header"
 )
+
+const redactedHeaderValue = "[REDACTED]"
 
 // DumpRequestOut returns the wire representation of an outgoing client
 // request, like httputil.DumpRequestOut: it includes any headers that the
 // standard http.Transport adds, such as User-Agent. When body is true the
 // request body is read into memory and restored on req.
 //
-// NOTE: this is a copy of the Go standard library implementation, kept in
-// this package so it can be adapted. It does not redact the Authorization
-// or DPoP headers; the client only calls it at DEBUG log level.
+// Sensitive credential headers are redacted in the dump without changing req.
+// A nil request or URL returns an error. This is adapted from the Go standard
+// library implementation.
 func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
+	if req == nil {
+		return nil, errors.New("request is nil")
+	}
+	if req.URL == nil {
+		return nil, errors.New("http: nil Request.URL")
+	}
+	dumpReq := req.Clone(req.Context())
+	for name := range dumpReq.Header {
+		if strings.EqualFold(name, header.Authorization) ||
+			strings.EqualFold(name, header.DPoP) ||
+			strings.EqualFold(name, header.Cookie) ||
+			strings.EqualFold(name, header.ProxyAuthorization) {
+			dumpReq.Header[name] = []string{redactedHeaderValue}
+		}
+	}
+	dumpReq.URL.User = nil
+
 	save := req.Body
 	dummyBody := false
 	if !body {
 		contentLength := outgoingLength(req)
 		if contentLength != 0 {
-			req.Body = io.NopCloser(io.LimitReader(neverEnding('x'), contentLength))
+			dumpReq.Body = io.NopCloser(io.LimitReader(neverEnding('x'), contentLength))
 			dummyBody = true
 		}
 	} else {
 		var err error
-		save, req.Body, err = drainBody(req.Body)
+		save, dumpReq.Body, err = drainBody(req.Body)
 		if err != nil {
 			return nil, err
 		}
+		defer func() { req.Body = save }()
 	}
 
 	// Since we're using the actual Transport code to write the request,
 	// switch to http so the Transport doesn't try to do an SSL
 	// negotiation with our dumpConn and its bytes.Buffer & pipe.
 	// The wire format for https and http are the same, anyway.
-	reqSend := req
-	if req.URL.Scheme == "https" {
+	reqSend := dumpReq
+	if dumpReq.URL.Scheme == "https" {
 		reqSend = new(http.Request)
-		*reqSend = *req
+		*reqSend = *dumpReq
 		reqSend.URL = new(url.URL)
-		*reqSend.URL = *req.URL
+		*reqSend.URL = *dumpReq.URL
 		reqSend.URL.Scheme = "http"
 	}
 
@@ -91,7 +114,6 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 
 	_, err := t.RoundTrip(reqSend)
 
-	req.Body = save
 	if err != nil {
 		pw.Close()
 		dr.err = err

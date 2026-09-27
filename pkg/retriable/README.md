@@ -108,6 +108,10 @@ tokens are signed per request. Token format is an opaque string or
 `access_token=...&exp=<unix>&dpop_jkt=<jkt>&token_type=DPoP`.
 Authorization is only sent to `https://` and `unixs://` hosts.
 
+New credentials folders use mode `0700`; existing folder permissions are kept.
+An empty storage path uses the working directory. Token and key files use `0600`.
+DPoP proofs are signed separately for each retry attempt.
+
 ## Nonces
 
 `client.WithNonce("/nonce", retriable.DefaultReplayNonceHeader)` installs a

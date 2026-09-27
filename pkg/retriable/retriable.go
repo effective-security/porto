@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -340,9 +341,15 @@ type Client struct {
 	headers    map[string]string
 	beforeSend BeforeSendRequest
 	dpopSigner dpop.Signer
+	refresh    *callerTokenRefresh
 
 	token          credentials.Token
 	callerIdentity credentials.CallerIdentity
+}
+
+type callerTokenRefresh struct {
+	done chan struct{}
+	err  error
 }
 
 // Default creates a Client for the given host with DefaultPolicy,
@@ -405,6 +412,8 @@ func (c *Client) HTTPClient() *http.Client {
 // Storage returns the token/key storage of the client's Config,
 // creating it from Config.StorageFolder on first use.
 func (c *Client) Storage() *Storage {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.Config.Storage()
 }
 
@@ -417,8 +426,8 @@ func (c *Client) CurrentHost() string {
 
 // WithHeaders adds headers that are sent with every request.
 func (c *Client) WithHeaders(headers map[string]string) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	if c.headers == nil {
 		c.headers = map[string]string{}
@@ -433,8 +442,8 @@ func (c *Client) WithHeaders(headers map[string]string) *Client {
 // AddHeader adds a header that is sent with every request,
 // replacing any previous value for the same name.
 func (c *Client) AddHeader(header, value string) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	if c.headers == nil {
 		c.headers = map[string]string{}
@@ -446,25 +455,31 @@ func (c *Client) AddHeader(header, value string) *Client {
 
 // WithName modifies client's name for logging purposes.
 func (c *Client) WithName(name string) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.Name = name
 	return c
 }
 
 // WithPolicy modifies retriable policy.
 func (c *Client) WithPolicy(policy Policy) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-	c.Policy = policy
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	c.Policy = clonePolicy(policy)
 	return c
+}
+
+func clonePolicy(policy Policy) Policy {
+	policy.Retries = maps.Clone(policy.Retries)
+	policy.NonRetriableErrors = append([]string(nil), policy.NonRetriableErrors...)
+	return policy
 }
 
 // WithHost sets the host (scheme://host[:port]) used by the
 // Head/Get/Post/Put/Delete helpers.
 func (c *Client) WithHost(host string) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.host = host
 	return c
 }
@@ -472,8 +487,8 @@ func (c *Client) WithHost(host string) *Client {
 // WithBeforeSendRequest installs a hook that is invoked once per request
 // (before retries) to modify or replace the outgoing request.
 func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.beforeSend = hook
 	return c
 }
@@ -482,9 +497,14 @@ func (c *Client) WithBeforeSendRequest(hook BeforeSendRequest) *Client {
 // client calls GetCallerIdentity when it has no token or the cached token
 // has expired, and sets the Authorization header from the result.
 func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.callerIdentity = ci
+	c.token = credentials.Token{}
+	if c.refresh != nil {
+		close(c.refresh.done)
+		c.refresh = nil
+	}
 	return c
 }
 
@@ -493,8 +513,8 @@ func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
 // (idle) connections per host is installed; otherwise the existing
 // transport is modified in place and must be an *http.Transport.
 func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	if c.httpClient.Transport == nil {
 		tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -516,8 +536,8 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 // WithTransport replaces the HTTP transport. Call it before WithTLS or
 // WithDNSServer, which modify the transport in place.
 func (c *Client) WithTransport(transport http.RoundTripper) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.httpClient.Transport = transport
 	return c
 }
@@ -525,8 +545,8 @@ func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 // WithTimeout sets Policy.RequestTimeout, the per-call timeout applied by
 // Request and the Get/Post/Put/Delete/Head helpers (not by Do).
 func (c *Client) WithTimeout(timeout time.Duration) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.Policy.RequestTimeout = timeout
 	return c
 }
@@ -549,8 +569,8 @@ func (c *Client) WithUserAgent(name string) *Client {
 // installed; otherwise the existing transport must be an *http.Transport
 // and its DialContext is replaced in place.
 func (c *Client) WithDNSServer(dns string) *Client {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
 	if c.httpClient.Transport == nil {
 		tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -579,8 +599,8 @@ func (c *Client) WithDNSServer(dns string) *Client {
 // SetNonceProvider replaces the nonce provider. When set, Request feeds
 // every response's headers to it via SetFromHeader.
 func (c *Client) SetNonceProvider(provider NonceProvider) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.nonceProvider = provider
 }
 
@@ -596,10 +616,10 @@ func (c *Client) GetNonceProvider() NonceProvider {
 // and reads them from the headerName response header.
 // A leading CurrentHost() prefix in path is stripped.
 func (c *Client) WithNonce(path, headerName string) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 
-	path = strings.TrimPrefix(path, c.CurrentHost())
+	path = strings.TrimPrefix(path, c.host)
 
 	c.nonceProvider = NewNonceProvider(c, path, headerName)
 }
@@ -683,8 +703,8 @@ func (c *Client) Request(ctx context.Context, method string, host string, path s
 	}
 	defer resp.Body.Close()
 
-	if c.nonceProvider != nil {
-		c.nonceProvider.SetFromHeader(resp.Header)
+	if nonceProvider := c.GetNonceProvider(); nonceProvider != nil {
+		nonceProvider.SetFromHeader(resp.Header)
 	}
 
 	return c.DecodeResponse(resp, responseBody)
@@ -696,12 +716,15 @@ func (c *Client) ensureContext(ctx context.Context, httpMethod, path string) (co
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if c.Policy.RequestTimeout > 0 {
+	c.lock.RLock()
+	timeout := c.Policy.RequestTimeout
+	c.lock.RUnlock()
+	if timeout > 0 {
 		logger.KV(xlog.DEBUG,
 			"method", httpMethod,
 			"path", path,
-			"timeout", c.Policy.RequestTimeout)
-		return context.WithTimeout(ctx, c.Policy.RequestTimeout)
+			"timeout", timeout)
+		return context.WithTimeout(ctx, timeout)
 	}
 	return ctx, noop
 }
@@ -720,16 +743,19 @@ func (c *Client) executeRequest(ctx context.Context, httpMethod string, host str
 	ctx = correlation.WithID(ctx)
 
 	resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
+	c.lock.RLock()
+	name := c.Name
+	c.lock.RUnlock()
 	if err != nil {
 		logger.ContextKV(ctx, xlog.DEBUG,
-			"client", c.Name,
+			"client", name,
 			"method", httpMethod,
 			"host", host,
 			"path", path,
 			"err", err)
 	} else {
 		logger.ContextKV(ctx, xlog.DEBUG,
-			"client", c.Name,
+			"client", name,
 			"method", httpMethod,
 			"host", host,
 			"path", path,
@@ -756,9 +782,14 @@ func (c *Client) doHTTP(ctx context.Context, httpMethod string, host string, pat
 	return c.Do(req)
 }
 
-// convertRequest wraps http.Request into retriable.Request
-func (c *Client) convertRequest(req *http.Request) (*Request, error) {
-	for header, val := range c.headers {
+// convertRequest wraps http.Request into retriable.Request.
+func (c *Client) convertRequest(req *http.Request) (*Request, dpop.Signer, error) {
+	c.lock.RLock()
+	headers := maps.Clone(c.headers)
+	beforeSend := c.beforeSend
+	signer := c.dpopSigner
+	c.lock.RUnlock()
+	for header, val := range headers {
 		req.Header.Add(header, val)
 	}
 
@@ -781,34 +812,20 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 	if req.Header.Get(header.XCorrelationID) == "" {
 		req.Header.Add(header.XCorrelationID, correlation.ID(ctx))
 	}
-	if c.beforeSend != nil {
-		req = c.beforeSend(req)
+	if beforeSend != nil {
+		req = beforeSend(req)
 	}
 
-	if c.callerIdentity != nil {
-		if c.token.AccessToken == "" || (c.token.Expires != nil && c.token.Expires.Before(time.Now())) {
-			ti, err := c.callerIdentity.GetCallerIdentity(ctx)
-			if err != nil {
-				return nil, err
-			}
-			c.token = *ti
-		}
-
-		if c.token.AccessToken != "" && (c.token.Expires == nil || c.token.Expires.After(time.Now())) {
-			authHeader := c.token.AccessToken
-			if c.token.TokenType != "" {
-				authHeader = c.token.TokenType + " " + authHeader
-			}
-			req.Header.Set(header.Authorization, authHeader)
-		}
+	token, configured, err := c.callerToken(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	authHeader := req.Header.Get(header.Authorization)
-	if strings.EqualFold(slices.StringUpto(authHeader, 5), "DPoP ") {
-		_, err := dpop.ForRequest(c.dpopSigner, req, nil)
-		if err != nil {
-			return nil, errors.WithMessage(err, "failed to sign DPoP")
+	if configured && token.AccessToken != "" && (token.Expires == nil || token.Expires.After(time.Now())) {
+		authHeader := token.AccessToken
+		if token.TokenType != "" {
+			authHeader = token.TokenType + " " + authHeader
 		}
+		req.Header.Set(header.Authorization, authHeader)
 	}
 
 	var body io.ReadSeeker
@@ -816,14 +833,14 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 		defer req.Body.Close()
 		bodyBytes, err := io.ReadAll(req.Body)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, nil, errors.WithStack(err)
 		}
 		body = bytes.NewReader(bodyBytes)
 	}
 
 	r, err := NewRequest(req.Method, req.URL.String(), body)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	r.Request = r.WithContext(ctx)
 	for header, vals := range req.Header {
@@ -832,15 +849,102 @@ func (c *Client) convertRequest(req *http.Request) (*Request, error) {
 		}
 	}
 
-	return r, nil
+	return r, signer, nil
+}
+
+func (c *Client) callerToken(ctx context.Context) (credentials.Token, bool, error) {
+	for {
+		c.lock.RLock()
+		provider := c.callerIdentity
+		token := c.token
+		c.lock.RUnlock()
+		if provider == nil {
+			return credentials.Token{}, false, nil
+		}
+		if callerTokenValid(token) {
+			return token, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return credentials.Token{}, true, errors.WithStack(err)
+		}
+
+		c.lock.Lock()
+		provider = c.callerIdentity
+		token = c.token
+		if provider == nil {
+			c.lock.Unlock()
+			return credentials.Token{}, false, nil
+		}
+		if callerTokenValid(token) {
+			c.lock.Unlock()
+			return token, true, nil
+		}
+		if c.refresh != nil {
+			refresh := c.refresh
+			c.lock.Unlock()
+			select {
+			case <-refresh.done:
+				if err := ctx.Err(); err != nil {
+					return credentials.Token{}, true, errors.WithStack(err)
+				}
+				if refresh.err != nil {
+					if errors.Is(refresh.err, context.Canceled) || errors.Is(refresh.err, context.DeadlineExceeded) {
+						continue
+					}
+					return credentials.Token{}, true, refresh.err
+				}
+				continue
+			case <-ctx.Done():
+				return credentials.Token{}, true, errors.WithStack(ctx.Err())
+			}
+		}
+		refresh := &callerTokenRefresh{done: make(chan struct{})}
+		c.refresh = refresh
+		c.lock.Unlock()
+
+		fresh, err := provider.GetCallerIdentity(ctx)
+		if err != nil {
+			err = errors.WithMessage(err, "unable to get caller identity")
+		} else if fresh == nil {
+			err = errors.New("caller identity returned no token")
+		} else {
+			token = *fresh
+			if fresh.Expires != nil {
+				expires := *fresh.Expires
+				token.Expires = &expires
+			}
+		}
+
+		c.lock.Lock()
+		if c.refresh != refresh {
+			c.lock.Unlock()
+			continue
+		}
+		if err == nil {
+			c.token = token
+		}
+		refresh.err = err
+		c.refresh = nil
+		close(refresh.done)
+		c.lock.Unlock()
+		if err != nil {
+			return credentials.Token{}, true, err
+		}
+		return token, true, nil
+	}
+}
+
+func callerTokenValid(token credentials.Token) bool {
+	return token.AccessToken != "" && (token.Expires == nil || token.Expires.After(time.Now()))
 }
 
 // Do sends r with retries according to Policy and returns the final
 // response, which the caller must close. It implements Requestor.
 // Before sending, the client headers, context-propagated headers
 // (see WithHeaders / PropagateHeadersFromRequest), the X-Correlation-ID,
-// the BeforeSendRequest hook, the caller-identity token and the DPoP proof
-// are applied; the body is buffered so it can be rewound for each retry.
+// the BeforeSendRequest hook and caller-identity token are applied once;
+// the DPoP proof is signed for each attempt. The body is buffered so it can
+// be rewound for each retry.
 // Do does not apply Policy.RequestTimeout: bound r's context yourself.
 // When retries are exhausted the last response (or transport error) is
 // returned; a non-2xx status is not converted to an error here.
@@ -849,10 +953,15 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	var err error
 	var retries int
 
-	req, err := c.convertRequest(r)
+	req, signer, err := c.convertRequest(r)
 	if err != nil {
 		return nil, err
 	}
+	c.lock.RLock()
+	policy := c.Policy
+	name := c.Name
+	httpClient := c.httpClient
+	c.lock.RUnlock()
 
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
@@ -867,20 +976,28 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 				req.Body = io.NopCloser(body)
 			}
 		}
+		if strings.EqualFold(slices.StringUpto(req.Header.Get(header.Authorization), 5), "DPoP ") {
+			if signer == nil {
+				return nil, errors.New("DPoP signer is not configured")
+			}
+			if _, err := dpop.ForRequest(signer, req.Request, nil); err != nil {
+				return nil, errors.WithMessage(err, "failed to sign DPoP")
+			}
+		}
 
 		started := time.Now()
-		resp, err = c.httpClient.Do(req.Request)
+		resp, err = httpClient.Do(req.Request)
 		elapsed := time.Since(started)
 		if err != nil {
 			logger.ContextKV(r.Context(), xlog.WARNING,
-				"client", c.Name,
+				"client", name,
 				"retries", retries,
 				"host", req.Host,
 				"elapsed", elapsed.String(),
 				"err", err.Error())
 		}
 		// Check if we should continue with retries.
-		shouldRetry, sleepDuration, reason := c.Policy.ShouldRetry(req.Request, resp, err, retries)
+		shouldRetry, sleepDuration, reason := policy.ShouldRetry(req.Request, resp, err, retries)
 		if !shouldRetry {
 			break
 		}
@@ -895,7 +1012,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		}
 
 		logger.ContextKV(r.Context(), xlog.WARNING,
-			"client", c.Name,
+			"client", name,
 			"retries", retries,
 			"description", desc,
 			"reason", reason,
@@ -904,7 +1021,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		time.Sleep(sleepDuration)
 	}
 
-	debugRequest(req.Request, err != nil)
+	debugRequest(req.Request)
 
 	return resp, err
 }
@@ -916,9 +1033,9 @@ func (c *Client) consumeResponseBody(r *http.Response) {
 	}
 }
 
-func debugRequest(r *http.Request, body bool) {
+func debugRequest(r *http.Request) {
 	if logger.LevelAt(xlog.DEBUG) {
-		b, err := DumpRequestOut(r, body)
+		b, err := DumpRequestOut(r, false)
 		if err != nil {
 			logger.ContextKV(r.Context(), xlog.ERROR, "err", err.Error())
 		} else {

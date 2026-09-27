@@ -21,6 +21,10 @@ const (
 	ApplicationTimestampReply = "application/timestamp-reply"
 	// Authorization is HTTP header for "Authorization"
 	Authorization = "Authorization"
+	// Cookie is HTTP header for browser cookies.
+	Cookie = "Cookie"
+	// ProxyAuthorization is HTTP header for proxy credentials.
+	ProxyAuthorization = "Proxy-Authorization"
 	// Bearer is token type for "Authorization" header
 	Bearer = "Bearer"
 	// DPoP is token type for "Authorization" header,

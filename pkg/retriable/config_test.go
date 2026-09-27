@@ -69,11 +69,10 @@ func TestStorageKeys(t *testing.T) {
 	storage := NewStorage(filepath.Join(os.TempDir(), "test", "httpclient-keys"))
 	defer storage.Clean()
 
-	assert.Panics(t, func() {
-		_, _ = storage.SaveKey(nil)
-	})
+	_, err := storage.SaveKey(nil)
+	assert.EqualError(t, err, "key is nil")
 
-	_, _, err := storage.LoadKey("TestKeys")
+	_, _, err = storage.LoadKey("TestKeys")
 	assert.EqualError(t, err, "open /tmp/test/httpclient-keys/TestKeys.jwk: no such file or directory")
 
 	k := &jose.JSONWebKey{

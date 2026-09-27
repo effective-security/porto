@@ -121,7 +121,7 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | max message size (gRPC)                     | gserver, pkg/rpcclient                     | options.go, client.go            | `MaxRecvMsgSize`, `MaxSendMsgSize`, `defaultMaxCallSendMsgSize`            |
 | max request size (REST, advisory)           | restserver                                 | server.go                        | `MaxRequestSize`                                                           |
 | header copy / trailer prefix handling       | gserver                                    | header.go                        | `copyHeader`, `replaceInKeys`                                              |
-| header name constants                       | xhttp/header                               | headers.go                       | `XCorrelationID`, `Authorization`, `ApplicationGRPCWebProto`, ...          |
+| header name constants                       | xhttp/header                               | headers.go                       | `XCorrelationID`, `Authorization`, `Cookie`, `ProxyAuthorization`, ...      |
 | correlation ID (HTTP)                       | xhttp/correlation                          | correlation.go                   | `NewHandler`, `ID`                                                         |
 | correlation ID (gRPC)                       | xhttp/correlation                          | correlation.go                   | `NewAuthUnaryInterceptor`, `WithMetaFromContext`                           |
 | correlation ID (client side)                | pkg/retriable                              | retriable.go                     | `convertRequest`                                                           |
@@ -160,7 +160,7 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | gRPC client credentials bundle              | gserver/credentials                        | credentials.go                   | `NewBundle`, `Bundle`                                                      |
 | authorization metadata key                  | gserver/credentials                        | credentials.go                   | `TokenFieldNameGRPC`                                                       |
 | token refresh / caller identity (client)    | gserver/credentials, pkg/retriable         | credentials.go, retriable.go     | `CallerIdentity`, `Token.Expired`, `WithCallerIdentity`                    |
-| DPoP proof (client)                         | gserver/credentials, pkg/retriable         | credentials.go, retriable.go     | `Bundle.WithDPoP`, `convertRequest`                                        |
+| DPoP proof (client)                         | gserver/credentials, pkg/retriable         | credentials.go, retriable.go     | `Bundle.WithDPoP`, `Client.Do`                                              |
 | OAuth fixed token                           | gserver/credentials                        | oauth.go                         | `NewOauthAccess`                                                           |
 | gRPC client construction                    | pkg/rpcclient                              | client.go                        | `New`, `NewFromURL`                                                        |
 | gRPC blocking dial timeout                  | pkg/rpcclient                              | client.go                        | `Client.dial`, `Config.DialTimeout`                                        |
@@ -428,16 +428,17 @@ Entry points: `New(cfg, opts...)`, `Default(host)`, `LoadClient(file)`, `NewFact
 Invariants:
 
 - Errors, not panics, except unchecked `*http.Transport` assertions in `WithTLS`/`WithDNSServer` (P-061).
-- DEBUG level dumps full requests including `Authorization` (P-038).
-- `Client.lock` is an RWMutex but setters only take `RLock` (P-040); configure before sharing.
+- DEBUG request dumps redact `Authorization`, `DPoP`, `Cookie`, and `Proxy-Authorization` without mutating the request; `Client.Do` omits request bodies from its DEBUG dump.
+- Client setters lock mutable fields; `Do` snapshots headers, policy, name, signer, and the HTTP client. Caller-identity refresh is shared by concurrent requests, with context-aware waiting and a fast path for valid tokens or no provider; changing the provider invalidates an in-flight refresh. Direct mutation of exported `Name`, `Policy`, `Config`, or the returned `HTTPClient()` still requires caller synchronization; configure transports before concurrent use (P-061).
 - `ShouldRetry` order: ctx done → `TotalRetryLimit` → `NonRetriableErrors` → `Retries[0]`; status < 400 succeeds; 404/429 stop; other 4xx stop; 5xx → `Retries[status]`. `DefaultPolicy`: connection errors 3x/2s, 502/503 5x/1s, total 5, no timeout. A `request:` config block replaces the defaults with its own values (P-046).
 - `RequestTimeout` applies to `Request` and helpers, not `Do`; its cancel func is intentionally not called (P-057).
 - Headers written: `X-Correlation-ID`, `Authorization`, `DPoP`, `User-Agent`, `X-CLIENT-HOSTNAME`, `X-CLIENT-IP`; context headers override client headers.
 - Authorization only for `https://` / `unixs://` hosts; token formats: opaque or `access_token=&exp=&dpop_jkt=&token_type=`.
+- DPoP proofs are signed separately for each retry attempt; a DPoP authorization header without a configured signer returns an error.
 - Config YAML: `host, tls{cert,key,trusted_ca}, request{retry_limit,timeout}, storage_folder`; `~` and `$VAR` are expanded; `LoadFactory` appends `HostFolderName(host)` to `storage_folder`.
-- Storage files: `.auth_token` mode 0600 (folder 0755, P-066), `<thumbprint>.jwk` via `xpki/jwt/dpop`.
+- Storage files: `.auth_token` and `<thumbprint>.jwk` are written through mode-0600 temporary files and atomically replace existing files or symlinks. A newly created credentials folder uses mode 0700; existing directory permissions stay intact. An empty `StorageFolder` uses the working directory without changing its mode. A public-only DPoP key is rejected by `SetAuthorization`.
 
-Tests: `retriable_test.go` (httptest servers; `TestMain` writes a test CA/client cert under `$TMPDIR/test-retriable`), `config_test.go` with `testdata/*.yaml`, `nonce_test.go`, `internal_test.go` (needs outbound DNS to 8.8.8.8).
+Tests: `retriable_test.go` (httptest servers; `TestMain` writes a test CA/client cert under `$TMPDIR/test-retriable`), `safety_test.go` (credential redaction, concurrent refresh, retry signing, storage permissions), `config_test.go` with `testdata/*.yaml`, `nonce_test.go`, `internal_test.go` (needs outbound DNS to 8.8.8.8).
 
 ### github.com/effective-security/porto/pkg/rpcclient
 

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,7 +26,9 @@ import (
 )
 
 const (
-	authTokenFileName = ".auth_token"
+	authTokenFileName                 = ".auth_token"
+	credentialsFolderMode os.FileMode = 0700
+	credentialFileMode    os.FileMode = 0600
 )
 
 // Storage is a folder holding the client's credentials: the access token
@@ -36,7 +39,9 @@ type Storage struct {
 }
 
 // NewStorage returns a Storage rooted at baseFolder; a leading "~" is
-// expanded to the home directory. The folder is created lazily on write.
+// expanded to the home directory. An empty folder uses the working directory.
+// A missing folder is created lazily on write with mode 0700; the mode of an
+// existing folder is not changed.
 func NewStorage(baseFolder string) *Storage {
 	folder, err := homedir.Expand(baseFolder)
 	if err != nil {
@@ -71,16 +76,18 @@ func (c *Storage) Marshal(file string, v any) error {
 }
 
 // SaveAuthToken writes the raw token to the .auth_token file (mode 0600),
-// creating the folder if needed, and returns the file location.
+// creating the folder if needed, and returns the file location. An existing
+// file or symlink is atomically replaced with a private regular file.
 // The token can be an opaque string, or form encoded as
 // access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
 // (see ParseAuthToken).
 func (c *Storage) SaveAuthToken(token string) (string, error) {
-	_ = os.MkdirAll(c.folder, 0755)
 	location := filepath.Join(c.folder, authTokenFileName)
-	err := os.WriteFile(location, []byte(token), 0600)
-	if err != nil {
-		return location, errors.WithMessagef(err, "unable to store token")
+	if err := c.ensurePrivateFolder(); err != nil {
+		return location, err
+	}
+	if err := c.writePrivateFile(location, []byte(token)); err != nil {
+		return location, errors.WithMessage(err, "unable to store token")
 	}
 	return location, nil
 }
@@ -94,8 +101,107 @@ func (c *Storage) LoadKey(label string) (*jose.JSONWebKey, string, error) {
 
 // SaveKey writes the DPoP private key to "<thumbprint>.jwk" in the storage
 // folder (created with mode 0700 if needed) and returns the file path.
+// An existing file or symlink is atomically replaced with a private regular file.
 func (c *Storage) SaveKey(k *jose.JSONWebKey) (string, error) {
-	return dpop.SaveKey(c.folder, k)
+	if k == nil {
+		return "", errors.New("key is nil")
+	}
+	if err := c.ensurePrivateFolder(); err != nil {
+		return "", err
+	}
+	thumbprint, err := dpop.Thumbprint(k)
+	if err != nil {
+		return "", errors.WithMessage(err, "unable to compute key thumbprint")
+	}
+	data, err := json.MarshalIndent(k, "", "  ")
+	if err != nil {
+		return "", errors.WithMessage(err, "unable to encode key")
+	}
+	location := filepath.Join(c.folder, thumbprint+".jwk")
+	if err := c.writePrivateFile(location, data); err != nil {
+		return "", errors.WithMessage(err, "unable to store key")
+	}
+	return location, nil
+}
+
+func (c *Storage) writePrivateFile(location string, data []byte) (err error) {
+	file, err := os.CreateTemp(c.folderForWrite(), ".credential-*")
+	if err != nil {
+		return errors.WithMessage(err, "unable to create temporary credential file")
+	}
+	temporaryPath := file.Name()
+	defer func() {
+		if file != nil {
+			err = errors.Join(err, errors.WithMessage(file.Close(), "unable to close credential file"))
+		}
+		if temporaryPath != "" {
+			if removeErr := os.Remove(temporaryPath); removeErr != nil {
+				err = errors.Join(err, errors.WithMessage(removeErr, "unable to remove temporary credential file"))
+			}
+		}
+	}()
+
+	if err := file.Chmod(credentialFileMode); err != nil {
+		return errors.WithMessage(err, "unable to secure credential file")
+	}
+	n, writeErr := file.Write(data)
+	if writeErr != nil {
+		return errors.WithMessage(writeErr, "unable to write credential file")
+	}
+	if n != len(data) {
+		return errors.WithMessage(io.ErrShortWrite, "unable to write credential file")
+	}
+	if err := file.Sync(); err != nil {
+		return errors.WithMessage(err, "unable to sync credential file")
+	}
+	if err := file.Close(); err != nil {
+		file = nil
+		return errors.WithMessage(err, "unable to close credential file")
+	}
+	file = nil
+	if err := os.Rename(temporaryPath, location); err != nil {
+		return errors.WithMessage(err, "unable to replace credential file")
+	}
+	temporaryPath = ""
+	return nil
+}
+
+func (c *Storage) folderForWrite() string {
+	return cmp.Or(c.folder, ".")
+}
+
+func (c *Storage) ensurePrivateFolder() error {
+	folder := c.folderForWrite()
+	info, err := os.Stat(folder)
+	if err == nil {
+		if !info.IsDir() {
+			return errors.Errorf("credentials folder is not a directory: %s", folder)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return errors.Wrapf(err, "unable to inspect credentials folder %s", folder)
+	}
+	if err := os.MkdirAll(filepath.Dir(folder), credentialsFolderMode); err != nil {
+		return errors.Wrapf(err, "unable to create credentials folder parent %s", folder)
+	}
+	if err := os.Mkdir(folder, credentialsFolderMode); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			info, statErr := os.Stat(folder)
+			if statErr != nil {
+				return errors.Wrapf(statErr, "unable to inspect credentials folder %s", folder)
+			}
+			if info.IsDir() {
+				return nil
+			}
+			return errors.Errorf("credentials folder is not a directory: %s", folder)
+		}
+		return errors.Wrapf(err, "unable to create credentials folder %s", folder)
+	}
+	if err := os.Chmod(folder, credentialsFolderMode); err != nil {
+		return errors.Wrapf(err, "unable to secure credentials folder %s", folder)
+	}
+	return nil
 }
 
 // LoadAuthToken reads and parses the .auth_token file in the storage
