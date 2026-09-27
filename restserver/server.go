@@ -55,7 +55,9 @@ const (
 
 // ServerEventFunc is a callback invoked synchronously when a ServerEvent is
 // broadcast. ServerStartedEvent is delivered on the serving goroutine;
-// ServerStoppingEvent and ServerStoppedEvent on the StopHTTP caller.
+// ServerStoppingEvent and ServerStoppedEvent on the StopHTTP caller. Event
+// handlers must not call StopHTTP synchronously: it waits for lifecycle
+// callbacks and shutdown to finish.
 type ServerEventFunc func(evt ServerEvent)
 
 // Server is the interface exposed to services and middleware for querying
@@ -93,7 +95,7 @@ type Server interface {
 	AddService(s Service)
 	// StartHTTP starts serving in a background goroutine.
 	StartHTTP() error
-	// StopHTTP closes services and gracefully shuts down the listener.
+	// StopHTTP drains requests, then closes services and the listener.
 	StopHTTP()
 
 	// OnEvent registers a handler for a lifecycle event.
@@ -112,31 +114,32 @@ type MuxFactory interface {
 // HTTP or HTTPS server. Configure it with the With* methods and AddService
 // before calling StartHTTP; those setters are not synchronised against a
 // running server.
-//
-// The embedded Server interface is left nil: only the methods implemented
-// directly on *HTTPServer are usable (note that Config() is not, use
-// HTTPConfig()).
 type HTTPServer struct {
-	Server
-	authz           authz.HTTPAuthz
-	identityMapper  identity.ProviderFromRequest
-	httpConfig      Config
-	tlsConfig       *tls.Config
-	httpServer      *http.Server
-	cors            *CORSOptions
-	muxFactory      MuxFactory
-	hostname        string
-	port            string
-	ipaddr          string
-	version         string
-	serving         atomic.Bool
-	startedAt       time.Time
-	clientAuth      string
-	services        map[string]Service
-	evtHandlers     map[ServerEvent][]ServerEventFunc
-	lock            sync.RWMutex
-	shutdownTimeout time.Duration
+	authz            authz.HTTPAuthz
+	identityMapper   identity.ProviderFromRequest
+	httpConfig       Config
+	tlsConfig        *tls.Config
+	httpServer       *http.Server
+	cors             *CORSOptions
+	muxFactory       MuxFactory
+	hostname         string
+	port             string
+	ipaddr           string
+	version          string
+	serving          atomic.Bool
+	startedAt        time.Time
+	clientAuth       string
+	services         map[string]Service
+	evtHandlers      map[ServerEvent][]ServerEventFunc
+	lock             sync.RWMutex
+	lifecycleMu      sync.Mutex
+	stopped          bool
+	startedEventDone chan struct{}
+	stopDone         chan struct{}
+	shutdownTimeout  time.Duration
 }
+
+var _ Server = (*HTTPServer)(nil)
 
 // New creates a server for the given configuration. version is reported by
 // Version(); ipaddr is the address reported by LocalIP() and is auto-detected
@@ -203,7 +206,7 @@ func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer {
 }
 
 // WithShutdownTimeout sets how long StopHTTP waits for in-flight requests to
-// drain before giving up (default 5s).
+// drain before closing services (default 5s).
 func (server *HTTPServer) WithShutdownTimeout(timeout time.Duration) *HTTPServer {
 	server.shutdownTimeout = timeout
 	return server
@@ -297,6 +300,11 @@ func (server *HTTPServer) HTTPConfig() Config {
 	return server.httpConfig
 }
 
+// Config returns the server configuration passed to New.
+func (server *HTTPServer) Config() Config {
+	return server.httpConfig
+}
+
 // TLSConfig returns the TLS configuration passed to New, or nil for plain HTTP.
 func (server *HTTPServer) TLSConfig() *tls.Config {
 	return server.tlsConfig
@@ -326,47 +334,52 @@ func (server *HTTPServer) WithMuxFactory(muxFactory MuxFactory) {
 }
 
 func (server *HTTPServer) broadcast(evt ServerEvent) {
-	for _, handler := range server.evtHandlers[evt] {
+	server.lock.RLock()
+	handlers := append([]ServerEventFunc(nil), server.evtHandlers[evt]...)
+	server.lock.RUnlock()
+	for _, handler := range handlers {
 		handler(evt)
 	}
 }
 
 // StartHTTP builds the handler via the MuxFactory and starts serving in a
-// background goroutine, returning immediately. With TLS the listener is bound
-// synchronously and bind errors are returned; for plain HTTP the listener is
-// bound inside the goroutine and a failure there (for example address in
-// use) panics via the logger. ServerStartedEvent is broadcast from the
-// serving goroutine.
+// background goroutine. The listener is bound synchronously for both HTTP
+// and HTTPS, so bind errors are returned. ServerStartedEvent is broadcast
+// from the serving goroutine.
 func (server *HTTPServer) StartHTTP() error {
+	server.lifecycleMu.Lock()
+	defer server.lifecycleMu.Unlock()
+	if server.httpServer != nil {
+		return errors.New("HTTP server already started")
+	}
+
 	bindAddr := server.httpConfig.GetBindAddr()
-	var err error
 
 	// Main server
-	if _, err = net.ResolveTCPAddr("tcp", bindAddr); err != nil {
+	if _, err := net.ResolveTCPAddr("tcp", bindAddr); err != nil {
 		return errors.WithMessagef(err, "unable to resolve address")
 	}
 
-	server.httpServer = &http.Server{
+	httpHandler := server.muxFactory.NewMux()
+	httpServer := &http.Server{
 		IdleTimeout: time.Hour, // TODO: via config
 		ErrorLog:    xlog.Stderr,
+		Handler:     httpHandler,
 	}
 
-	var httpsListener net.Listener
-
+	var listener net.Listener
+	var err error
 	if server.tlsConfig != nil {
 		// Start listening on main server over TLS
-		httpsListener, err = tls.Listen("tcp", bindAddr, server.tlsConfig)
-		if err != nil {
-			return errors.WithMessagef(err, "%s: unable to listen: %q",
-				server.Name(), bindAddr)
-		}
-
-		server.httpServer.TLSConfig = server.tlsConfig
+		listener, err = tls.Listen("tcp", bindAddr, server.tlsConfig)
+		httpServer.TLSConfig = server.tlsConfig
 	} else {
-		server.httpServer.Addr = bindAddr
+		listener, err = net.Listen("tcp", bindAddr)
 	}
-
-	httpHandler := server.muxFactory.NewMux()
+	if err != nil {
+		return errors.Wrapf(err, "%s: unable to listen: %q", server.Name(), bindAddr)
+	}
+	httpServer.Addr = bindAddr
 
 	/*
 		if server.httpConfig.GetAllowProfiling() {
@@ -377,56 +390,73 @@ func (server *HTTPServer) StartHTTP() error {
 		}
 	*/
 
-	server.httpServer.Handler = httpHandler
-
-	serve := func() error {
-		server.serving.Store(true)
-		if httpsListener != nil {
-			return server.httpServer.Serve(httpsListener)
-		}
-		return server.httpServer.ListenAndServe()
-	}
+	server.httpServer = httpServer
+	server.serving.Store(true)
+	server.startedEventDone = make(chan struct{})
+	server.stopDone = make(chan struct{})
 
 	go func() {
 		server.broadcast(ServerStartedEvent)
+		close(server.startedEventDone)
 
 		logger.KV(xlog.INFO, "server", server.Name(), "bind", bindAddr, "status", "starting", "protocol", server.Protocol())
 
-		// this is a blocking call to serve
-		if err := serve(); err != nil {
-			server.serving.Store(false)
-			// panic, only if not Serve error while stopping the server,
-			// which is a valid error
-			if netutil.IsAddrInUse(err) || err != http.ErrServerClosed {
-				logger.Panicf("server=%s, err=[%v]", server.Name(), errors.WithStack(err))
+		if err := httpServer.Serve(listener); err != nil {
+			if !errors.Is(err, http.ErrServerClosed) {
+				logger.KV(xlog.ERROR, "server", server.Name(), "status", "stopped", "err", errors.WithStack(err))
+			} else {
+				logger.KV(xlog.WARNING, "server", server.Name(), "status", "stopped", "reason", err.Error())
 			}
-			logger.KV(xlog.WARNING, "server", server.Name(), "status", "stopped", "reason", err.Error())
 		}
+		server.serving.Store(false)
 	}()
 
 	return nil
 }
 
-// StopHTTP performs a graceful shutdown: it broadcasts ServerStoppingEvent,
-// calls Close on every registered service, then calls http.Server.Shutdown
-// bounded by the shutdown timeout (see WithShutdownTimeout) so in-flight
-// requests can drain, and finally broadcasts ServerStoppedEvent. Shutdown
-// errors are logged, not returned. StopHTTP must only be called after a
-// successful StartHTTP, and the instance must not be reused afterwards.
+// StopHTTP marks the server unready, broadcasts ServerStoppingEvent, and
+// waits for active requests to drain before closing services. The wait is
+// bounded by WithShutdownTimeout; errors are logged. Calls before StartHTTP
+// do nothing; repeated calls wait for the first shutdown. The instance
+// cannot be restarted.
 func (server *HTTPServer) StopHTTP() {
-	server.broadcast(ServerStoppingEvent)
-
-	// close services
-	for _, f := range server.services {
-		logger.KV(xlog.TRACE, "service", f.Name(), "status", "closing")
-		f.Close()
+	server.lifecycleMu.Lock()
+	if server.httpServer == nil {
+		server.lifecycleMu.Unlock()
+		return
 	}
+	if server.stopped {
+		stopDone := server.stopDone
+		server.lifecycleMu.Unlock()
+		<-stopDone
+		return
+	}
+	server.stopped = true
+	server.serving.Store(false)
+	httpServer := server.httpServer
+	startedEventDone := server.startedEventDone
+	stopDone := server.stopDone
+	server.lifecycleMu.Unlock()
+	defer close(stopDone)
+	<-startedEventDone
+
+	server.broadcast(ServerStoppingEvent)
 
 	ctx, cancel := context.WithTimeout(context.Background(), server.shutdownTimeout)
 	defer cancel()
-	err := server.httpServer.Shutdown(ctx)
+	err := httpServer.Shutdown(ctx)
 	if err != nil {
 		logger.KV(xlog.ERROR, "reason", "Shutdown", "err", err)
+	}
+	server.lock.RLock()
+	services := make([]Service, 0, len(server.services))
+	for _, service := range server.services {
+		services = append(services, service)
+	}
+	server.lock.RUnlock()
+	for _, service := range services {
+		logger.KV(xlog.TRACE, "service", service.Name(), "status", "closing")
+		service.Close()
 	}
 	server.broadcast(ServerStoppedEvent)
 }
@@ -521,7 +551,7 @@ func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL {
 		host = r.Host
 	}
 	if host == "" {
-		host = s.HostName() + ":" + s.Port()
+		host = net.JoinHostPort(s.HostName(), s.Port())
 	}
 
 	return &url.URL{
@@ -532,10 +562,10 @@ func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL {
 }
 
 // GetServerBaseURL returns scheme://host:port for the server's own bind
-// address, without consulting any request headers.
+// address, without consulting any request headers. IPv6 hosts are bracketed.
 func GetServerBaseURL(s Server) *url.URL {
 	return &url.URL{
 		Scheme: s.Protocol(),
-		Host:   s.HostName() + ":" + s.Port(),
+		Host:   net.JoinHostPort(s.HostName(), s.Port()),
 	}
 }

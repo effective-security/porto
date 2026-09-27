@@ -24,7 +24,7 @@ srv.AddService(mySvc)                 // implements restserver.Service
 if err := srv.StartHTTP(); err != nil { // non-blocking, serves in a goroutine
 	return err
 }
-defer srv.StopHTTP()                  // graceful shutdown, closes services
+defer srv.StopHTTP()                  // drains requests, then closes services
 ```
 
 A Service registers its routes on the Router passed to Register:
@@ -51,6 +51,7 @@ Handlers are expected to write responses with xhttp/marshal and report failures 
 - [type HTTPServer](<#HTTPServer>)
   - [func New\(version string, ipaddr string, httpConfig Config, tlsConfig \*tls.Config\) \(\*HTTPServer, error\)](<#New>)
   - [func \(server \*HTTPServer\) AddService\(s Service\)](<#HTTPServer.AddService>)
+  - [func \(server \*HTTPServer\) Config\(\) Config](<#HTTPServer.Config>)
   - [func \(server \*HTTPServer\) HTTPConfig\(\) Config](<#HTTPServer.HTTPConfig>)
   - [func \(server \*HTTPServer\) HostName\(\) string](<#HTTPServer.HostName>)
   - [func \(server \*HTTPServer\) IsReady\(\) bool](<#HTTPServer.IsReady>)
@@ -110,13 +111,13 @@ const MaxRequestSize = 64 * 1024 * 1024
 ```
 
 <a name="GetHostName"></a>
-## func [GetHostName](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L49>)
+## func [GetHostName](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L56>)
 
 ```go
 func GetHostName(bindAddr string) string
 ```
 
-GetHostName returns the host part of an HTTP bind address, or the OS hostname when the address has no host \(for example ":8080"\).
+GetHostName returns the host part of an HTTP bind address, or the OS hostname when the address has no host \(for example ":8080"\). IPv6 literals are returned without brackets; use net.JoinHostPort to rebuild host:port.
 
 <a name="GetPort"></a>
 ## func [GetPort](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L39>)
@@ -125,19 +126,19 @@ GetHostName returns the host part of an HTTP bind address, or the OS hostname wh
 func GetPort(bindAddr string) string
 ```
 
-GetPort returns the port from an HTTP bind address \("host:port" or ":port"\), or "443" when the address contains no colon. Unbracketed IPv6 literals without a port are not supported \(the last group is returned\).
+GetPort returns the port from an HTTP bind address \("host:port" or ":port"\), or "443" when the address has no port, including a bare IPv6 literal.
 
 <a name="GetServerBaseURL"></a>
-## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L536>)
+## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L566>)
 
 ```go
 func GetServerBaseURL(s Server) *url.URL
 ```
 
-GetServerBaseURL returns scheme://host:port for the server's own bind address, without consulting any request headers.
+GetServerBaseURL returns scheme://host:port for the server's own bind address, without consulting any request headers. IPv6 hosts are bracketed.
 
 <a name="GetServerURL"></a>
-## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L510>)
+## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L540>)
 
 ```go
 func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL
@@ -193,7 +194,7 @@ type CORSOptions struct {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L25-L34>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L26-L35>)
 
 Config is the server configuration contract passed to New. Consumers typically satisfy it with a struct loaded from YAML/JSON.
 
@@ -211,21 +212,18 @@ type Config interface {
 ```
 
 <a name="HTTPServer"></a>
-## type [HTTPServer](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L119-L139>)
+## type [HTTPServer](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L117-L140>)
 
 HTTPServer exposes a collection of Service implementations as a single HTTP or HTTPS server. Configure it with the With\* methods and AddService before calling StartHTTP; those setters are not synchronised against a running server.
 
-The embedded Server interface is left nil: only the methods implemented directly on \*HTTPServer are usable \(note that Config\(\) is not, use HTTPConfig\(\)\).
-
 ```go
 type HTTPServer struct {
-    Server
     // contains filtered or unexported fields
 }
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L145-L150>)
+### func [New](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L148-L153>)
 
 ```go
 func New(version string, ipaddr string, httpConfig Config, tlsConfig *tls.Config) (*HTTPServer, error)
@@ -234,7 +232,7 @@ func New(version string, ipaddr string, httpConfig Config, tlsConfig *tls.Config
 New creates a server for the given configuration. version is reported by Version\(\); ipaddr is the address reported by LocalIP\(\) and is auto\-detected \(falling back to 127.0.0.1\) when empty; a nil tlsConfig serves plain HTTP. The default shutdown timeout is 5 seconds. New never returns an error today.
 
 <a name="HTTPServer.AddService"></a>
-### func \(\*HTTPServer\) [AddService](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L222>)
+### func \(\*HTTPServer\) [AddService](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L225>)
 
 ```go
 func (server *HTTPServer) AddService(s Service)
@@ -242,8 +240,17 @@ func (server *HTTPServer) AddService(s Service)
 
 AddService registers a service by its Name. It panics \(via the logger\) if a service with the same name is already registered. Call it before StartHTTP.
 
+<a name="HTTPServer.Config"></a>
+### func \(\*HTTPServer\) [Config](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L304>)
+
+```go
+func (server *HTTPServer) Config() Config
+```
+
+Config returns the server configuration passed to New.
+
 <a name="HTTPServer.HTTPConfig"></a>
-### func \(\*HTTPServer\) [HTTPConfig](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L296>)
+### func \(\*HTTPServer\) [HTTPConfig](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L299>)
 
 ```go
 func (server *HTTPServer) HTTPConfig() Config
@@ -252,7 +259,7 @@ func (server *HTTPServer) HTTPConfig() Config
 HTTPConfig returns the Config passed to New.
 
 <a name="HTTPServer.HostName"></a>
-### func \(\*HTTPServer\) [HostName](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L248>)
+### func \(\*HTTPServer\) [HostName](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L251>)
 
 ```go
 func (server *HTTPServer) HostName() string
@@ -261,7 +268,7 @@ func (server *HTTPServer) HostName() string
 HostName returns the host name of the server
 
 <a name="HTTPServer.IsReady"></a>
-### func \(\*HTTPServer\) [IsReady](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L308>)
+### func \(\*HTTPServer\) [IsReady](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L316>)
 
 ```go
 func (server *HTTPServer) IsReady() bool
@@ -270,7 +277,7 @@ func (server *HTTPServer) IsReady() bool
 IsReady reports whether the listener has been started and every registered service reports IsReady. It is used by the ready middleware to answer 503 until then.
 
 <a name="HTTPServer.LocalIP"></a>
-### func \(\*HTTPServer\) [LocalIP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L266>)
+### func \(\*HTTPServer\) [LocalIP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L269>)
 
 ```go
 func (server *HTTPServer) LocalIP() string
@@ -279,7 +286,7 @@ func (server *HTTPServer) LocalIP() string
 LocalIP returns the IP address passed to New, or the auto\-detected local IP.
 
 <a name="HTTPServer.Name"></a>
-### func \(\*HTTPServer\) [Name](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L291>)
+### func \(\*HTTPServer\) [Name](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L294>)
 
 ```go
 func (server *HTTPServer) Name() string
@@ -288,7 +295,7 @@ func (server *HTTPServer) Name() string
 Name returns the configured server name \(Config.GetServerName\).
 
 <a name="HTTPServer.NewMux"></a>
-### func \(\*HTTPServer\) [NewMux](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L441>)
+### func \(\*HTTPServer\) [NewMux](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L471>)
 
 ```go
 func (server *HTTPServer) NewMux() http.Handler
@@ -297,7 +304,7 @@ func (server *HTTPServer) NewMux() http.Handler
 NewMux builds the default handler chain: a Router \(with CORS when configured\) on which every registered service has called Register, wrapped \(innermost to outermost\) by the ready verifier, the authz handler when set, the request logger, request metrics, the identity context handler and the correlation ID handler. It is called by StartHTTP through the MuxFactory; call it directly only in tests. It panics via the logger if the authz handler cannot be created.
 
 <a name="HTTPServer.OnEvent"></a>
-### func \(\*HTTPServer\) [OnEvent](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L233>)
+### func \(\*HTTPServer\) [OnEvent](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L236>)
 
 ```go
 func (server *HTTPServer) OnEvent(evt ServerEvent, handler ServerEventFunc)
@@ -306,7 +313,7 @@ func (server *HTTPServer) OnEvent(evt ServerEvent, handler ServerEventFunc)
 OnEvent registers a callback for the given lifecycle event. Handlers are invoked synchronously in registration order.
 
 <a name="HTTPServer.Port"></a>
-### func \(\*HTTPServer\) [Port](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L253>)
+### func \(\*HTTPServer\) [Port](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L256>)
 
 ```go
 func (server *HTTPServer) Port() string
@@ -315,7 +322,7 @@ func (server *HTTPServer) Port() string
 Port returns the port part of the bind address \(see GetPort\).
 
 <a name="HTTPServer.Protocol"></a>
-### func \(\*HTTPServer\) [Protocol](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L258>)
+### func \(\*HTTPServer\) [Protocol](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L261>)
 
 ```go
 func (server *HTTPServer) Protocol() string
@@ -324,7 +331,7 @@ func (server *HTTPServer) Protocol() string
 Protocol returns "https" when a TLS config was supplied, otherwise "http".
 
 <a name="HTTPServer.PublicURL"></a>
-### func \(\*HTTPServer\) [PublicURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L271>)
+### func \(\*HTTPServer\) [PublicURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L274>)
 
 ```go
 func (server *HTTPServer) PublicURL() string
@@ -333,7 +340,7 @@ func (server *HTTPServer) PublicURL() string
 PublicURL returns the configured public URL \(Config.GetPublicURL\).
 
 <a name="HTTPServer.ServeHTTP"></a>
-### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L498>)
+### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L528>)
 
 ```go
 func (server *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request)
@@ -342,7 +349,7 @@ func (server *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request)
 ServeHTTP should write reply headers and data to the ResponseWriter and then return. Returning signals that the request is finished; it is not valid to use the ResponseWriter or read from the Request.Body after or concurrently with the completion of the ServeHTTP call.
 
 <a name="HTTPServer.Service"></a>
-### func \(\*HTTPServer\) [Service](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L241>)
+### func \(\*HTTPServer\) [Service](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L244>)
 
 ```go
 func (server *HTTPServer) Service(name string) Service
@@ -351,16 +358,16 @@ func (server *HTTPServer) Service(name string) Service
 Service returns the registered service with the given name, or nil.
 
 <a name="HTTPServer.StartHTTP"></a>
-### func \(\*HTTPServer\) [StartHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L340>)
+### func \(\*HTTPServer\) [StartHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L349>)
 
 ```go
 func (server *HTTPServer) StartHTTP() error
 ```
 
-StartHTTP builds the handler via the MuxFactory and starts serving in a background goroutine, returning immediately. With TLS the listener is bound synchronously and bind errors are returned; for plain HTTP the listener is bound inside the goroutine and a failure there \(for example address in use\) panics via the logger. ServerStartedEvent is broadcast from the serving goroutine.
+StartHTTP builds the handler via the MuxFactory and starts serving in a background goroutine. The listener is bound synchronously for both HTTP and HTTPS, so bind errors are returned. ServerStartedEvent is broadcast from the serving goroutine.
 
 <a name="HTTPServer.StartedAt"></a>
-### func \(\*HTTPServer\) [StartedAt](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L276>)
+### func \(\*HTTPServer\) [StartedAt](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L279>)
 
 ```go
 func (server *HTTPServer) StartedAt() time.Time
@@ -369,16 +376,16 @@ func (server *HTTPServer) StartedAt() time.Time
 StartedAt returns the UTC time at which the server instance was created.
 
 <a name="HTTPServer.StopHTTP"></a>
-### func \(\*HTTPServer\) [StopHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L416>)
+### func \(\*HTTPServer\) [StopHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L422>)
 
 ```go
 func (server *HTTPServer) StopHTTP()
 ```
 
-StopHTTP performs a graceful shutdown: it broadcasts ServerStoppingEvent, calls Close on every registered service, then calls http.Server.Shutdown bounded by the shutdown timeout \(see WithShutdownTimeout\) so in\-flight requests can drain, and finally broadcasts ServerStoppedEvent. Shutdown errors are logged, not returned. StopHTTP must only be called after a successful StartHTTP, and the instance must not be reused afterwards.
+StopHTTP marks the server unready, broadcasts ServerStoppingEvent, and waits for active requests to drain before closing services. The wait is bounded by WithShutdownTimeout; errors are logged. Calls before StartHTTP do nothing; repeated calls wait for the first shutdown. The instance cannot be restarted.
 
 <a name="HTTPServer.TLSConfig"></a>
-### func \(\*HTTPServer\) [TLSConfig](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L301>)
+### func \(\*HTTPServer\) [TLSConfig](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L309>)
 
 ```go
 func (server *HTTPServer) TLSConfig() *tls.Config
@@ -387,7 +394,7 @@ func (server *HTTPServer) TLSConfig() *tls.Config
 TLSConfig returns the TLS configuration passed to New, or nil for plain HTTP.
 
 <a name="HTTPServer.Uptime"></a>
-### func \(\*HTTPServer\) [Uptime](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L281>)
+### func \(\*HTTPServer\) [Uptime](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L284>)
 
 ```go
 func (server *HTTPServer) Uptime() time.Duration
@@ -396,7 +403,7 @@ func (server *HTTPServer) Uptime() time.Duration
 Uptime returns the time elapsed since StartedAt.
 
 <a name="HTTPServer.Version"></a>
-### func \(\*HTTPServer\) [Version](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L286>)
+### func \(\*HTTPServer\) [Version](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L289>)
 
 ```go
 func (server *HTTPServer) Version() string
@@ -405,7 +412,7 @@ func (server *HTTPServer) Version() string
 Version returns the version string passed to New.
 
 <a name="HTTPServer.WithAuthz"></a>
-### func \(\*HTTPServer\) [WithAuthz](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L186>)
+### func \(\*HTTPServer\) [WithAuthz](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L189>)
 
 ```go
 func (server *HTTPServer) WithAuthz(authz authz.HTTPAuthz) *HTTPServer
@@ -414,7 +421,7 @@ func (server *HTTPServer) WithAuthz(authz authz.HTTPAuthz) *HTTPServer
 WithAuthz enables path/role authorization; the handler is created from authz by NewMux, so it must be set before StartHTTP.
 
 <a name="HTTPServer.WithCORS"></a>
-### func \(\*HTTPServer\) [WithCORS](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L200>)
+### func \(\*HTTPServer\) [WithCORS](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L203>)
 
 ```go
 func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer
@@ -423,7 +430,7 @@ func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer
 WithCORS enables the CORS middleware around the router with the given options; nil options disable CORS.
 
 <a name="HTTPServer.WithIdentityProvider"></a>
-### func \(\*HTTPServer\) [WithIdentityProvider](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L193>)
+### func \(\*HTTPServer\) [WithIdentityProvider](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L196>)
 
 ```go
 func (server *HTTPServer) WithIdentityProvider(provider identity.ProviderFromRequest) *HTTPServer
@@ -432,7 +439,7 @@ func (server *HTTPServer) WithIdentityProvider(provider identity.ProviderFromReq
 WithIdentityProvider sets the mapper that derives the caller identity for each request. When unset identity.GuestIdentityMapper is used.
 
 <a name="HTTPServer.WithMuxFactory"></a>
-### func \(\*HTTPServer\) [WithMuxFactory](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L324>)
+### func \(\*HTTPServer\) [WithMuxFactory](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L332>)
 
 ```go
 func (server *HTTPServer) WithMuxFactory(muxFactory MuxFactory)
@@ -441,13 +448,13 @@ func (server *HTTPServer) WithMuxFactory(muxFactory MuxFactory)
 WithMuxFactory replaces the factory used by StartHTTP to build the root handler, allowing a custom middleware chain instead of NewMux.
 
 <a name="HTTPServer.WithShutdownTimeout"></a>
-### func \(\*HTTPServer\) [WithShutdownTimeout](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L207>)
+### func \(\*HTTPServer\) [WithShutdownTimeout](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L210>)
 
 ```go
 func (server *HTTPServer) WithShutdownTimeout(timeout time.Duration) *HTTPServer
 ```
 
-WithShutdownTimeout sets how long StopHTTP waits for in\-flight requests to drain before giving up \(default 5s\).
+WithShutdownTimeout sets how long StopHTTP waits for in\-flight requests to drain before closing services \(default 5s\).
 
 <a name="Handle"></a>
 ## type [Handle](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L70>)
@@ -459,7 +466,7 @@ type Handle func(http.ResponseWriter, *http.Request, Params)
 ```
 
 <a name="MuxFactory"></a>
-## type [MuxFactory](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L106-L109>)
+## type [MuxFactory](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L108-L111>)
 
 MuxFactory creates the root http.Handler used by StartHTTP. HTTPServer is its own default MuxFactory \(see HTTPServer.NewMux\); use WithMuxFactory to substitute a custom middleware chain.
 
@@ -536,7 +543,7 @@ func NewRouterWithCORS(notfoundhandler http.HandlerFunc, opt *CORSOptions) Route
 NewRouterWithCORS returns a Router whose Handler is wrapped by the rs/cors middleware configured from opt; a nil opt uses cors.Default\(\) \(all origins, simple methods, no credentials\).
 
 <a name="Server"></a>
-## type [Server](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L64-L101>)
+## type [Server](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L66-L103>)
 
 Server is the interface exposed to services and middleware for querying server identity, configuration and lifecycle. \*HTTPServer is the implementation; services receive it via their constructors.
 
@@ -573,7 +580,7 @@ type Server interface {
     AddService(s Service)
     // StartHTTP starts serving in a background goroutine.
     StartHTTP() error
-    // StopHTTP closes services and gracefully shuts down the listener.
+    // StopHTTP drains requests, then closes services and the listener.
     StopHTTP()
 
     // OnEvent registers a handler for a lifecycle event.
@@ -701,16 +708,16 @@ const (
 ```
 
 <a name="ServerEventFunc"></a>
-## type [ServerEventFunc](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L59>)
+## type [ServerEventFunc](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L61>)
 
-ServerEventFunc is a callback invoked synchronously when a ServerEvent is broadcast. ServerStartedEvent is delivered on the serving goroutine; ServerStoppingEvent and ServerStoppedEvent on the StopHTTP caller.
+ServerEventFunc is a callback invoked synchronously when a ServerEvent is broadcast. ServerStartedEvent is delivered on the serving goroutine; ServerStoppingEvent and ServerStoppedEvent on the StopHTTP caller. Event handlers must not call StopHTTP synchronously: it waits for lifecycle callbacks and shutdown to finish.
 
 ```go
 type ServerEventFunc func(evt ServerEvent)
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/effective-security/porto/blob/main/restserver/service.go#L6-L16>)
+## type [Service](<https://github.com/effective-security/porto/blob/main/restserver/service.go#L6-L17>)
 
 Service is a component that contributes routes to the HTTPServer. It is registered with HTTPServer.AddService and its lifecycle is driven by the server: Register during StartHTTP \(mux creation\), Close during StopHTTP.
 
@@ -720,7 +727,8 @@ type Service interface {
     Name() string
     // Register adds the service's routes to the router.
     Register(Router)
-    // Close releases the service's resources; called once by StopHTTP.
+    // Close releases the service's resources after StopHTTP drains requests.
+    // It is called once, even when the shutdown deadline expires.
     Close()
     // IsReady indicates that service is ready to serve its end-points;
     // while any service returns false the server answers 503 to all requests.
@@ -729,7 +737,7 @@ type Service interface {
 ```
 
 <a name="TLSInfoConfig"></a>
-## type [TLSInfoConfig](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L10-L21>)
+## type [TLSInfoConfig](<https://github.com/effective-security/porto/blob/main/restserver/config.go#L11-L22>)
 
 TLSInfoConfig describes where a server's TLS material lives. It is the contract consumers' config structs satisfy to build a \*tls.Config for New.
 

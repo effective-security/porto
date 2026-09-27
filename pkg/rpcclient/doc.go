@@ -24,11 +24,12 @@
 //	svc := pb.NewMyServiceClient(client.Conn())
 //	res, err := svc.Call(ctx, req, client.Opts()...)
 //
-// Endpoint accepts https://, http://, unixs:// and unix:// prefixes, or a
-// bare host[:port]; the scheme is stripped before dialing and ":443" is
-// appended when no port is given. TLS and the Authorization token are only
-// applied when TLS is configured and the endpoint uses the https:// or
-// unixs:// scheme; other endpoints are dialed with insecure credentials.
+// Endpoint accepts https://, http://, unixs:///path and unix:///path, or a
+// bare host[:port]. Host schemes are stripped and ":443" is appended when
+// no port is given; Unix targets use gRPC's unix resolver. TLS and the
+// Authorization token apply when TLS is configured and the endpoint uses
+// the https:// or unixs:// scheme. New rejects TLS with any other endpoint;
+// nil TLS dials without security.
 //
 // Config has no yaml/json tags and is populated programmatically. All
 // constructors return errors rather than panic.

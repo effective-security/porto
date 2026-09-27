@@ -57,9 +57,6 @@ byte-exact test.
 | P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Open           |
 | P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Needs Approval |
 | P-019 | restserver                              | `server.go` `StartHTTP`                                                  | No `ReadHeaderTimeout`/`ReadTimeout`; `IdleTimeout` is one hour                                                                              | security    | MEDIUM   | Needs Approval |
-| P-020 | restserver                              | `server.go` `StartHTTP`                                                  | Plain-HTTP bind failure panics on a background goroutine instead of returning an error                                                       | bug         | MEDIUM   | Open           |
-| P-021 | restserver                              | `server.go` `StopHTTP`                                                   | Services are closed before in-flight requests are drained                                                                                    | correctness | MEDIUM   | Needs Approval |
-| P-022 | restserver                              | `server.go` `HTTPServer`                                                 | `HTTPServer.Config()` panics (nil embedded `Server` interface)                                                                               | bug         | MEDIUM   | Open           |
 | P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
 | P-026 | xhttp/marshal, restserver               | `json.go` `DecodeBody`; `server.go` `MaxRequestSize`                     | Request bodies decoded without a size limit; `MaxRequestSize` is dead                                                                        | security    | MEDIUM   | Needs Approval |
@@ -69,10 +66,8 @@ byte-exact test.
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-032 | xhttp/marshal, xhttp/identity           | `marshal.go` `WriteJSON`; `ctx.go`                                       | Internal error text echoed to clients in 5xx/401 bodies                                                                                      | security    | LOW      | Needs Approval |
 | P-033 | restserver/authz                        | `authz.go` `checkAccess`                                                 | `OPTIONS` bypasses authz even with `OptionsPassthrough`                                                                                      | security    | LOW      | Needs Approval |
-| P-034 | restserver                              | `server.go` `StopHTTP`, `broadcast`; `config.go` `GetPort`               | `StopHTTP` before `StartHTTP` panics; `broadcast` reads handlers unlocked; `GetPort` wrong for bare IPv6                                     | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 79.2% is below the 80% CI gate                                                                                                | docs        | LOW      | Open           |
 | P-037 | pkg/tlsconfig                           | `reloader.go` `KeypairReloader.tlsCert`                                  | Process panics when the served certificate expires at runtime                                                                                | bug         | HIGH     | Needs Approval |
-| P-039 | pkg/rpcclient                           | `client.go` `newClient`, `dialSetupOpts`                                 | TLS configured but endpoint without `https://` dials plaintext with no token                                                                 | security    | MEDIUM   | Needs Approval |
 | P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
 | P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
 | P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
@@ -206,21 +201,6 @@ byte-exact test.
 - Evidence: `&http.Server{IdleTimeout: time.Hour, ErrorLog: xlog.Stderr}` with no `ReadHeaderTimeout`.
 - Fix: set `ReadHeaderTimeout` (about 10s) and expose timeouts through `Config` or an option.
 
-### P-020 Plain-HTTP bind failure panics asynchronously
-
-- Evidence: the TLS path calls `tls.Listen` synchronously; the plain path calls `ListenAndServe` inside the goroutine and `logger.Panicf` on any error other than `ErrServerClosed`.
-- Fix: `net.Listen` synchronously in both branches and pass the listener to `Serve`.
-
-### P-021 Services closed before drain
-
-- Evidence: `StopHTTP` calls `Service.Close()` on every service before `httpServer.Shutdown`; `IsReady` still reports ready during the drain.
-- Fix: flip `serving` to false, `Shutdown`, then close services.
-
-### P-022 `HTTPServer.Config()` panics
-
-- Evidence: `HTTPServer` embeds the `Server` interface (always nil) and implements `HTTPConfig()` but not `Config()`.
-- Fix: implement `Config()`, drop the embedded interface, add `var _ Server = (*HTTPServer)(nil)`.
-
 ### P-023 Metric label cardinality
 
 - Evidence: `HTTPReqPerf.MeasureSince(start, method, status, r.URL.Path)` uses the raw path; only 404s collapse to `unknown`.
@@ -266,11 +246,6 @@ byte-exact test.
 - Evidence: `if r.Method == http.MethodOptions { return nil }` unconditionally.
 - Fix: short-circuit only when `Access-Control-Request-Method` is present.
 
-### P-034 restserver minor bugs
-
-- `StopHTTP` dereferences a nil `httpServer` if called before `StartHTTP`; `broadcast` reads `evtHandlers` without the lock; `GetPort` uses `LastIndex(":")` and returns `1` for `::1`.
-- Fix: nil-check; `RLock`; `net.SplitHostPort`.
-
 ### P-035 Coverage below CI gate
 
 - Evidence: `go tool cover -func=coverage.out` total is 79.2%; CI `MIN_TESTCOV` is 80.
@@ -281,12 +256,6 @@ byte-exact test.
 - Evidence: `tlsCert` calls `logger.Panic("cert expired")` when `NotAfter` has passed; it runs inside `GetCertificate` callbacks from handshake goroutines and from the background `Reload`.
 - Impact: a late rotation terminates the process on the next handshake or poll instead of failing that handshake.
 - Fix: return an error from the callbacks and log; keep serving the previous certificate.
-
-### P-039 rpcclient silent plaintext downgrade
-
-- Evidence: TLS and per-RPC credentials are applied only when `cfg.TLS != nil` and the endpoint starts with `https://` or `unixs://`; otherwise `insecure.NewCredentials()` and no token.
-- Impact: a missing scheme in config yields unauthenticated plaintext gRPC with no error.
-- Fix: return an error (or apply TLS) when `TLS` is set and the scheme is not secure.
 
 ### P-041 Redis subscription goroutine leak
 
@@ -391,10 +360,10 @@ byte-exact test.
 
 - P-002, P-011: gRPC-Web clients may rely on the implicit wildcard and the 200 response.
 - P-006, P-007, P-019, P-026: new defaults or limits that deployments may need to raise.
-- P-013, P-018, P-021, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
+- P-013, P-018, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
 - P-037, P-055: replace fail-fast panics/Fatal with errors; some deployments may rely on the crash.
-- P-039, P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
+- P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
 - P-043, P-047: rate limiter and lock semantics change under concurrency.
 - P-044, P-064: key layout changes for keys containing `..`, `//` or a prefix.
 - P-051, P-052, P-073, P-074: public type behavior or config surface.

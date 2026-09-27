@@ -93,7 +93,7 @@ func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder
 NewEncoder returns a JSON encoder writing to w, pretty\-printing when the request URL has a "pp" query parameter. r must not be nil.
 
 <a name="NewRequest"></a>
-## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L319>)
+## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L320>)
 
 ```go
 func NewRequest(method string, url string, req any) (*http.Request, error)
@@ -118,7 +118,7 @@ marshal.WriteJSON(w, r, err, x)
 ```
 
 <a name="WritePlainJSON"></a>
-## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L308>)
+## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L309>)
 
 ```go
 func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSetting PrettyPrintSetting)

@@ -227,7 +227,7 @@ func HostFolderName(host string) string
 HostFolderName returns the storage sub\-folder name derived from a host URL: the host\[:port\] part with ":" replaced by "\_", e.g. "https://foo.bar:3444" \-\> "foo.bar\_3444".
 
 <a name="PropagateHeadersFromRequest"></a>
-## func [PropagateHeadersFromRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1211>)
+## func [PropagateHeadersFromRequest](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1217>)
 
 ```go
 func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers ...string) context.Context
@@ -236,7 +236,7 @@ func PropagateHeadersFromRequest(ctx context.Context, r *http.Request, headers .
 PropagateHeadersFromRequest returns a context carrying the named headers that are present in the incoming request r, so that a Client used with that context forwards them on its outgoing requests \(see WithHeaders\). A nil ctx is treated as context.Background\(\).
 
 <a name="WithHeaders"></a>
-## func [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1236>)
+## func [WithHeaders](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1242>)
 
 ```go
 func WithHeaders(ctx context.Context, headers map[string]string) context.Context
@@ -377,7 +377,7 @@ func (c *Client) CurrentHost() string
 CurrentHost returns the configured host \(scheme://host\[:port\]\).
 
 <a name="Client.DecodeResponse"></a>
-### func \(\*Client\) [DecodeResponse](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1059>)
+### func \(\*Client\) [DecodeResponse](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1065>)
 
 ```go
 func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int, error)
@@ -395,7 +395,7 @@ func (c *Client) Delete(ctx context.Context, path string, body any) (http.Header
 Delete makes an HTTP DELETE to the configured host \(see Request\) and decodes the response into body \(io.Writer or JSON target\). Statuses \>= 300 are returned as an error, with retries applied per the client Policy. path should be an absolute URI path, i.e. /foo/bar/baz
 
 <a name="Client.Do"></a>
-### func \(\*Client\) [Do](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L945>)
+### func \(\*Client\) [Do](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L951>)
 
 ```go
 func (c *Client) Do(r *http.Request) (*http.Response, error)
@@ -1121,7 +1121,7 @@ func DefaultPolicy() Policy
 DefaultPolicy returns the policy used by New: connection errors are retried up to 3 times with a 2s wait, 502 and 503 up to 5 times with a 1s wait, TotalRetryLimit is 5, no RequestTimeout, and DefaultNonRetriableErrors are never retried. Note that 429 is registered but never reached, because ShouldRetry returns LimitExceeded for 429 before consulting Retries.
 
 <a name="Policy.ShouldRetry"></a>
-### func \(\*Policy\) [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1122>)
+### func \(\*Policy\) [ShouldRetry](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1128>)
 
 ```go
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string)
@@ -1251,7 +1251,7 @@ type ShouldRetry func(r *http.Request, resp *http.Response, err error, retries i
 ```
 
 <a name="DefaultShouldRetryFactory"></a>
-### func [DefaultShouldRetryFactory](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1095>)
+### func [DefaultShouldRetryFactory](<https://github.com/effective-security/porto/blob/main/pkg/retriable/retriable.go#L1101>)
 
 ```go
 func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) ShouldRetry

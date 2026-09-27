@@ -16,6 +16,10 @@
 
 ### Correctness and interoperability
 
+- Return REST server HTTP bind errors from `StartHTTP`, support `Config()` and IPv6 bind addresses (`HostName()` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` add them), and make `StopHTTP` safe before start and on repeated calls.
+
+- Route `unix:///path` and `unixs:///path` gRPC client endpoints through the Unix socket resolver without appending a TCP port.
+
 - Sign a fresh DPoP proof for each retry attempt.
 
 - Forward a normalized correlation ID from HTTP requests to gRPC metadata, including the `x-request-id` alias when present.
@@ -29,6 +33,10 @@
 ## New features and behaviour
 
 ## Breaking changes: what clients must change
+
+- `restserver.StopHTTP` now drains active requests before calling `Service.Close`. Services that must stop accepting work earlier can use a `ServerStoppingEvent` handler. After the shutdown timeout, services still close even if handlers have not finished.
+
+- `rpcclient.New` now rejects a TLS configuration paired with `http://`, `unix://`, or a bare endpoint. Change the endpoint to `https://` or `unixs://` to keep TLS and per-RPC credentials enabled.
 
 - `Scheduler.List` now returns a copy of its slice, `Task.Schedule` returns a snapshot, and `New(s)` copies its input schedule. Use `Add`/`Clear` and `SetNextRun`/`UpdateSchedule` to change live state; mutating returned values or the original `s` no longer changes the scheduler or task.
 
