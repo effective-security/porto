@@ -35,6 +35,11 @@
 //	}
 //	defer s.Stop() // signals the ticker to exit; does not wait for running tasks
 //
+// Scheduler.List returns a copy of the task slice, and Task.Schedule returns
+// a snapshot of schedule state. New copies its input Schedule. Use Add/Clear
+// and SetNextRun/UpdateSchedule to change live state. Stop is idempotent, and a
+// stopped scheduler may be started again.
+//
 // The constructors NewTaskOnWeekday, NewTaskDaily and Task.Do panic on invalid
 // input (out-of-range time, non-function callback, wrong parameter count);
 // NewTask and ParseSchedule return an error for an invalid format string.

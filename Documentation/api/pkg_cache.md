@@ -27,7 +27,7 @@ users := cache.NewProxyProvider("users", p)
 
 Config YAML/JSON fields: provider \(redis|memory\) and redis \{server, ttl, client\_tls \{cert, key, trusted\_ca\}, user, password\}. The package does not itself switch on Config.Provider; the caller picks the constructor.
 
-TTL: a ttl of 0 means DefaultTTL for the memory provider and RedisConfig.TTL \(default 1h\) for Redis; KeepTTL stores the value without expiry \(Redis KEEPTTL\). The memory provider never evicts on its own: the caller must run CleanExpired periodically, and NowFunc can be overridden in tests to control its clock.
+TTL: a ttl of 0 means DefaultTTL for the memory provider and RedisConfig.TTL \(default 1h\) for Redis; KeepTTL stores the value without expiry \(Redis KEEPTTL\). The memory provider never evicts on its own: the caller must run CleanExpired periodically, and NowFunc can be overridden in tests to control its clock. GetOrSet reads through the cache on a miss and stores a successful getter result with the provider's default TTL. The getter returns a pointer to the value to store. On a miss, the destination must point to a concrete type; providers cannot reliably restore values into interface destinations. Concurrent misses may run the getter more than once.
 
 Pub/Sub: Subscribe returns a Subscription whose ReceiveMessage blocks until a message arrives or the context is done \(checked about once a second\); Close unregisters it. The memory provider delivers to every subscriber of the channel in\-process only; the Redis provider uses Redis channels, which are not prefixed.
 
@@ -72,16 +72,16 @@ var NowFunc = time.Now
 ```
 
 <a name="GetOrSet"></a>
-## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L95>)
+## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L98>)
 
 ```go
 func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error
 ```
 
-GetOrSet decodes the cached value for key into value \(a non\-nil pointer\). On a miss it calls getter, which must return a pointer, and copies the pointed\-to result into value. Note that the result is NOT written back to the cache; callers must Set it themselves. Errors other than a miss are returned as\-is.
+GetOrSet decodes the cached value for key into value \(a non\-nil pointer\). On a miss it calls getter, which must return a pointer, and copies the pointed\-to result into value. A successful result is also stored with the provider's default TTL \(Set with ttl 0\). A cache write failure is returned without changing value. Interface destinations are unsupported on a miss because providers cannot reliably restore the getter's concrete type. Concurrent misses may call getter more than once. Errors other than a miss are returned as\-is.
 
 <a name="IsNotFoundError"></a>
-## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L127>)
+## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L149>)
 
 ```go
 func IsNotFoundError(err error) bool

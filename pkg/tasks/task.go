@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"uuid"
@@ -43,8 +44,8 @@ const (
 // Task is a scheduled unit of work: a Schedule plus a callback bound with Do.
 // Create one with New, NewTask, NewTaskAtIntervals, NewTaskOnWeekday or
 // NewTaskDaily, bind the callback with Do, then hand it to Scheduler.Add.
-// Tasks are not internally synchronized beyond the run lock; status fields
-// are written by the goroutine executing Run.
+// Task methods synchronize run state. Schedule returns a snapshot; use
+// SetNextRun or UpdateSchedule to change a task's schedule.
 type Task interface {
 	// ID returns the task ID: the WithID option value or a generated UUIDv7.
 	ID() string
@@ -53,7 +54,7 @@ type Task interface {
 	Name() string
 	// RunCount returns how many times Run has started the callback.
 	RunCount() uint32
-	// Schedule returns the live schedule (not a copy).
+	// Schedule returns a snapshot of the current schedule and run state.
 	Schedule() *Schedule
 	// UpdateSchedule replaces the schedule with one parsed from format
 	// (see ParseSchedule); the next run is recomputed on the next Run.
@@ -81,7 +82,7 @@ type Task interface {
 }
 
 // Schedule describes when a task runs. Fields are exported for inspection
-// (e.g. by a Publisher) and are mutated by Run and UpdateNextRun without locking.
+// (e.g. by a Publisher). Task.Schedule returns a snapshot of these fields.
 type Schedule struct {
 	// Format is the original string given to ParseSchedule, if any.
 	Format string
@@ -122,6 +123,7 @@ func (s *Schedule) GetLastRun() *time.Time {
 
 // task describes a task schedule
 type task struct {
+	state sync.RWMutex
 	// id is unique guide assigned to the task
 	id       string
 	schedule *Schedule
@@ -205,8 +207,9 @@ func NewTask(format string, ops ...Option) (Task, error) {
 	return New(s, ops...), nil
 }
 
-// New wraps an existing Schedule in a Task. Use WithID, WithRunTimeout and
-// WithPublisher to customize; the callback must still be bound with Do.
+// New copies a Schedule into a Task. Later changes to the input do not affect
+// the task. Use WithID, WithRunTimeout and WithPublisher to customize; the
+// callback must still be bound with Do.
 func New(s *Schedule, ops ...Option) Task {
 	dops := options{
 		id:         uuid.NewV7().String(),
@@ -219,7 +222,7 @@ func New(s *Schedule, ops ...Option) Task {
 	dops.id = cmp.Or(dops.id, uuid.NewV7().String())
 	j := &task{
 		id:         dops.id,
-		schedule:   s,
+		schedule:   cloneSchedule(s),
 		runLock:    make(chan struct{}, 1),
 		runTimeout: dops.runTimeout,
 		publisher:  dops.publisher,
@@ -230,14 +233,19 @@ func New(s *Schedule, ops ...Option) Task {
 
 // SetPublisher sets the Publisher notified on status changes.
 func (j *task) SetPublisher(pub Publisher) Task {
+	j.state.Lock()
 	j.publisher = pub
+	j.state.Unlock()
 	return j
 }
 
 // Publish sends the task to its Publisher, if one is set.
 func (j *task) Publish() {
-	if j.publisher != nil {
-		j.publisher.Publish(j)
+	j.state.RLock()
+	pub := j.publisher
+	j.state.RUnlock()
+	if pub != nil {
+		pub.Publish(j)
 	}
 }
 
@@ -247,13 +255,17 @@ func (j *task) UpdateSchedule(format string) error {
 	if err != nil {
 		return err
 	}
+	j.state.Lock()
 	j.schedule = s
+	j.state.Unlock()
 	return nil
 }
 
 // SetNextRun forces the next run to TimeNow()+after.
 func (j *task) SetNextRun(after time.Duration) Task {
+	j.state.Lock()
 	j.schedule.NextRunAt = TimeNow().Add(after)
+	j.state.Unlock()
 	return j
 }
 
@@ -264,26 +276,48 @@ func (j *task) ID() string {
 
 // Name returns "<taskName>@<function>" as set by Do.
 func (j *task) Name() string {
+	j.state.RLock()
+	defer j.state.RUnlock()
 	return j.name
 }
 
-// Schedule returns the live schedule.
+// Schedule returns a snapshot of the current schedule.
 func (j *task) Schedule() *Schedule {
-	return j.schedule
+	j.state.RLock()
+	defer j.state.RUnlock()
+	return cloneSchedule(j.schedule)
+}
+
+func cloneSchedule(s *Schedule) *Schedule {
+	if s == nil {
+		return nil
+	}
+	copy := *s
+	if s.LastRunAt != nil {
+		lastRun := *s.LastRunAt
+		copy.LastRunAt = &lastRun
+	}
+	return &copy
 }
 
 // RunCount returns the number of runs started so far.
 func (j *task) RunCount() uint32 {
+	j.state.RLock()
+	defer j.state.RUnlock()
 	return atomic.LoadUint32(&j.schedule.RunCount)
 }
 
 // ShouldRun reports whether the task is idle and due.
 func (j *task) ShouldRun() bool {
+	j.state.RLock()
+	defer j.state.RUnlock()
 	return !j.running && j.schedule.ShouldRun()
 }
 
 // IsRunning reports whether the callback is executing.
 func (j *task) IsRunning() bool {
+	j.state.RLock()
+	defer j.state.RUnlock()
 	return j.running
 }
 
@@ -295,18 +329,22 @@ func (j *task) Do(taskName string, taskFunc any, params ...any) Task {
 		logger.Panic("only function can be scheduled into the task queue")
 	}
 
-	j.name = fmt.Sprintf("%s@%s", taskName, filepath.Base(getFunctionName(taskFunc)))
-	j.callback = reflect.ValueOf(taskFunc)
-	if len(params) != j.callback.Type().NumIn() {
+	callback := reflect.ValueOf(taskFunc)
+	if len(params) != callback.Type().NumIn() {
 		logger.Panicf("the number of parameters does not match the function")
 	}
-	j.params = make([]reflect.Value, len(params))
+	values := make([]reflect.Value, len(params))
 	for k, param := range params {
-		j.params[k] = reflect.ValueOf(param)
+		values[k] = reflect.ValueOf(param)
 	}
 
+	j.state.Lock()
+	j.name = fmt.Sprintf("%s@%s", taskName, filepath.Base(getFunctionName(taskFunc)))
+	j.callback = callback
+	j.params = values
 	//schedule the next run
 	j.schedule.UpdateNextRun()
+	j.state.Unlock()
 
 	return j
 }
@@ -354,18 +392,22 @@ func (j *task) Run() bool {
 	}
 
 	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case j.runLock <- struct{}{}:
-		timer.Stop()
 		now := TimeNow()
+		j.state.Lock()
 		j.schedule.LastRunAt = &now
 		j.running = true
 		count := atomic.AddUint32(&j.schedule.RunCount, 1)
+		callback := j.callback
+		params := j.params
+		j.state.Unlock()
 
 		logger.KV(xlog.DEBUG,
 			"status", "running",
 			"run_count", count,
-			"started_at", j.schedule.LastRunAt,
+			"started_at", now,
 			"task", j.Name())
 
 		j.Publish()
@@ -380,22 +422,28 @@ func (j *task) Run() bool {
 						"stack", string(debug.Stack()))
 				}
 			}()
-			j.callback.Call(j.params)
+			callback.Call(params)
 		}()
 
+		j.state.Lock()
 		j.running = false
 		j.schedule.UpdateNextRun()
+		j.state.Unlock()
 		j.Publish()
 
 		<-j.runLock
 		return true
-	case <-time.After(timeout):
+	case <-timer.C:
 	}
 
+	j.state.RLock()
+	count := j.schedule.RunCount
+	lastRun := j.schedule.LastRunAt
+	j.state.RUnlock()
 	logger.KV(xlog.DEBUG,
 		"status", "already_running",
-		"run_count", j.schedule.RunCount,
-		"started_at", j.schedule.LastRunAt,
+		"run_count", count,
+		"started_at", lastRun,
 		"task", j.Name())
 
 	return false

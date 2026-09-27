@@ -140,6 +140,17 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 		},
 	}
 
+	t.Run("interface destination on miss", func(t *testing.T) {
+		var value any
+		err := cache.GetOrSet(ctx, p, "interface-miss", &value, func() (any, error) {
+			result := "computed"
+			return &result, nil
+		})
+		require.EqualError(t, err, "cache miss requires a concrete destination type")
+		err = p.Get(ctx, "interface-miss", &value)
+		require.True(t, cache.IsNotFoundError(err))
+	})
+
 	defer func() {
 		// let's not polute redis
 		for _, tc := range tcases {
@@ -148,17 +159,24 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 	}()
 
 	for _, tc := range tcases {
+		getterCalls := 0
 		err = cache.GetOrSet(ctx, p, tc.name, tc.out, func() (any, error) {
+			getterCalls++
 			return &tc.in, nil
 		})
 		require.NoError(t, err)
 		testutils.CompareJSON(t, tc.in, tc.out)
 
-		err = p.Set(ctx, tc.name, tc.in, time.Hour)
-		require.NoError(t, err)
 		err = p.Get(ctx, tc.name, tc.out)
 		require.NoError(t, err)
 		testutils.CompareJSON(t, tc.in, tc.out)
+
+		err = cache.GetOrSet(ctx, p, tc.name, tc.out, func() (any, error) {
+			getterCalls++
+			return nil, errors.New("getter called on cache hit")
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, getterCalls)
 	}
 
 	keys, err := p.Keys(ctx, "*")

@@ -487,11 +487,11 @@ Invariants:
 - TTL 0 → `DefaultTTL` (memory, 30m, package var) or `RedisConfig.TTL` (default 1h); `KeepTTL` (-1) → no expiry.
 - Memory provider is unbounded; expiry enforced on `Get` and `CleanExpired`; `NowFunc` is process-global.
 - Keys via `path.Join(prefix, key)`; Redis `Keys` strips the prefix, memory does not (P-064).
-- `GetOrSet` does not write back (P-036). Pub/sub channels are not prefixed; memory `Publish` blocks on a full 10-slot subscriber buffer (P-042); Redis `ReceiveMessage` spawns a goroutine per receive (P-041).
+- `GetOrSet` writes a successful getter result with TTL 0 (the provider default), storing the dereferenced value so Redis string/byte reads remain compatible; a failed write leaves the destination unchanged and returns an error. Cache misses require a pointer to a concrete destination type because interface values do not round-trip reliably across providers. Concurrent misses may call the getter more than once. Pub/sub channels are not prefixed; memory `Publish` blocks on a full 10-slot subscriber buffer (P-042); Redis `ReceiveMessage` spawns a goroutine per receive (P-041).
 - Subscription IDs use the Go 1.27 standard `uuid` package.
 - Config YAML: `provider: redis|memory`, `redis{...}`; no factory reads `provider`.
 
-Tests: `cache_test.go` runs the same matrix against redis (testcontainers), memory and proxy(memory); `memory_test.go` covers `CleanExpired`.
+Tests: `cache_test.go` runs the same matrix against redis (testcontainers), memory and proxy(memory), including read-through persistence; `get_or_set_test.go` covers default TTL, hit reuse, type errors, and write failures; `memory_test.go` covers `CleanExpired`.
 
 ### github.com/effective-security/porto/pkg/tasks
 
@@ -503,13 +503,14 @@ Entry points: `NewScheduler(opts...)` with `Add/Start/Stop`; `NewTask(format)`, 
 
 Invariants:
 
-- Panics: `NewTaskDaily/NewTaskOnWeekday` on a bad hh:mm, `Task.Do` on a non-func or wrong arity. Errors: `NewTask/ParseSchedule/UpdateSchedule`, `Start` (already running), `Stop` (not running).
+- Panics: `NewTaskDaily/NewTaskOnWeekday` on a bad hh:mm, `Task.Do` on a non-func or wrong arity. Errors: `NewTask/ParseSchedule/UpdateSchedule`, `Start` (already running); `Stop` succeeds when already stopped.
 - Globals: `TimeNow`, location via `SetGlobalLocation`, package logger.
-- `Start` spawns one ticker goroutine; each due task runs in its own goroutine with a per-task run lock and `WithRunTimeout` (default 1s); callback panics are recovered and logged. Tick = `WithTickerInterval` or min(1s, shortest Duration/10).
-- `scheduler.lock` guards the task slice; task state is not locked (P-048); `Stop` can deadlock if called twice (P-049).
+- `Start` spawns one ticker goroutine; each due task runs in its own goroutine with a per-task run lock and `WithRunTimeout` (default 1s); callback panics are recovered and logged. Tick = `WithTickerInterval` or min(1s, shortest Duration/10). Runnable tasks are sorted by a snapshot of next-run times using `slices.SortFunc`.
+- `scheduler.lock` guards membership and lifecycle; `Task` has a separate RWMutex for callback, publisher, and run state. `List` copies the task slice; `Task.Schedule` deep-copies `LastRunAt` and returns a snapshot. `New(*Schedule)` copies its input. Use `Add/Clear` and `SetNextRun/UpdateSchedule` to mutate state. Custom `Task` implementations must provide their own concurrency safety.
+- `Stop` closes the current run's quit channel under the lifecycle lock, is idempotent, and does not wait for task callbacks. `Start` may restart after `Stop`. Publisher callbacks run outside scheduler and task locks.
 - Task ID: `WithID` or `uuid.NewV7()`.
 
-Tests: time-based (`task_test.go`, `scheduler_test.go`); fail under `-race`.
+Tests: time-based (`task_test.go`, `scheduler_test.go`) and overlapping reads, writes, stops, and callbacks (`concurrency_test.go`); `task_bench_test.go` measures `Run`; package race tests pass.
 
 ### github.com/effective-security/porto/pkg/tlsconfig
 
@@ -590,4 +591,4 @@ Purpose: test helpers. `testutils`: `CreateURL`, `CreateBindAddr` (panic if no f
 - `make test` needs Docker for `pkg/redisclient` and `pkg/cache`; `pkg/retriable` `internal_test.go` needs outbound DNS.
 - `make covtest` writes `coverage.out`; CI (`.github/workflows/unittest.yml`) runs `make build covtest` and requires 90% total coverage. CI does not run `make lint` or `-race`.
 - `make docs` regenerates `Documentation/api/*.md` with gomarkdoc (one file per non-test package).
-- `pkg/tasks` fails `go test -race`; every other package is race-clean.
+- `pkg/tasks` and the other packages pass `go test -race`.

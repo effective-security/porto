@@ -1,7 +1,7 @@
 package tasks
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,7 +28,7 @@ func SetGlobalLocation(newLocation *time.Location) {
 }
 
 // Scheduler owns a set of tasks and a ticker goroutine that starts due tasks.
-// All methods are safe for concurrent use except Count, which reads without a lock.
+// Its methods are safe for concurrent use.
 type Scheduler interface {
 	// SetPublisher sets the publisher on the scheduler and on every task
 	// already added; tasks added later inherit it in Add.
@@ -38,8 +38,8 @@ type Scheduler interface {
 	Add(Task) Scheduler
 	// Get returns the task with the given ID, or nil if not found.
 	Get(id string) Task
-	// List returns the registered tasks. The returned slice shares the
-	// scheduler's backing array; do not modify it.
+	// List returns a snapshot of the registered task slice. Changes to the
+	// returned slice do not change scheduler membership.
 	List() []Task
 	// Clear removes all tasks from the pool. Tasks already started keep running.
 	Clear()
@@ -52,7 +52,7 @@ type Scheduler interface {
 	// It returns an error if the scheduler is already running.
 	Start() error
 	// Stop signals the ticker goroutine to exit. It does not wait for the
-	// goroutine or for in-flight tasks. It returns an error if not running.
+	// goroutine or for in-flight tasks. Repeated calls succeed.
 	Stop() error
 	// Publish calls Publish on every registered task.
 	Publish()
@@ -73,28 +73,8 @@ type scheduler struct {
 
 	tasks   []Task
 	running bool
-	quit    chan bool
+	quit    chan struct{}
 	lock    sync.RWMutex
-}
-
-// Scheduler implements the sort.Interface{} for sorting tasks, by the time nextRun
-// The Len, Swap, Less are needed for the sort.Interface{}
-
-// Len returns the lengths of tasks array for sorting interface
-func (s *scheduler) Len() int {
-	return len(s.tasks)
-}
-
-// Swap provides swap method for sorting interface
-func (s *scheduler) Swap(i, j int) {
-	s.tasks[i], s.tasks[j] = s.tasks[j], s.tasks[i]
-}
-
-// Less provides less-comparisson method for sorting interface
-func (s *scheduler) Less(i, j int) bool {
-	sj := s.tasks[j].Schedule()
-	si := s.tasks[i].Schedule()
-	return sj.NextRunAt.After(si.NextRunAt)
 }
 
 // NewScheduler creates a stopped scheduler. Only WithTickerInterval and
@@ -103,7 +83,6 @@ func NewScheduler(ops ...Option) Scheduler {
 	s := &scheduler{
 		tasks:   []Task{},
 		running: false,
-		quit:    make(chan bool, 1),
 	}
 
 	for _, op := range ops {
@@ -127,31 +106,39 @@ func (s *scheduler) SetPublisher(pub Publisher) Scheduler {
 
 // Publish calls Publish on every registered task.
 func (s *scheduler) Publish() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	for i := range s.tasks {
-		s.tasks[i].Publish()
+	for _, task := range s.List() {
+		task.Publish()
 	}
 }
 
 // Count returns the number of registered tasks
 func (s *scheduler) Count() int {
-	// s.lock.Lock()
-	// defer s.lock.Unlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return len(s.tasks)
 }
 
 // Get the current runnable tasks, which shouldRun is True
 func (s *scheduler) getRunnableTasks() []Task {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
+	tasks := s.List()
+	type scheduledTask struct {
+		task Task
+		next time.Time
+	}
+	scheduled := make([]scheduledTask, len(tasks))
+	for i, task := range tasks {
+		scheduled[i] = scheduledTask{
+			task: task,
+			next: task.Schedule().NextRunAt,
+		}
+	}
 	runnable := []Task{}
-	sort.Sort(s)
-	for _, j := range s.tasks {
-		if j.ShouldRun() {
-			runnable = append(runnable, j)
+	slices.SortFunc(scheduled, func(a, b scheduledTask) int {
+		return a.next.Compare(b.next)
+	})
+	for _, entry := range scheduled {
+		if entry.task.ShouldRun() {
+			runnable = append(runnable, entry.task)
 		}
 	}
 	return runnable
@@ -159,10 +146,10 @@ func (s *scheduler) getRunnableTasks() []Task {
 
 // List returns all registered tasks
 func (s *scheduler) List() []Task {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 
-	return s.tasks[:]
+	return slices.Clone(s.tasks)
 }
 
 // Add adds a task to a pool of scheduled tasks
@@ -180,8 +167,8 @@ func (s *scheduler) Add(j Task) Scheduler {
 
 // Get returns the task with the given ID, or nil if not found.
 func (s *scheduler) Get(id string) Task {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 
 	for _, t := range s.tasks {
 		if t.ID() == id {
@@ -208,8 +195,8 @@ func (s *scheduler) Clear() {
 
 // IsRunning reports whether the ticker goroutine is active.
 func (s *scheduler) IsRunning() bool {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.running
 }
 
@@ -217,17 +204,20 @@ func (s *scheduler) IsRunning() bool {
 // ticker goroutine. It returns an error if already running.
 func (s *scheduler) Start() error {
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	if s.running {
+		s.lock.Unlock()
 		return errors.Errorf("schedule already started")
 	}
 	s.running = true
+	s.quit = make(chan struct{})
+	quit := s.quit
+	tasks := slices.Clone(s.tasks)
 
 	interval := s.dops.tickerInterval
 	if interval == 0 {
 		// if not specified, then find a reasonable interval to schedule
 		interval = DefaultTickerInterval
-		for _, t := range s.tasks {
+		for _, t := range tasks {
 			in := t.Schedule().Duration()
 			if in < interval {
 				interval = in / 10 // use 1/10 of a task schedule interval
@@ -240,41 +230,48 @@ func (s *scheduler) Start() error {
 	}
 
 	logger.KV(xlog.DEBUG,
-		"tasks", s.Count(),
+		"tasks", len(tasks),
 		"schedule_interval", interval,
 	)
+	s.lock.Unlock()
 
-	for _, j := range s.tasks {
+	for _, j := range tasks {
 		j.Publish()
 	}
 
+	s.lock.Lock()
+	if !s.running || s.quit != quit {
+		s.lock.Unlock()
+		return nil
+	}
 	ticker := time.NewTicker(interval)
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				s.runPending()
-			case <-s.quit:
-				s.running = false
-				ticker.Stop()
+			case <-quit:
 				return
 			}
 		}
 	}()
+	s.lock.Unlock()
 
 	return nil
 }
 
 // Stop signals the ticker goroutine to exit; it does not wait for it or for
-// in-flight tasks. It returns an error if the scheduler is not running.
+// in-flight tasks. Repeated calls succeed.
 func (s *scheduler) Stop() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if !s.running {
-		return errors.Errorf("the scheduler is not running")
+		return nil
 	}
 
-	s.quit <- true
+	s.running = false
+	close(s.quit)
 
 	return nil
 }
