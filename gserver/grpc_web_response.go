@@ -33,6 +33,8 @@ type grpcWebResponse struct {
 	wrapped http.ResponseWriter
 
 	compress bool
+	// exposeHeaders enables the gRPC-Web CORS exposure list for an allowed origin.
+	exposeHeaders bool
 	// gz is the pooled gzip writer of a compressed response; Close returns
 	// it to the pool and sets it to nil.
 	gz *gzip.Writer
@@ -180,19 +182,87 @@ func (w *grpcWebResponse) Close() {
 // prepare the header of the wrapped response writer.
 func (w *grpcWebResponse) prepareHeaders() {
 	wh := w.wrapped.Header()
+	configuredExposed := wh.Values("Access-Control-Expose-Headers")
+	responseExposed := w.headers.Values("Access-Control-Expose-Headers")
 	copyHeader(
 		wh, w.headers,
-		skipKeys("trailer"),
+		skipKeys(
+			"trailer",
+			"access-control-allow-origin",
+			"access-control-allow-credentials",
+			"access-control-expose-headers",
+			header.Vary,
+			http.TrailerPrefix+"Access-Control-Allow-Origin",
+			http.TrailerPrefix+"Access-Control-Allow-Credentials",
+			http.TrailerPrefix+"Access-Control-Expose-Headers",
+			http.TrailerPrefix+header.Vary,
+		),
 		replaceInKeys(http.TrailerPrefix, ""),
 		replaceInVals("content-type", header.ApplicationGRPC, w.contentType),
 		keyCase(http.CanonicalHeaderKey),
 	)
-	responseHeaderKeys := headerKeys(wh)
-	responseHeaderKeys = append(responseHeaderKeys, "grpc-status", "grpc-message")
-	wh.Set(
-		"access-control-expose-headers",
-		strings.Join(responseHeaderKeys, ", "),
-	)
+	mergeVaryHeader(wh, w.headers)
+	if w.exposeHeaders {
+		exposed := make([]string, 0, len(wh)+2)
+		seen := make(map[string]bool, len(wh)+2)
+		add := func(name string) {
+			name = strings.TrimSpace(name)
+			key := strings.ToLower(name)
+			if name != "" && !seen[key] {
+				seen[key] = true
+				exposed = append(exposed, name)
+			}
+		}
+		for _, values := range [][]string{configuredExposed, responseExposed} {
+			for _, value := range values {
+				for name := range strings.SplitSeq(value, ",") {
+					add(name)
+				}
+			}
+		}
+		for _, name := range headerKeys(wh) {
+			add(name)
+		}
+		add("grpc-status")
+		add("grpc-message")
+		wh.Set("Access-Control-Expose-Headers", strings.Join(exposed, ", "))
+	}
+}
+
+// mergeVaryHeader keeps server-selected cache keys when gRPC metadata also
+// includes Vary. A wildcard means every request field may affect the response.
+func mergeVaryHeader(dst, src http.Header) {
+	var metadataVary []string
+	for key, values := range src {
+		if strings.EqualFold(key, header.Vary) || strings.EqualFold(key, http.TrailerPrefix+header.Vary) {
+			metadataVary = append(metadataVary, values...)
+		}
+	}
+	if len(metadataVary) == 0 {
+		return
+	}
+
+	var merged []string
+	seen := make(map[string]bool)
+	for _, values := range [][]string{dst.Values(header.Vary), metadataVary} {
+		for _, value := range values {
+			for field := range strings.SplitSeq(value, ",") {
+				field = strings.TrimSpace(field)
+				if field == "*" {
+					dst.Set(header.Vary, "*")
+					return
+				}
+				key := strings.ToLower(field)
+				if field != "" && !seen[key] {
+					seen[key] = true
+					merged = append(merged, field)
+				}
+			}
+		}
+	}
+	if len(merged) > 0 {
+		dst.Set(header.Vary, strings.Join(merged, ", "))
+	}
 }
 
 func (w *grpcWebResponse) finishRequest() {

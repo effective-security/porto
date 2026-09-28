@@ -40,7 +40,6 @@ byte-exact test.
 | ID    | Package                                 | Location                                                                 | Title                                                                                                                                        | Type        | Severity | Status         |
 | ----- | --------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------- | -------------- |
 | P-001 | (module)                                | `go.mod` `google.golang.org/grpc v1.84.0`                                | GO-2026-6443: gRPC server panic via missing authority/Host headers                                                                           | security    | HIGH     | Fixed          |
-| P-002 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web responses get `Access-Control-Allow-Origin: *` when CORS is disabled                                                                | security    | HIGH     | Needs Approval |
 | P-003 | gserver                                 | `serve.go` `serveCtx.serve`, `server.go` `Server.Close`                  | `Close` deadlocks if a listener's `serve` fails before publishing servers                                                                    | bug         | MEDIUM   | Open           |
 | P-004 | gserver                                 | `serve.go` `configureListeners`, `server.go` `Server.Close`              | TLS keypair reloader goroutine leaked on `Close`                                                                                             | bug         | MEDIUM   | Open           |
 | P-005 | gserver                                 | `serve.go` `serveCtx.serve`                                              | cmux and `http.Server` have no read/header/idle timeouts (slowloris)                                                                         | security    | MEDIUM   | Open           |
@@ -48,8 +47,6 @@ byte-exact test.
 | P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Needs Approval |
 | P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
 | P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
-| P-011 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web request from a disallowed origin returns 200 with an empty body                                                                     | correctness | LOW      | Needs Approval |
-| P-012 | gserver                                 | `grpc_web_response.go` `grpcWebResponse.prepareHeaders`                  | Configured `CORS.ExposedHeaders` overwritten for gRPC-Web responses                                                                          | correctness | LOW      | Open           |
 | P-013 | gserver/roles                           | `roles.go` `IdentityFromContext`                                         | Cookie auth over gRPC skips the CSRF check; HTTP cookie auth silently requires `cookies.csrf`                                                | security    | LOW      | Needs Approval |
 | P-014 | gserver/credentials                     | `credentials.go` `perRPCCredential.GetRequestMetadata`                   | Unsynchronized reads of `callerIdentity`/`dpopSigner`; thundering-herd token refresh                                                         | race        | LOW      | Open           |
 | P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
@@ -107,12 +104,6 @@ byte-exact test.
 - Impact: a request without `:authority`/`Host` can panic the gRPC server.
 - Fix: upgrade to the first released `google.golang.org/grpc` that contains the fix (only `v1.85.0-dev` pseudo-versions exist as of the audit). Pin a pseudo-version or wait for `v1.85.0`.
 
-### P-002 gRPC-Web wildcard `Access-Control-Allow-Origin`
-
-- Evidence: `allowedOrigins` is populated only when `cfg.CORS != nil` and the first origin is not `*`; `CORS.GetEnabled()` is never consulted. With an `Origin` header and no allowed origins the handler sets `Access-Control-Allow-Origin: *`.
-- Impact: with no `cors:` block, every TLS listener answers gRPC-Web calls with a wildcard ACAO so any web origin can read non-credentialed responses. REST only applies CORS when enabled, so the two protocols disagree.
-- Fix: emit ACAO/ACEH/ACAC only when `CORS.GetEnabled()`; treat "no allowed origins" as "do not emit ACAO".
-
 ### P-003 `Server.Close` deadlock after a failed `serve`
 
 - Evidence: `serve` returns on `transport.NewTLSListener` error before `close(sctx.serversC)`; `Close` ranges over `serversC` and blocks forever. `Start`'s deferred cleanup only closes the channel when `!serving`, but `serveClients` always returns nil.
@@ -154,16 +145,6 @@ byte-exact test.
 - Evidence: `awsIdentity` only caches successful lookups (`p.awsCache.Add` after decoding); the LRU is 100 entries keyed by the full URL.
 - Impact: repeated bad tokens each cost an outbound STS call (now bounded by a 10s timeout and 64 KiB body).
 - Fix: negatively cache failures for a short TTL.
-
-### P-011 gRPC-Web disallowed origin returns 200
-
-- Evidence: on origin mismatch the handler logs `cors_not_allowed` and returns without writing a status or trailer; `serve_test.go` asserts `http.StatusOK`.
-- Fix: `http.Error(w, "origin not allowed", http.StatusForbidden)` or a gRPC-Web trailer with `grpc-status: 7`.
-
-### P-012 `ExposedHeaders` overwritten
-
-- Evidence: `grpcHandlerFunc` sets `Access-Control-Expose-Headers` from config, then `prepareHeaders` calls `wh.Set(...)` with the response header keys plus `grpc-status, grpc-message`, replacing it and duplicating entries.
-- Fix: merge case-insensitively instead of `Set`.
 
 ### P-013 Cookie auth CSRF asymmetry
 
@@ -358,7 +339,6 @@ byte-exact test.
 
 ## Notes on items needing approval
 
-- P-002, P-011: gRPC-Web clients may rely on the implicit wildcard and the 200 response.
 - P-006, P-007, P-019, P-026: new defaults or limits that deployments may need to raise.
 - P-013, P-018, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.

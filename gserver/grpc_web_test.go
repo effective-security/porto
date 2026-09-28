@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"encoding/base64"
@@ -56,6 +57,7 @@ func TestGrpcWebResponse_PrepareHeadersJSON(t *testing.T) {
 	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.headers.Set("Content-Type", "application/json")
+	g.exposeHeaders = true
 	g.prepareHeaders()
 
 	h := resp.Header()
@@ -69,12 +71,110 @@ func TestGrpcWebResponse_PrepareHeaders(t *testing.T) {
 	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
 
 	g.headers.Set("Content-Type", "application/grpc-web+proto")
+	g.exposeHeaders = true
 	g.prepareHeaders()
 
 	h := resp.Header()
 	assert.Equal(t, "application/grpc-web+proto", h.Get("Content-Type"))
 	assert.Contains(t, h.Get("Access-Control-Expose-Headers"), "grpc-status")
 	assert.Contains(t, h.Get("Access-Control-Expose-Headers"), "grpc-message")
+}
+
+func TestGrpcWebResponse_ExposedHeadersMerge(t *testing.T) {
+	t.Parallel()
+	resp := httptest.NewRecorder()
+	resp.Header().Set("Access-Control-Expose-Headers", "X-Custom-Header, GRPC-STATUS, x-custom-header")
+	resp.Header().Set("Access-Control-Allow-Origin", "https://allowed.example")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+	g.exposeHeaders = true
+	g.headers.Set("Content-Type", header.ApplicationGRPC)
+	g.headers.Set("Access-Control-Expose-Headers", "X-Service-Header, grpc-status")
+	g.headers.Set("Access-Control-Allow-Origin", "https://other.example")
+	g.headers.Set("Access-Control-Allow-Credentials", "true")
+
+	g.prepareHeaders()
+
+	parts := strings.Split(resp.Header().Get("Access-Control-Expose-Headers"), ", ")
+	counts := make(map[string]int)
+	for _, part := range parts {
+		counts[strings.ToLower(part)]++
+	}
+	assert.Equal(t, 1, counts["x-custom-header"])
+	assert.Equal(t, 1, counts["x-service-header"])
+	assert.Equal(t, 1, counts["grpc-status"])
+	assert.Equal(t, 1, counts["grpc-message"])
+	assert.Equal(t, 1, counts["content-type"])
+	assert.Equal(t, "https://allowed.example", resp.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, resp.Header().Get("Access-Control-Allow-Credentials"))
+}
+
+func TestGrpcWebResponse_PreservesCORSVary(t *testing.T) {
+	t.Parallel()
+	resp := httptest.NewRecorder()
+	resp.Header().Add(header.Vary, "Origin")
+	resp.Header().Add(header.Vary, "Accept-Encoding")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+	g.exposeHeaders = true
+	g.headers["vary"] = []string{"Accept-Language, origin"}
+
+	g.prepareHeaders()
+
+	assert.Equal(t, "Origin, Accept-Encoding, Accept-Language", resp.Header().Get(header.Vary))
+}
+
+func TestGrpcWebResponse_PreservesCORSVaryFromTrailerMetadata(t *testing.T) {
+	t.Parallel()
+	resp := httptest.NewRecorder()
+	resp.Header().Set(header.Vary, "Origin")
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+	g.headers[http.TrailerPrefix+header.Vary] = []string{"Accept-Language"}
+
+	g.prepareHeaders()
+
+	assert.Equal(t, "Origin, Accept-Language", resp.Header().Get(header.Vary))
+}
+
+func TestGrpcWebResponse_VaryWildcard(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		wrapped  string
+		metadata string
+	}{
+		{name: "wrapped wildcard", wrapped: "*", metadata: "Accept-Language"},
+		{name: "metadata wildcard", wrapped: "Origin", metadata: "*"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp := httptest.NewRecorder()
+			resp.Header().Set(header.Vary, tt.wrapped)
+			g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+			g.headers.Set(header.Vary, tt.metadata)
+
+			g.prepareHeaders()
+
+			assert.Equal(t, "*", resp.Header().Get(header.Vary))
+		})
+	}
+}
+
+func TestGrpcWebResponse_NoCORSFromMetadata(t *testing.T) {
+	t.Parallel()
+	resp := httptest.NewRecorder()
+	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+	g.headers.Set("Access-Control-Allow-Origin", "*")
+	g.headers.Set("Access-Control-Allow-Credentials", "true")
+	g.headers.Set("Access-Control-Expose-Headers", "X-Service-Header")
+	g.headers[http.TrailerPrefix+"Access-Control-Allow-Origin"] = []string{"*"}
+	g.headers[http.TrailerPrefix+"Access-Control-Allow-Credentials"] = []string{"true"}
+	g.headers[http.TrailerPrefix+"Access-Control-Expose-Headers"] = []string{"X-Trailer-Header"}
+
+	g.prepareHeaders()
+
+	assert.Empty(t, resp.Header().Get("Access-Control-Allow-Origin"))
+	assert.Empty(t, resp.Header().Get("Access-Control-Allow-Credentials"))
+	assert.Empty(t, resp.Header().Get("Access-Control-Expose-Headers"))
 }
 
 func TestGrpcWebResponse_FinishRequest(t *testing.T) {
@@ -129,6 +229,7 @@ func TestGrpcWebResponse_PrepareHeadersText(t *testing.T) {
 	g := newGrpcWebResponse(resp, header.ApplicationGRPCWebText, false)
 
 	g.headers.Set("Content-Type", header.ApplicationGRPCWebText)
+	g.exposeHeaders = true
 	g.prepareHeaders()
 
 	h := resp.Header()

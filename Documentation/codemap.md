@@ -80,8 +80,8 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | gRPC-Web translation / trailer frame        | gserver                                    | grpc_web_response.go             | `grpcWebResponse`, `buildTrailerFrame`                                     |
 | gRPC-Web text (base64)                      | gserver                                    | grpc_web_response.go             | `writeTextPayload`                                                         |
 | gRPC-Web gzip / `X-GRPC-Stream`             | gserver                                    | serve.go                         | `grpcHandlerFunc`                                                          |
-| CORS (REST, rs/cors)                        | gserver, restserver                        | serve.go, router.go              | `configureHandlers`, `CORSOptions`, `NewRouterWithCORS`                    |
-| CORS (gRPC-Web headers)                     | gserver                                    | serve.go                         | `grpcHandlerFunc`                                                          |
+| CORS (REST, rs/cors)                        | gserver, restserver                        | serve.go, router.go              | `configureHandlers`, `corsHandler`, `CORSOptions`, `NewRouterWithCORS`     |
+| CORS (gRPC-Web headers)                     | gserver                                    | serve.go, grpc_web_response.go   | `grpcHandlerFunc`, `grpcWebResponse.prepareHeaders`, `mergeVaryHeader`     |
 | rate limit (tollbooth)                      | gserver                                    | serve.go, config.go              | `configureRateLimiter`, `RateLimit`                                        |
 | HTTP middleware chain order                 | gserver, restserver                        | serve.go, server.go              | `configureHandlers`, `HTTPServer.NewMux`                                   |
 | gRPC interceptor chain                      | gserver                                    | serve.go                         | `grpcServer`                                                               |
@@ -119,7 +119,7 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | metrics config YAML                         | pkg/appinit/config                         | config.go                        | `Metrics`                                                                  |
 | logging flags / log rotation                | pkg/appinit                                | init.go                          | `LogConfig`, `Logs`                                                        |
 | CPU profiling                               | pkg/appinit                                | init.go                          | `CPUProfiler`                                                              |
-| static response headers                     | gserver                                    | config.go                        | `Config.HTTPHeaders`                                                       |
+| static response headers                     | gserver                                    | config.go                        | `Config.HTTPHeaders`, `Config.Validate`                                    |
 | max message size (gRPC)                     | gserver, pkg/rpcclient                     | options.go, client.go            | `MaxRecvMsgSize`, `MaxSendMsgSize`, `defaultMaxCallSendMsgSize`            |
 | max request size (REST, advisory)           | restserver                                 | server.go                        | `MaxRequestSize`                                                           |
 | header copy / trailer prefix handling       | gserver                                    | header.go                        | `copyHeader`, `replaceInKeys`                                              |
@@ -214,11 +214,11 @@ Files:
 
 - `doc.go` — package overview and usage example.
 - `server.go` — `Server`/`GServer`, `Start`, service registry, `Close`, error channel.
-- `serve.go` — `configureListeners` (URL schemes, TLS, keepalive), `serveCtx.serve` (cmux split), `configureHandlers` (HTTP chain), `configureRateLimiter`, `grpcServer` (interceptor chain), `grpcHandlerFunc` (gRPC / gRPC-Web / REST mux on TLS listeners), `NewRequestValidationUnaryInterceptor`, `panicInterceptor`.
+- `serve.go` — `configureListeners` (URL schemes, TLS, keepalive), `serveCtx.serve` (cmux split), `configureHandlers` (HTTP chain), `corsHandler` (REST/preflight CORS response headers; an empty origin list allows none, and a disallowed actual request still reaches the handler), `configureRateLimiter`, `grpcServer` (interceptor chain), `grpcHandlerFunc` (gRPC / gRPC-Web / REST mux on TLS listeners), `NewRequestValidationUnaryInterceptor`, `panicInterceptor`.
 - `grpc_web_response.go` — `grpcWebResponse`: `http.ResponseWriter` that rewrites gRPC responses into gRPC-Web framing (trailer frame, base64 for `-text`, pooled optional gzip for unary).
 - `header.go` — `copyHeader` and option helpers used for gRPC → gRPC-Web header/trailer translation.
 - `logs.go` — gRPC request logging/metrics interceptors.
-- `config.go` — `Config`, `TLSInfo`, `KeepAliveCfg`, `CORS`, `RateLimit`, `SwaggerCfg`.
+- `config.go` — `Config` (`Config.Validate`), `TLSInfo`, `KeepAliveCfg`, `CORS` (`CORS.Validate`), `RateLimit`, `SwaggerCfg`.
 - `options.go` — `WithMiddleware`, `WithUnaryServerInterceptor`, `WithStreamServerInterceptor`, `MaxRecvMsgSize`, `MaxSendMsgSize`.
 
 Entry points:
@@ -230,13 +230,13 @@ Entry points:
 
 Invariants:
 
-- `Start` returns errors; `configureHandlers` panics through the logger if the authz handler cannot be built. Handler panics are recovered into 500 / `codes.Internal` (unary only; the stream chain has no recovery).
+- `Start` returns errors, starting with `Config.Validate`; `configureHandlers` panics through the logger if the authz handler cannot be built. Handler panics are recovered into 500 / `codes.Internal` (unary only; the stream chain has no recovery).
 - Process-global: package logger; `WarnUnaryRequestLatency`. The gRPC gzip compressor is registered by blank import.
 - Every name in `Config.Services` must exist in the factory map; factories run through `dig.Container.Invoke`. The container must provide `discovery.Discovery` and, when JWT/DPoP is enabled, `jwt.Parser`.
 - Listen URL schemes: `http`, `https`, `unix`, `unixs`; no scheme → https when TLS is configured. The same address listed twice yields one listener serving both secure and insecure.
 - Plain listeners: cmux routes HTTP/2 → gRPC (h2c), HTTP/1 → REST; gRPC-Web and `HTTPHeaders` are only handled on TLS listeners, where everything goes through `http.Server` and `grpcHandlerFunc` selects by `Content-Type`.
 - HTTP chain (outer → inner): rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
-- Headers read: `Content-Type`, `Origin`, `Accept-Encoding`, `X-GRPC-Stream`. Headers written: `Access-Control-Allow-Origin/Expose-Headers/Allow-Credentials` for gRPC-Web (see FINDINGS P-002), `Content-Encoding: gzip`, `Config.HTTPHeaders`.
+- Headers read: `Content-Type`, `Origin`, `Accept-Encoding`, `X-GRPC-Stream`. For gRPC-Web, CORS headers are written only when `CORS.GetEnabled()` and an allowed `Origin` is present. Nonempty `AllowedOrigins` uses `rs/cors` matching, including its origin patterns; explicit `*` allows all origins and an empty list allows none. `Start` rejects an enabled `*` with `AllowCredentials` (`CORS.Validate`) and, while CORS is enabled, any `Access-Control-*` name in `HTTPHeaders` (`Config.Validate`, case-insensitive), so static headers cannot bypass the CORS policy; gRPC-Web never sends `Access-Control-Allow-Credentials` with `Access-Control-Allow-Origin: *`. A disallowed gRPC-Web POST gets HTTP 403; a disallowed preflight gets no allow-origin header. REST CORS is not request or CSRF protection: `rs/cors` still runs the handler for a disallowed actual request and only omits CORS response headers. `Access-Control-Expose-Headers` merges configured and service names with response and gRPC trailer names without case-insensitive duplicates; service response metadata cannot override server CORS policy headers. Reflected and denied origins add `Vary: Origin`; `prepareHeaders` merges service `Vary` header and trailer metadata without dropping it. Other headers written: `Content-Encoding: gzip`, `Config.HTTPHeaders`.
 - gRPC-Web compression is enabled when `Accept-Encoding` contains `gzip` as a substring (q-values ignored, P-076) and `X-GRPC-Stream` is absent.
 - Compressed gRPC-Web responses borrow a gzip writer from a pool; `Close` is idempotent because both `finishRequest` and the handler's deferred cleanup call it. Writers are reset before reuse and release the previous response writer on return to the pool. After `Close`, body writes to a compressed response return `errWriteAfterClose` and late trailer writes are logged and dropped, so raw bytes never follow the gzip footer.
 - Close ordering: services `Close()` → `stopc` → per-listener `http.Shutdown` + `grpc.Stop`/`GracefulStop` within `Timeout.Request` (default 3s) → listeners closed. `Err()` is buffered and never closed. The TLS reloader is not closed (P-004).

@@ -333,25 +333,37 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 
 	if s.cfg.CORS.GetEnabled() {
 		logger.KV(xlog.NOTICE, "server", s.name, "CORS", "enabled")
-		co := cors.New(cors.Options{
-			AllowedOrigins: s.cfg.CORS.AllowedOrigins,
-			//AllowOriginFunc:        s.cfg.CORS.AllowOriginFunc,
-			//AllowOriginRequestFunc: s.cfg.CORS.AllowOriginRequestFunc,
-			AllowedMethods:     s.cfg.CORS.AllowedMethods,
-			AllowedHeaders:     s.cfg.CORS.AllowedHeaders,
-			ExposedHeaders:     s.cfg.CORS.ExposedHeaders,
-			MaxAge:             s.cfg.CORS.MaxAge,
-			AllowCredentials:   s.cfg.CORS.GetAllowCredentials(),
-			OptionsPassthrough: s.cfg.CORS.GetOptionsPassthrough(),
-			Debug:              s.cfg.CORS.GetDebug(),
-		})
-		handler = co.Handler(handler)
+		handler = corsHandler(s.cfg.CORS, handler)
 	}
 
 	// Add correlationID
 	handler = correlation.NewHandler(handler)
 
 	return handler
+}
+
+func corsHandler(cfg *CORS, handler http.Handler) http.Handler {
+	allowedOrigins := cfg.AllowedOrigins
+	options := cors.Options{
+		AllowedOrigins:     allowedOrigins,
+		AllowedMethods:     cfg.AllowedMethods,
+		AllowedHeaders:     cfg.AllowedHeaders,
+		ExposedHeaders:     cfg.ExposedHeaders,
+		MaxAge:             cfg.MaxAge,
+		AllowCredentials:   cfg.GetAllowCredentials(),
+		OptionsPassthrough: cfg.GetOptionsPassthrough(),
+		Debug:              cfg.GetDebug(),
+	}
+	if len(allowedOrigins) == 0 {
+		// rs/cors treats an empty list as allow-all; an enabled CORS block
+		// with no origins allows none, matching gRPC-Web. "*" with
+		// credentials never reaches here: CORS.Validate rejects it.
+		options.AllowOriginVaryRequestFunc = func(_ *http.Request, _ string) (bool, []string) {
+			return false, nil
+		}
+	}
+	co := cors.New(options)
+	return co.Handler(handler)
 }
 
 func restRouter(e *Server) restserver.Router {
@@ -476,15 +488,18 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 		})
 	}
 
+	corsEnabled := sctx.cfg.CORS.GetEnabled()
 	var allowedOrigins []string
 	exposedHeaders := ""
 	allowCredentials := false
-	if sctx.cfg.CORS != nil {
-		if len(sctx.cfg.CORS.AllowedOrigins) > 0 && sctx.cfg.CORS.AllowedOrigins[0] != "*" {
-			allowedOrigins = sctx.cfg.CORS.AllowedOrigins
-		}
+	var originMatcher *cors.Cors
+	wildcard := false
+	if corsEnabled {
+		allowedOrigins = sctx.cfg.CORS.AllowedOrigins
+		wildcard = slices.Contains(allowedOrigins, corsWildcardOrigin)
+		originMatcher = cors.New(cors.Options{AllowedOrigins: allowedOrigins})
 		if len(sctx.cfg.CORS.ExposedHeaders) > 0 {
-			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ",")
+			exposedHeaders = strings.Join(sctx.cfg.CORS.ExposedHeaders, ", ")
 		}
 		allowCredentials = sctx.cfg.CORS.GetAllowCredentials()
 	}
@@ -535,8 +550,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				r.Header.Del(header.ContentLength)
 
 				r.Header.Set(header.ContentType, header.ApplicationGRPC)
-				if origin != "" {
-					if len(allowedOrigins) > 0 && !slices.Contains(allowedOrigins, origin) {
+				if origin != "" && corsEnabled {
+					if len(allowedOrigins) == 0 || !originMatcher.OriginAllowed(r) {
 						logger.ContextKV(r.Context(), xlog.INFO,
 							"reason", "cors_not_allowed",
 							"method", r.Method,
@@ -546,19 +561,24 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 							"content-type", r.Header.Get(header.ContentType),
 							"accept", r.Header.Get(header.Accept),
 							"url", r.URL.String())
+						wh.Add(header.Vary, "Origin")
+						http.Error(w, "origin not allowed", http.StatusForbidden)
 						return
 					}
-					if len(allowedOrigins) > 0 {
-						wh.Set("Access-Control-Allow-Origin", origin)
+					if wildcard {
+						// Never credentialed: CORS.Validate rejects "*" with
+						// credentials, and the header is not sent here either.
+						wh.Set("Access-Control-Allow-Origin", corsWildcardOrigin)
 					} else {
-						wh.Set("Access-Control-Allow-Origin", "*")
+						wh.Set("Access-Control-Allow-Origin", origin)
+						wh.Add(header.Vary, "Origin")
+						if allowCredentials {
+							wh.Set("Access-Control-Allow-Credentials", "true")
+						}
 					}
-				}
-				if exposedHeaders != "" {
-					wh.Set("Access-Control-Expose-Headers", exposedHeaders)
-				}
-				if allowCredentials && len(allowedOrigins) > 0 {
-					wh.Set("Access-Control-Allow-Credentials", "true")
+					if exposedHeaders != "" {
+						wh.Set("Access-Control-Expose-Headers", exposedHeaders)
+					}
 				}
 
 				// Only apply HTTP-level gzip for unary (non-streaming) calls.
@@ -570,7 +590,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				// ignored (FINDINGS P-076).
 				isStream := r.Header.Get(header.XGRPCStream) != ""
 				compress := !isStream && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip)
-				w = newGrpcWebResponse(w, ct, compress)
+				grw := newGrpcWebResponse(w, ct, compress)
+				grw.exposeHeaders = corsEnabled && origin != ""
+				w = grw
 				defer func() {
 					grw := w.(*grpcWebResponse)
 					grw.Close()

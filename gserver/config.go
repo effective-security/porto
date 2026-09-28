@@ -2,13 +2,25 @@ package gserver
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/x/netutil"
+)
+
+const (
+	// corsWildcardOrigin is the CORS.AllowedOrigins entry that allows every origin.
+	corsWildcardOrigin = "*"
+	// corsHeaderPrefix is the lower-case prefix of CORS response header names,
+	// which an enabled CORS block owns.
+	corsHeaderPrefix = "access-control-"
 )
 
 // Config is the server configuration passed to Start. It is usually
@@ -79,6 +91,8 @@ type Config struct {
 
 	// HTTPHeaders are static response headers set on every response served
 	// by TLS listeners (they are not applied on plain http listeners).
+	// While CORS is enabled, Access-Control-* names are rejected (see
+	// Validate): the CORS block owns those headers.
 	HTTPHeaders map[string]string `json:"http_headers,omitempty" yaml:"http_headers,omitempty"`
 }
 
@@ -138,6 +152,16 @@ type SwaggerCfg struct {
 // CORS configures cross-origin handling. When enabled the REST handler is
 // wrapped with github.com/rs/cors; AllowedOrigins, ExposedHeaders and
 // AllowCredentials are also applied to gRPC-Web responses on TLS listeners.
+// Both match origins the same way, including rs/cors origin patterns. Use
+// AllowedOrigins with "*" to allow every origin; an empty list allows none.
+// "*" cannot be combined with AllowCredentials: Start rejects that
+// configuration (see Validate).
+//
+// For REST, CORS only controls whether a browser may read the response; it is
+// not request or CSRF protection. A REST request from a disallowed origin
+// still reaches its handler and only lacks CORS response headers, and a
+// disallowed preflight gets no allow headers. gRPC-Web rejects a request from
+// a disallowed origin with HTTP 403 before the service is called.
 type CORS struct {
 	// Enabled specifies if the CORS is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
@@ -158,6 +182,7 @@ type CORS struct {
 	ExposedHeaders []string `json:"exposed_headers,omitempty" yaml:"exposed_headers,omitempty"`
 
 	// AllowCredentials indicates whether the request can include user credentials.
+	// It requires explicit AllowedOrigins or origin patterns; "*" is rejected.
 	AllowCredentials *bool `json:"allow_credentials,omitempty" yaml:"allow_credentials,omitempty"`
 
 	// OptionsPassthrough instructs preflight to let other potential next handlers to process the OPTIONS method.
@@ -165,6 +190,24 @@ type CORS struct {
 
 	// Debug flag adds additional output to debug server side CORS issues.
 	Debug *bool `json:"debug,omitempty" yaml:"debug,omitempty"`
+}
+
+// Validate returns an error for a configuration Start cannot serve safely: an
+// invalid CORS block (see CORS.Validate) or, while CORS is enabled, an
+// HTTPHeaders entry that would set an Access-Control-* header outside the
+// CORS policy. Start calls Validate.
+func (c *Config) Validate() error {
+	if err := c.CORS.Validate(); err != nil {
+		return err
+	}
+	if c.CORS.GetEnabled() {
+		for _, name := range slices.Sorted(maps.Keys(c.HTTPHeaders)) {
+			if strings.HasPrefix(strings.ToLower(name), corsHeaderPrefix) {
+				return errors.Newf("http_headers: %q cannot be set while cors is enabled; configure it in the cors block", name)
+			}
+		}
+	}
+	return nil
 }
 
 // ParseListenURLs parses ListenURLs into URLs, returning an error for any
@@ -205,6 +248,17 @@ func (c *CORS) GetDebug() bool {
 // GetAllowCredentials returns the AllowCredentials flag; safe on a nil receiver.
 func (c *CORS) GetAllowCredentials() bool {
 	return c != nil && c.AllowCredentials != nil && *c.AllowCredentials
+}
+
+// Validate returns an error when an enabled CORS block combines the "*" origin
+// with AllowCredentials, which would let every web origin read credentialed
+// responses. A nil or disabled CORS is valid. Start calls it through
+// Config.Validate.
+func (c *CORS) Validate() error {
+	if c.GetEnabled() && c.GetAllowCredentials() && slices.Contains(c.AllowedOrigins, corsWildcardOrigin) {
+		return errors.New(`cors: allowed_origins "*" cannot be combined with allow_credentials; list explicit origins`)
+	}
+	return nil
 }
 
 // GetOptionsPassthrough returns the OptionsPassthrough flag; safe on a nil receiver.

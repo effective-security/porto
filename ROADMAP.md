@@ -22,10 +22,10 @@ Retires P-005, P-019, P-026, P-054, P-055.
 
 ## 3. gRPC-Web CORS parity with REST
 
-gRPC-Web emits its own `Access-Control-*` headers in `grpcHandlerFunc`,
-independently of `rs/cors`, and defaults to `*`. Route gRPC-Web through the
-same CORS decision as REST (honor `enabled`, merge `exposed_headers`, return
-403 on a disallowed origin). Retires P-002, P-011, P-012, P-013.
+v0.41 routes gRPC-Web origin checks through `rs/cors` matching, honors
+`enabled`, merges `exposed_headers` and returns 403 on a disallowed origin
+(formerly P-002, P-011, P-012). Remaining: cookie-authenticated gRPC calls
+skip the CSRF check that HTTP cookie auth requires. Retires P-013.
 
 ## 4. Replace archived gRPC middleware
 

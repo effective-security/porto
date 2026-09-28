@@ -222,7 +222,10 @@ func newServer(
 	serviceFactories map[string]ServiceFactory,
 	opts ...Option,
 ) (*Server, error) {
-	var err error
+	err := cfg.Validate()
+	if err != nil {
+		return nil, err
+	}
 
 	ipaddr, err := netutil.GetLocalIP()
 	if err != nil {
