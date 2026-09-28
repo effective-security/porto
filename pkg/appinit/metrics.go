@@ -3,8 +3,8 @@ package appinit
 import (
 	"context"
 	"io"
-	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +17,6 @@ import (
 	"github.com/effective-security/xlog"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Sinks can be initialized only once per process; kept global for tests.
@@ -30,13 +29,18 @@ var (
 // comma-separated list of "prometheus", "cloudwatch" and "inmem"; an empty
 // provider or Disabled=true is a no-op returning (nil, nil). Prometheus
 // registers with the default registry and, when Prometheus.Addr is set,
-// serves promhttp on that address in a goroutine (fatal on listen error).
+// binds synchronously and serves promhttp with bounded HTTP read deadlines.
+// Bind errors are returned; unexpected serve errors are logged. The returned
+// closer stops the HTTP endpoint, including active connections.
 // CloudWatch starts a publishing goroutine; the returned closer flushes it.
 // GlobalTags accepts "service", "cluster_id" and "node" (from $NODE_NAME).
 // describe lists the caller's metric descriptors, merged with metricskey.Metrics
 // for Prometheus help text. It returns an error if a sink is already
 // initialized or a provider is unknown.
-func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (io.Closer, error) {
+func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (closer io.Closer, err error) {
+	if cfg == nil {
+		return nil, nil
+	}
 	if cfg.Provider == "" || cfg.GetDisabled() {
 		logger.KV(xlog.INFO,
 			"status", "metrics_disabled",
@@ -47,9 +51,37 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 		return nil, nil
 	}
 
-	var err error
 	var sinks []metrics.Sink
-	var closer io.Closer
+	var closers metricsClosers
+	providers := strings.Split(cfg.Provider, ",")
+	if err := validateMetricsProviders(cfg, providers); err != nil {
+		return nil, err
+	}
+	var endpoint *prometheusServer
+	var newPromSink *prometheus.Sink
+	var newCWSink *cloudwatch.Sink
+	if slices.Contains(providers, "prometheus") && cfg.Prometheus.Addr != "" {
+		endpoint, err = newPrometheusServer(cfg.Prometheus)
+		if err != nil {
+			return nil, err
+		}
+		closers = append(closers, endpoint)
+	}
+	// Roll back every sink created by this call so a failed call can be retried.
+	defer func() {
+		if err != nil {
+			if endpoint != nil {
+				err = errors.CombineErrors(err, endpoint.Close())
+			}
+			if newPromSink != nil {
+				prom.Unregister(newPromSink)
+				promSink = nil
+			}
+			if newCWSink != nil {
+				cwSink = nil
+			}
+		}
+	}()
 
 	mcfg := &metrics.Config{
 		EnableHostname:       false,
@@ -78,17 +110,9 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 		}
 	}
 
-	providers := strings.Split(cfg.Provider, ",")
-
 	for _, p := range providers {
 		switch p {
 		case "prometheus":
-			if promSink != nil {
-				return nil, errors.New("prometheus sink already initialized")
-			}
-			if cfg.Prometheus == nil {
-				return nil, errors.New("metrics: provider prometheus requires the prometheus config section")
-			}
 			// Remove Go collector
 			prom.Unregister(collectors.NewGoCollector())
 			prom.Unregister(collectors.NewBuildInfoCollector())
@@ -100,30 +124,14 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 				Help:       mcfg.Help(describe, pmetricskey.Metrics),
 			}
 
-			promSink, err = prometheus.NewSinkFrom(ops)
+			newPromSink, err = prometheus.NewSinkFrom(ops)
 			if err != nil {
 				return nil, errors.WithMessage(err, "failed to create prometheus sink")
 			}
+			promSink = newPromSink
 			sinks = append(sinks, promSink)
 
-			if cfg.Prometheus.Addr != "" {
-				go func() {
-					logger.KV(xlog.INFO,
-						"status", "starting_prometheus",
-						"endpoint", cfg.Prometheus.Addr)
-					// remove Prom metrics
-					//h := promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{})
-					logger.Fatal(http.ListenAndServe(cfg.Prometheus.Addr, promhttp.Handler()).Error())
-				}()
-			}
-
 		case "cloudwatch":
-			if cwSink != nil {
-				return nil, errors.New("cloudwatch sink already initialized")
-			}
-			if cfg.CloudWatch == nil {
-				return nil, errors.New("metrics: provider cloudwatch requires the cloudwatch config section")
-			}
 			c := cloudwatch.Config{
 				AwsRegion:       cfg.CloudWatch.AwsRegion,
 				AwsEndpoint:     cfg.CloudWatch.AwsEndpoint,
@@ -133,26 +141,18 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 				WithCleanup:     true, // reset after each Flush
 			}
 
-			cwSink, err = cloudwatch.NewSink(&c)
+			newCWSink, err = cloudwatch.NewSink(&c)
 			if err != nil {
-				return nil, err
+				return nil, errors.WithMessage(err, "failed to create cloudwatch sink")
 			}
+			cwSink = newCWSink
 			sinks = append(sinks, cwSink)
-
-			ctxcloser := &contextCloser{
+			closers = append(closers, &contextCloser{
 				ctx: context.Background(),
-			}
-
-			go cwSink.Run(ctxcloser.ctx)
-			closer = ctxcloser
-
-		case "inmem", "inmemory":
-
-		case "":
-
-		default:
-			return nil, errors.Errorf("metrics provider %q not supported", cfg.Provider)
+			})
 		}
+		// "inmem", "inmemory" and "" need no sink; validateMetricsProviders
+		// has already rejected unknown providers.
 	}
 	var sink metrics.Sink
 
@@ -163,9 +163,8 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	}
 
 	if sink != nil {
-		_, err := metrics.NewGlobal(mcfg, sink)
-		if err != nil {
-			return nil, err
+		if _, err = metrics.NewGlobal(mcfg, sink); err != nil {
+			return nil, errors.WithMessage(err, "failed to initialize global metrics")
 		}
 		pmetricskey.StatsVersion.SetGauge(float64(commitNumber))
 	}
@@ -182,7 +181,55 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 		"tags", mcfg.GlobalTags,
 	)
 
+	// Start background work only after every fallible step has succeeded.
+	if newCWSink != nil {
+		go newCWSink.Run(context.Background())
+	}
+	if endpoint != nil {
+		endpoint.start()
+	}
+	if len(closers) > 0 {
+		closer = closers
+	}
 	return closer, nil
+}
+
+// Validate all provider choices before binding or registering any sink.
+func validateMetricsProviders(cfg *config.Metrics, providers []string) error {
+	seen := make(map[string]bool)
+	for _, p := range providers {
+		switch p {
+		case "prometheus":
+			if promSink != nil || seen[p] {
+				return errors.New("prometheus sink already initialized")
+			}
+			if cfg.Prometheus == nil {
+				return errors.New("metrics: provider prometheus requires the prometheus config section")
+			}
+		case "cloudwatch":
+			if cwSink != nil || seen[p] {
+				return errors.New("cloudwatch sink already initialized")
+			}
+			if cfg.CloudWatch == nil {
+				return errors.New("metrics: provider cloudwatch requires the cloudwatch config section")
+			}
+		case "inmem", "inmemory", "":
+		default:
+			return errors.Errorf("metrics provider %q not supported", p)
+		}
+		seen[p] = true
+	}
+	return nil
+}
+
+type metricsClosers []io.Closer
+
+func (c metricsClosers) Close() error {
+	var err error
+	for _, closer := range c {
+		err = errors.CombineErrors(err, closer.Close())
+	}
+	return err
 }
 
 // contextCloser flushes the CloudWatch sink on Close.

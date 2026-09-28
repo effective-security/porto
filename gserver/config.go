@@ -13,6 +13,7 @@ import (
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/xhttp/identity"
+	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/effective-security/x/netutil"
 )
 
@@ -75,6 +76,15 @@ type Config struct {
 	// TrustedProxyCIDRs permits these socket peers to supply forwarding headers.
 	// By default, only the socket address is used for client IP and scheme.
 	TrustedProxyCIDRs []string `json:"trusted_proxy_cidrs,omitempty" yaml:"trusted_proxy_cidrs,omitempty"`
+
+	// Timeouts bounds HTTP reads, cmux detection and eager TLS handshakes.
+	// Zero fields select limits defaults; negative fields disable deadlines.
+	Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
+
+	// MaxRequestBody limits HTTP body bytes, including TLS gRPC/gRPC-Web streams.
+	// Zero uses limits.DefaultMaxRequestBody; negative disables the limit.
+	// Native gRPC on plain listeners uses MaxRecvMsgSize instead.
+	MaxRequestBody int64 `json:"max_request_body,omitempty" yaml:"max_request_body,omitempty"`
 
 	// Timeout settings
 	Timeout struct {

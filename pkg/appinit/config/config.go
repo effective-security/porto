@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/effective-security/porto/xhttp/limits"
+)
 
 // Metrics specifies the metrics pipeline configuration for appinit.Metrics.
 type Metrics struct {
@@ -48,6 +52,11 @@ type Prometheus struct {
 	// Expiration is the duration a metric is valid for, after which it will be
 	// untracked. If the value is zero, a default expiration applied
 	Expiration time.Duration `json:"expiration,omitempty" yaml:"expiration,omitempty"`
+	// Timeouts configures HTTP read deadlines; zero fields select shared defaults.
+	Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
+	// MaxRequestBody limits HTTP request bytes; zero uses the shared default,
+	// and a negative value disables it.
+	MaxRequestBody int64 `json:"max_request_body,omitempty" yaml:"max_request_body,omitempty"`
 }
 
 // CloudWatch configures the CloudWatch sink. AdditionalTags and ReplaceTags

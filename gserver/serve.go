@@ -74,12 +74,13 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			clientauthType = tls.RequireAndVerifyClientCert
 		}
 		tlsInfo = &transport.TLSInfo{
-			CertFile:       from.CertFile,
-			KeyFile:        from.KeyFile,
-			TrustedCAFile:  from.TrustedCAFile,
-			ClientCAFile:   from.ClientCAFile,
-			ClientAuthType: clientauthType,
-			CipherSuites:   from.CipherSuites,
+			CertFile:         from.CertFile,
+			KeyFile:          from.KeyFile,
+			TrustedCAFile:    from.TrustedCAFile,
+			ClientCAFile:     from.ClientCAFile,
+			ClientAuthType:   clientauthType,
+			CipherSuites:     from.CipherSuites,
+			HandshakeTimeout: cfg.Timeouts.Handshake,
 			// CRLVerifier : TODO
 		}
 
@@ -217,6 +218,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	router := restRouter(s)
 
 	m := cmux.New(sctx.listener)
+	m.SetReadTimeout(s.cfg.Timeouts.WithDefaults().Handshake)
 
 	if sctx.insecure {
 		gsInsecure = grpcServer(s, nil, sctx.gopts...)
@@ -227,12 +229,14 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = configureHandlers(s, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
+		handler = marshal.LimitRequestBody(handler, s.cfg.MaxRequestBody)
 		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
 		srv := &http.Server{
 			Handler: handler,
 			//ErrorLog: logger, // do not log user error
 		}
+		s.cfg.Timeouts.ApplyHTTP(srv)
 
 		httpL := m.Match(cmux.HTTP1())
 		go func() { errHandler(srv.Serve(httpL)) }()
@@ -251,6 +255,9 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = sctx.grpcHandlerFunc(gsSecure, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
+		// P-077: this limit and Timeouts.Read also bound native gRPC streams.
+		// P-078: an early 413 bypasses CORS, telemetry and gRPC status.
+		handler = marshal.LimitRequestBody(handler, s.cfg.MaxRequestBody)
 		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
 		srv := &http.Server{
@@ -258,6 +265,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 			TLSConfig: sctx.tlsInfo.Config(),
 			//ErrorLog:  logger, // do not log user error
 		}
+		s.cfg.Timeouts.ApplyHTTP(srv)
 		grpcL, err := transport.NewTLSListener(m.Match(cmux.Any()), sctx.tlsInfo)
 		if err != nil {
 			return err

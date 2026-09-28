@@ -25,7 +25,8 @@ xhttp/
   header/           header name and content-type constants
   httperror/        structured API errors, HTTP ↔ gRPC code mapping
   identity/         caller identity + client IP in request contexts
-  marshal/          JSON response writing (gzip, ?pp) and strict decoding
+  marshal/          JSON response writing (gzip, ?pp), bounded bodies and strict decoding
+  limits/           Shared timeout and body-size defaults
 pkg/
   retriable/        HTTP client: retry policy, failover, Bearer/DPoP, nonces, token storage
   rpcclient/        gRPC client builder from Config
@@ -61,14 +62,14 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | `xhttp/correlation`                                                                                                             | `pkg/streamctx`, `xhttp/header`                                                                                                                                   |
 | `xhttp/httperror`                                                                                                               | `xhttp/correlation`, `xhttp/header`                                                                                                                               |
 | `xhttp/identity`                                                                                                                | `pkg/streamctx`, `xhttp/header`, `xhttp/httperror`, `xhttp/marshal`                                                                                               |
-| `xhttp/marshal`                                                                                                                 | `xhttp/header`, `xhttp/httperror`                                                                                                                                 |
+| `xhttp/marshal`                                                                                                                 | `xhttp/header`, `xhttp/httperror`, `xhttp/limits`                                                                                                                                 |
 | `pkg/retriable`                                                                                                                 | `gserver/credentials`, `pkg/tlsconfig`, `xhttp/correlation`, `xhttp/header`, `xhttp/httperror`                                                                    |
 | `pkg/rpcclient`                                                                                                                 | `gserver/credentials`, `pkg/retriable`, `xhttp/httperror`                                                                                                         |
 | `pkg/redisclient`, `pkg/cache`                                                                                                  | `pkg/tlsconfig` (and `gserver.TLSInfo` for config)                                                                                                                |
-| `pkg/transport`                                                                                                                 | `pkg/crlcache`, `pkg/tlsconfig`                                                                                                                                   |
-| `pkg/appinit`                                                                                                                   | `pkg/appinit/config`, `metricskey`                                                                                                                                |
+| `pkg/transport`                                                                                                                 | `pkg/crlcache`, `pkg/tlsconfig`, `xhttp/limits`                                                                                                                                   |
+| `pkg/appinit`                                                                                                                   | `pkg/appinit/config`, `metricskey`, `xhttp/marshal`; `pkg/appinit/config` imports `xhttp/limits`                                                                                                                                |
 | `tests/mockappcontainer`                                                                                                        | `gserver`, `pkg/discovery`                                                                                                                                        |
-| `xhttp/header`, `pkg/tlsconfig`, `pkg/tasks`, `pkg/discovery`, `pkg/crlcache`, `pkg/streamctx`, `metricskey`, `tests/testutils` | none                                                                                                                                                              |
+| `xhttp/header`, `xhttp/limits`, `pkg/tlsconfig`, `pkg/tasks`, `pkg/discovery`, `pkg/crlcache`, `pkg/streamctx`, `metricskey`, `tests/testutils` | none                                                                                                                                                              |
 
 ## Concept index
 
@@ -123,7 +124,8 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | CPU profiling                               | pkg/appinit                                | init.go                          | `CPUProfiler`                                                              |
 | static response headers                     | gserver                                    | config.go                        | `Config.HTTPHeaders`, `Config.Validate`                                    |
 | max message size (gRPC)                     | gserver, pkg/rpcclient                     | options.go, client.go            | `MaxRecvMsgSize`, `MaxSendMsgSize`, `defaultMaxCallSendMsgSize`            |
-| max request size (REST, advisory)           | restserver                                 | server.go                        | `MaxRequestSize`                                                           |
+| HTTP body limits | xhttp/marshal, gserver, restserver | limits.go, config.go, server.go | `LimitRequestBody`, `DecodeBody`, `Config.MaxRequestBody`, `WithMaxRequestBody`, `MaxRequestSize` |
+| Shared server timeouts | xhttp/limits, gserver, restserver, pkg/appinit/config | limits.go, config.go, server.go | `Timeouts`, `Config.Timeouts`, `WithTimeouts`, `Prometheus.Timeouts` |
 | header copy / trailer prefix handling       | gserver                                    | header.go                        | `copyHeader`, `replaceInKeys`                                              |
 | header name constants                       | xhttp/header                               | headers.go                       | `XCorrelationID`, `Authorization`, `Cookie`, `ProxyAuthorization`, ...      |
 | correlation ID (HTTP)                       | xhttp/correlation                          | correlation.go                   | `NewHandler`, `ID`                                                         |
@@ -236,15 +238,16 @@ Invariants:
 - Process-global: package logger; `WarnUnaryRequestLatency`. The gRPC gzip compressor is registered by blank import.
 - Every name in `Config.Services` must exist in the factory map; factories run through `dig.Container.Invoke`. The container must provide `discovery.Discovery` and, when JWT/DPoP is enabled, `jwt.Parser`.
 - Listen URL schemes: `http`, `https`, `unix`, `unixs`; no scheme → https when TLS is configured. The same address listed twice yields one listener serving both secure and insecure.
+- Network limits: `Config.Timeouts` uses `xhttp/limits` defaults (header 10s, read 30s, idle 60s, handshake/detection 10s); zero selects defaults and negatives disable individual limits. cmux detection and `transport.TLSInfo.HandshakeTimeout` use Handshake. Both HTTP servers limit bodies to `MaxRequestBody` (default 10 MiB), including gRPC/gRPC-Web over TLS. Native plaintext gRPC keeps its per-message limits. Raise or disable read/body limits for large uploads and long request streams. `Timeout.Request` remains shutdown-only.
 - Plain listeners: cmux routes HTTP/2 → gRPC (h2c), HTTP/1 → REST; gRPC-Web and `HTTPHeaders` are only handled on TLS listeners, where everything goes through `http.Server` and `grpcHandlerFunc` selects by `Content-Type`.
-- HTTP chain (outer → inner): trusted proxy policy → rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. The default limiter keys on the client IP resolved by `NewTrustedProxyHandler`: tollbooth checks a shallow request copy whose `RemoteAddr` is that bare IP, so `X-Rate-Limit-Request-Remote-Addr` echoes the limiter key rather than the socket peer; the handler and `OnLimitReached` get the original request; a request without a client IP is not limited. Explicit `headers_ip_lookups` uses `tollbooth.LimitHandler` as is, overrides that policy, and must be used only when a proxy overwrites the chosen headers. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
+- HTTP chain (outer → inner): trusted proxy policy → body limiter → rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. The default limiter keys on the client IP resolved by `NewTrustedProxyHandler`: tollbooth checks a shallow request copy whose `RemoteAddr` is that bare IP, so `X-Rate-Limit-Request-Remote-Addr` echoes the limiter key rather than the socket peer; the handler and `OnLimitReached` get the original request; a request without a client IP is not limited. Explicit `headers_ip_lookups` uses `tollbooth.LimitHandler` as is, overrides that policy, and must be used only when a proxy overwrites the chosen headers. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
 - Headers read: `Content-Type`, `Origin`, `Accept-Encoding`, `X-GRPC-Stream`. For gRPC-Web, CORS headers are written only when `CORS.GetEnabled()` and an allowed `Origin` is present. Nonempty `AllowedOrigins` uses `rs/cors` matching, including its origin patterns; explicit `*` allows all origins and an empty list allows none. `Start` rejects an enabled `*` with `AllowCredentials` (`CORS.Validate`) and, while CORS is enabled, any `Access-Control-*` name in `HTTPHeaders` (`Config.Validate`, case-insensitive), so static headers cannot bypass the CORS policy; gRPC-Web never sends `Access-Control-Allow-Credentials` with `Access-Control-Allow-Origin: *`. A disallowed gRPC-Web POST gets HTTP 403; a disallowed preflight gets no allow-origin header. REST CORS is not request or CSRF protection: `rs/cors` still runs the handler for a disallowed actual request and only omits CORS response headers. `Access-Control-Expose-Headers` merges configured and service names with response and gRPC trailer names without case-insensitive duplicates; service response metadata cannot override server CORS policy headers. Reflected and denied origins add `Vary: Origin`; `prepareHeaders` merges service `Vary` header and trailer metadata without dropping it. Other headers written: `Content-Encoding: gzip`, `Config.HTTPHeaders`.
 - gRPC-Web compression is enabled when `Accept-Encoding` contains `gzip` as a substring (q-values ignored, P-076) and `X-GRPC-Stream` is absent.
 - Compressed gRPC-Web responses borrow a gzip writer from a pool; `Close` is idempotent because both `finishRequest` and the handler's deferred cleanup call it. Writers are reset before reuse and release the previous response writer on return to the pool. After `Close`, body writes to a compressed response return `errWriteAfterClose` and late trailer writes are logged and dropped, so raw bytes never follow the gzip footer.
 - Close ordering: services `Close()` → `stopc` → per-listener `http.Shutdown` + `grpc.Stop`/`GracefulStop` within `Timeout.Request` (default 3s) → listeners closed. `Err()` is buffered and never closed. The TLS reloader is not closed (P-004).
 - Keepalive: `MaxConnectionIdle` fixed at 5m; enforcement `MinTime` only if >0; `Time/Timeout` only if both >0.
 
-Tests: `server_test.go` and `example_test.go` start real servers on random ports using `tests/mockappcontainer` and `tests/testutils.CreateURL`; TLS fixtures in `testdata/test-server{,-key,-rootca}.pem`; `grpc_web_test.go` and `grpc_web_bench_test.go` unit-test the gRPC-Web writer with `httptest.ResponseRecorder`; `serve_test.go` drives `grpcHandlerFunc` with a bare `grpc.NewServer()`.
+Tests: `server_test.go` and `example_test.go` start real servers on random ports using `tests/mockappcontainer` and `tests/testutils.CreateURL`; TLS fixtures in `testdata/test-server{,-key,-rootca}.pem`; `grpc_web_test.go` and `grpc_web_bench_test.go` unit-test the gRPC-Web writer with `httptest.ResponseRecorder`; `serve_test.go` drives `grpcHandlerFunc` with a bare `grpc.NewServer()`; `limits_test.go` checks protocol detection, stalled headers/bodies and HTTP body limits on plain and TLS listeners, including HTTP/2 unknown-length bodies and stalled request streams.
 
 ### github.com/effective-security/porto/gserver/credentials
 
@@ -308,20 +311,21 @@ Files:
 Entry points:
 
 - `New(version, ipaddr, Config, *tls.Config) (*HTTPServer, error)` — nil TLS means plain HTTP.
-- `WithAuthz` / `WithIdentityProvider` / `WithTrustedProxies` / `WithCORS` / `WithShutdownTimeout` / `WithMuxFactory` — configure before `StartHTTP`; all but `WithMuxFactory` return the server for chaining.
+- `WithAuthz` / `WithIdentityProvider` / `WithTrustedProxies` / `WithCORS` / `WithShutdownTimeout` / `WithTimeouts` / `WithMaxRequestBody` / `WithMuxFactory` — configure before `StartHTTP`; all but `WithMuxFactory` return the server for chaining.
 - `AddService`, `StartHTTP`, `StopHTTP`, `NewMux`, `IsReady`, `OnEvent`; `Router` methods; `GetServerURL`, `GetServerBaseURL`.
 
 Invariants:
 
 - `StartHTTP` binds HTTP and HTTPS listeners synchronously and returns bind errors; serving remains asynchronous. A failed bind can be retried, but a successfully started instance cannot be restarted.
 - `AddService` panics on duplicate names; `NewMux` panics if the authz handler cannot be built.
-- Chain (outer → inner): trusted proxy policy → correlation → identity → metrics → request logger → authz (if set) → ready → CORS (if set) → router. `WithTrustedProxies` takes a policy from `identity.ParseTrustedProxies` (CIDR errors are returned there); nil trusts no proxy. `StartHTTP` applies the policy to custom mux factories too. Default identity mapper is `identity.GuestIdentityMapper`; logger granularity is `time.Millisecond`.
+- Chain (outer → inner): trusted proxy policy → correlation → body limiter → identity → metrics → request logger → authz (if set) → ready → CORS (if set) → router. `WithTrustedProxies` takes a policy from `identity.ParseTrustedProxies` (CIDR errors are returned there); nil trusts no proxy. `StartHTTP` applies the policy to custom mux factories too. Default identity mapper is `identity.GuestIdentityMapper`; logger granularity is `time.Millisecond`.
 - `StopHTTP`: mark unready → wait for Started callbacks → broadcast Stopping → `Shutdown` with `shutdownTimeout` (default 5s) → `Service.Close()` for all → broadcast Stopped. Calls before start do nothing; concurrent and repeated calls wait for the first shutdown. A timeout still closes services after `Shutdown` returns. Lifecycle callbacks must not call `StopHTTP` synchronously.
 - `serving` is an `atomic.Bool`; `IsReady` reads services under `lock.RLock`. `HTTPServer.Config()` and `HTTPConfig()` return the same configuration. Event handlers are copied under `lock.RLock` before callbacks run, so callbacks may register handlers.
 - `GetPort` uses `net.SplitHostPort` for host:port and defaults bare IPv6 literals to port 443. `GetHostName` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` rebuild host:port with `net.JoinHostPort`.
-- `GetServerURL` accepts `X-Forwarded-Proto` only for a configured trusted peer and only when the value is `http` or `https`. 404 → JSON `not_found`. `MaxRequestSize` (64 MiB) is advisory only (P-026).
+- `GetServerURL` accepts `X-Forwarded-Proto` only for a configured trusted peer and only when the value is `http` or `https`. 404 → JSON `not_found`. `MaxRequestSize` is enforced (10 MiB). `WithMaxRequestBody` overrides it, including for custom muxes; zero selects the default, negative disables it.
+- `WithTimeouts` applies shared HTTP defaults (header 10s, read 30s, idle 60s); zero selects defaults, negative disables an individual deadline. Native net/http TLS handshakes use the smaller positive header/read timeout; Handshake is for cmux/eager transport listeners. No write deadline is imposed.
 
-Tests: `rest_test.go` suite builds CA/server/client chains with `xpki/testca` in a temp dir; `server_test.go` uses random ports via `tests/testutils`; `router_test.go` CORS; `example_test.go` uses `testdata/test-server*.pem`.
+Tests: `rest_test.go` suite builds CA/server/client chains with `xpki/testca` in a temp dir; `server_test.go` uses random ports via `tests/testutils`; `router_test.go` CORS; `example_test.go` uses `testdata/test-server*.pem`; `limits_test.go` checks real stalled headers/bodies, idle connections and custom-mux body limits.
 
 ### github.com/effective-security/porto/restserver/authz
 
@@ -393,6 +397,7 @@ Invariants:
 
 - Wire JSON `{code, message, request_id?}`; `ManyError` adds `errors{}`.
 - `WithContext`/`WithCause`/`WriteHTTPResponse` mutate the receiver; do not share `Error` values across requests.
+- `RequestTooLarge` returns HTTP 413 with `request_too_large`.
 - Mapping: `PermissionDenied` and `Unauthenticated` → 401 (P-027); `Canceled`/`DeadlineExceeded` → 408; `CodeTimeout` → `DeadlineExceeded`; unknown codes → RPCStatus 0.
 - `Wrap` classification is substring-based ("invalid"/"bad"/"400" → 400; "not found"/"404" → 404; "timeout"/"deadline"/"cancel" → 408).
 - `Is` compares Code and Message; `Unwrap` skips one wrapper level of the cause.
@@ -414,16 +419,26 @@ Invariants:
 
 Purpose: JSON response writing (with errors, gzip, pretty-print) and strict JSON request decoding via ugorji codec.
 
-Files: `marshal.go` (`WriteJSON`, `WritePlainJSON`, `WriteHTTPResponse`, `NewRequest`), `json.go` (`PrettyPrintSetting`, `NewEncoder`, `EncodeBytes`, `DecodeBytes`, `Decode`, `DecodeBody`, `DecoderHandle`).
+Files: `limits.go` (`LimitRequestBody`, shared body-limit policy), `marshal.go` (`WriteJSON`, `WritePlainJSON`, `WriteHTTPResponse`, `NewRequest`), `json.go` (`PrettyPrintSetting`, `NewEncoder`, `EncodeBytes`, `DecodeBytes`, `Decode`, `DecodeBody`, `DecoderHandle`).
 
 Invariants:
 
 - First non-nil body wins; `WriteHTTPResponse` implementers write themselves; other errors → 500 `unexpected` with `err.Error()` as message (P-032); non-404 errors are logged.
 - Success: 200, `application/json`, gzip for payloads of at least 1 KiB when `Accept-Encoding` allows gzip with positive quality (a missing `q` means 1, a malformed or out-of-range `q` means 0; explicit gzip denial overrides `*`), pretty when `?pp`. `Vary: Accept-Encoding` is merged with existing values; gzip writers are pooled. `r` must be non-nil.
-- Decoding is strict (`ErrorIfNoField`), maps → `map[string]any`, no size limit (P-026).
+- Decoding is strict (`ErrorIfNoField`), maps → `map[string]any`. `DecodeBody` defaults to a 10 MiB body cap via `http.MaxBytesReader`; `LimitRequestBody` overrides it (zero = default, negative = disabled) and rejects known oversized Content-Length before handlers run. DecodeBody consumes the remaining bounded body after decoding so trailing data cannot bypass the cap; with the limit disabled the remainder is left unread. An early 413 from `LimitRequestBody` bypasses CORS and telemetry (P-078). Overflow returns/writes a structured 413; malformed JSON remains 400. Other body readers must handle `*http.MaxBytesError`. `Decode`/`DecodeBytes` remain unbounded.
 - Encoder handles are package globals initialised in `init`.
 
-Tests: `marshal_test.go` covers negotiation, the compression threshold, `Vary`, decompressed payloads, and log line numbers derived from `runtime.Caller`; `marshal_bench_test.go` measures compressed responses.
+Tests: `marshal_test.go` covers negotiation, the compression threshold, `Vary`, decompressed payloads, and log line numbers derived from `runtime.Caller`; `marshal_bench_test.go` measures compressed responses. `limits_test.go` covers exact/unknown-length/oversized/trailing bodies, defaults and overrides.
+
+### github.com/effective-security/porto/xhttp/limits
+
+Purpose: shared conservative server timeout and request-body defaults without internal dependencies.
+
+Files: `doc.go`, `limits.go` (`Timeouts`, `WithDefaults`, `ApplyHTTP`, default constants).
+
+Invariants: header 10s, read 30s, idle 60s, handshake/detection 10s, body 10 MiB. Zero selects defaults; negatives explicitly disable individual limits. Header applies to HTTP/1.x through net/http.ReadHeaderTimeout; net/http has no per-stream HTTP/2 header deadline. HTTP timeout application preserves negative values to avoid net/http fallback deadlines; no response write deadline is set. Call before serving. Native net/http TLS handshakes use the smaller positive header/read deadline; Handshake applies to cmux and eager transport listeners.
+
+Tests: `limits_test.go` covers defaults, overrides, explicit disabling and write-timeout preservation.
 
 ### github.com/effective-security/porto/pkg/retriable
 
@@ -545,29 +560,29 @@ Files: `doc.go`, `transport.go` (logger), `tls.go` (`TLSInfo`: `ServerTLSWithRel
 
 Invariants:
 
-- `TLSInfo` uses only `CertFile/KeyFile/TrustedCAFile/ClientCAFile/ClientAuthType/CipherSuites/CRLVerifier/HandshakeFailure`; the other fields are documented as unenforced (P-052).
+- `TLSInfo` uses only `CertFile/KeyFile/TrustedCAFile/ClientCAFile/ClientAuthType/CipherSuites/CRLVerifier/HandshakeFailure/HandshakeTimeout`; the other fields are documented as unenforced (P-052).
 - CRL check only sees `VerifiedChains` (needs ClientAuth ≥ `VerifyClientCertIfGiven`); Revoked → reject; verify error or Unknown → log and allow (fail-open).
-- No handshake deadline (P-054); `Accept` errors on keepalive listeners are stack-wrapped (P-053); keepalive `Accept` panics for non-TCP conns.
+- Eager handshakes have a default 10s deadline (`TLSInfo.HandshakeTimeout`, zero = default, negative = disabled), cleared before returning a successful connection. Deadline and handshake errors go to HandshakeFailure and the connection is closed; `Accept` errors on keepalive listeners are stack-wrapped (P-053); keepalive `Accept` panics for non-TCP conns.
 - Reloader interval is 5 minutes; `TLSInfo.Close` stops it.
 - `ServerTLSWithReloader` clears static certificates after installing `GetCertificate`, so handshakes without SNI use the current pair and receive expiry errors.
 
-Tests: `tls_test.go` `init()` builds a CA/intermediate/server chain with `xpki/testca` under `os.TempDir()/test-transport` and verifies a handshake without SNI uses the callback; listener tests start `restserver` over the listener with a fake verifier.
+Tests: `tls_test.go` `init()` builds a CA/intermediate/server chain with `xpki/testca` under `os.TempDir()/test-transport` and verifies a handshake without SNI uses the callback; listener tests start `restserver` over the listener with a fake verifier; `limits_test.go` checks stalled handshakes and application I/O after the handshake deadline.
 
 ### github.com/effective-security/porto/pkg/appinit and pkg/appinit/config
 
 Purpose: service bootstrap: logging setup, metrics pipeline (Prometheus/CloudWatch), CPU profiler; `config.Metrics` is the YAML/JSON struct.
 
-Files: `init.go` (`LogConfig`, `Flags`, `Logs`, `CPUProfiler`), `metrics.go` (`Metrics`, `contextCloser`), `cpu_profiler.go`; `config/config.go` (`Metrics`, `Prometheus`, `CloudWatch`).
+Files: `init.go` (`LogConfig`, `Flags`, `Logs`, `CPUProfiler`), `metrics.go` (`Metrics`, `contextCloser`, `metricsClosers`), `prometheus.go` (bounded, closable HTTP endpoint), `cpu_profiler.go`; `config/config.go` (`Metrics`, `Prometheus`, `CloudWatch`).
 
 Invariants:
 
 - Process-global side effects: `xlog.SetFormatter` (or the logrotate formatter installed by `logrotate.Initialize`, which `Logs` keeps and only adjusts), `metrics.NewGlobal`, default Prometheus registry, `xlog.OnError` hook, package vars `promSink`/`cwSink` (once per process).
-- `provider` is comma-separated: `prometheus | cloudwatch | inmem`; empty or disabled → `(nil, nil)`. A provider without its config block is an error. Prometheus HTTP endpoint runs in a goroutine with `logger.Fatal` on error (P-055). Reads env `NODE_NAME` for the `node` tag.
+- `provider` is comma-separated: `prometheus | cloudwatch | inmem`; empty or disabled → `(nil, nil)`. A provider without its config block is an error. Provider choices are validated before binding or registering sinks. Prometheus binds synchronously before sink initialization; bind errors are returned without initializing the sink, later initialization errors release the listener and reset the Prometheus and CloudWatch sinks created by the call, so a failed call can be retried; the Prometheus endpoint and the CloudWatch `Run` goroutine start only after initialization succeeds. Its HTTP server uses shared timeout/body defaults (`prometheus.timeouts`, `prometheus.max_request_body`). The returned closer closes active connections and the listener and waits for Serve to exit; concurrent/repeated endpoint closes are safe. Unexpected serve errors are logged, never fatal. The endpoint closer ignores an already-closed listener error. Sinks remain initialized once per process after Close; initialize Metrics serially. Reads env `NODE_NAME` for the `node` tag.
 - Nil closers are normal; callers must nil-check.
 - `LogDir` `/dev/null` discards; set → logrotate (10 MB / 10 days, buffered) with stderr as an extra sink when `LogStd`.
-- Config keys: `disabled, provider, prefix, prefix_for_number_labels, prometheus{addr,expiration}, runtime_metrics, cloudwatch{aws_region,namespace,publish_interval,add_tags,replace_tags,with_sample_count}, global_tags, allowed_prefixes, blocked_prefixes`; `add_tags`/`replace_tags` are unused and `AwsEndpoint` is untagged (P-073).
+- Config keys: `disabled, provider, prefix, prefix_for_number_labels, prometheus{addr,expiration,timeouts{header,read,idle,handshake},max_request_body}, runtime_metrics, cloudwatch{aws_region,namespace,publish_interval,add_tags,replace_tags,with_sample_count}, global_tags, allowed_prefixes, blocked_prefixes`; `add_tags`/`replace_tags` are unused and `AwsEndpoint` is untagged (P-073).
 
-Tests: `init_test.go` (log branches with `t.TempDir`, asserts the rotating file receives output), `cpu_profiles_test.go`. No `Metrics` tests.
+Tests: `init_test.go` (log branches with `t.TempDir`, asserts the rotating file receives output), `cpu_profiles_test.go`. `metrics_test.go` covers Prometheus bind errors/retry, Prometheus and CloudWatch sink-failure cleanup, provider validation, scrapes, header deadlines and concurrent close. Global-state tests run serially.
 
 ### github.com/effective-security/porto/pkg/discovery
 

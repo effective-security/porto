@@ -8,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/httperror"
+	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/ugorji/go/codec"
 )
 
@@ -113,12 +114,35 @@ func Decode(r io.Reader, result any) error {
 }
 
 // DecodeBody decodes the JSON request body into result. On failure it
-// writes a 400 invalid_json response (including the decode error text) to w
-// and returns the error, so callers can simply return. The body is not
-// size-limited.
+// writes a 400 invalid_json response, or 413 request_too_large on overflow,
+// and returns the error, so callers can simply return. The default limit is
+// limits.DefaultMaxRequestBody; LimitRequestBody overrides it. After a successful
+// decode, the remaining body is consumed within the limit so trailing bytes
+// cannot bypass the size check; with the limit disabled it is left unread.
+// Decode and DecodeBytes remain unbounded.
 func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error {
+	maxBytes, limited := r.Context().Value(bodyLimitKey{}).(int64)
+	if !limited {
+		maxBytes = limits.DefaultMaxRequestBody
+		if err := limitRequestBody(w, r, maxBytes); err != nil {
+			WriteJSON(w, r, err)
+			return err
+		}
+	}
 	err := Decode(r.Body, result)
+	// Draining only enforces the limit; with the limit disabled it would just
+	// block on a body the client keeps open.
+	if err == nil && maxBytes >= 0 {
+		_, err = io.Copy(io.Discard, r.Body)
+		err = errors.WithMessage(err, "unable to read request body")
+	}
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			err = requestTooLarge(err)
+			WriteJSON(w, r, err)
+			return err
+		}
 		WriteJSON(
 			w, r,
 			httperror.New(

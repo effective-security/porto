@@ -34,4 +34,6 @@
 // metrics sink, the default Prometheus registry) and are meant to be called
 // once per process. Metrics also registers an xlog error hook that counts
 // logged errors in metricskey.HealthLogErrors.
+// Prometheus binds synchronously, returns bind errors to the caller, and uses
+// bounded HTTP read deadlines. Closing the metrics closer stops its endpoint.
 package appinit

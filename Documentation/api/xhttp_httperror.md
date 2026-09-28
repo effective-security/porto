@@ -430,7 +430,7 @@ RateLimitExceeded returns Error instance with RateLimitExceeded code
 func RequestTooLarge(msgFormat string, vals ...any) *Error
 ```
 
-RequestTooLarge returns Error instance with RequestTooLarge code
+RequestTooLarge returns an HTTP 413 error with the request\_too\_large code.
 
 <a name="Timeout"></a>
 ### func [Timeout](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L226>)

@@ -172,9 +172,9 @@ func NotFound(msgFormat string, vals ...any) *Error {
 	return New(http.StatusNotFound, CodeNotFound, msgFormat, vals...)
 }
 
-// RequestTooLarge returns Error instance with RequestTooLarge code
+// RequestTooLarge returns an HTTP 413 error with the request_too_large code.
 func RequestTooLarge(msgFormat string, vals ...any) *Error {
-	return New(http.StatusBadRequest, CodeRequestTooLarge, msgFormat, vals...)
+	return New(http.StatusRequestEntityTooLarge, CodeRequestTooLarge, msgFormat, vals...)
 }
 
 // FailedToReadRequestBody returns Error instance with FailedToReadRequestBody code

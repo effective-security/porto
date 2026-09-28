@@ -11,15 +11,6 @@ Introduce one opt-in setting (a trusted proxy CIDR list, or a
 `TrustProxyHeaders` flag) shared by both servers, default off, and key the
 rate limiter on `RemoteAddr` unless it is set. Retires P-007, P-018.
 
-## 2. Server hardening defaults
-
-Neither server sets `ReadHeaderTimeout`, `ReadTimeout` or a cmux read
-timeout; TLS handshakes have no deadline; request bodies are unbounded;
-the Prometheus endpoint uses `http.ListenAndServe`. Add a `Timeouts`
-config block (header, read, idle, handshake) and a body limit wired into
-`marshal.DecodeBody`, with conservative defaults and a documented override.
-Retires P-005, P-019, P-026, P-054, P-055.
-
 ## 3. gRPC-Web CORS parity with REST
 
 v0.41 routes gRPC-Web origin checks through `rs/cors` matching, honors
@@ -62,9 +53,9 @@ as the `uri` tag. Retires P-023.
 
 ## 10. Coverage and untested packages
 
-Coverage sits at 79.2% against an 80% gate. `pkg/crlcache`,
-`pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils` and
-`appinit.Metrics` have no tests; `gserver/roles` has no STS tests beyond
+B06 verification measured 83.5% coverage against a 90% gate. `pkg/crlcache`,
+`pkg/streamctx`, `pkg/appinit/config`, `metricskey` and `tests/testutils`
+have no dedicated tests; B06 added Prometheus lifecycle tests in `appinit.Metrics`; `gserver/roles` has no STS tests beyond
 URL validation. Retires P-035.
 
 ## 11. Follow up after xpki v1.0 upgrade

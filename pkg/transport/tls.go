@@ -15,7 +15,8 @@ import (
 // reloader. It is not safe for concurrent use while being initialized.
 //
 // Fields that are read by this package: CertFile, KeyFile, TrustedCAFile,
-// ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier, HandshakeFailure.
+// ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier, HandshakeFailure,
+// HandshakeTimeout.
 // InsecureSkipVerify, SkipClientSANVerify, ServerName, AllowedCN,
 // AllowedHostname and EmptyCN are currently not enforced.
 type TLSInfo struct {
@@ -46,6 +47,10 @@ type TLSInfo struct {
 	// HandshakeFailure is optionally called when a connection fails to handshake. The
 	// connection will be closed immediately afterwards.
 	HandshakeFailure func(*tls.Conn, error)
+
+	// HandshakeTimeout bounds each eager TLS handshake. Zero uses
+	// limits.DefaultHandshakeTimeout; a negative duration disables the deadline.
+	HandshakeTimeout time.Duration
 
 	// CipherSuites is a list of supported cipher suites.
 	// If empty, Go auto-populates it by default.
