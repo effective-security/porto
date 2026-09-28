@@ -67,3 +67,17 @@ HTTP proof verification (gserver/roles/roles.go:293) assumes an https origin whe
 Proof verification (gserver/roles/roles.go:518) and client proof signing (pkg/retriable/retriable.go:983) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
 
 The stricter JWT time, algorithm, and key checks may reject previously accepted tokens; Porto parses tokens supplied by callers and does not issue them here.
+
+## 12. Native gRPC transport on TLS listeners
+
+On TLS listeners `gserver` serves native gRPC through `http.Server` and
+`grpc.Server.ServeHTTP`. That transport reads request data eagerly into an
+unbounded buffer, without HTTP/2 flow control, and ignores the gRPC
+keepalive settings. v0.41 therefore clears the per-stream `Timeouts.Read`
+deadline for native gRPC but keeps `MaxRequestBody` as a per-stream total,
+and a stream over it fails with `Unavailable`. Plaintext listeners are only
+limited per message by `MaxRecvMsgSize`. To match them, hand TLS connections
+that carry `application/grpc` to `grpc.Server.Serve`, using credentials that
+report the TLS state of the connection that is already established. The same
+listener also carries REST and gRPC-Web, so the design must handle clients
+or proxies that send REST and gRPC over one HTTP/2 connection.

@@ -115,7 +115,8 @@ func Decode(r io.Reader, result any) error {
 
 // DecodeBody decodes the JSON request body into result. On failure it
 // writes a 400 invalid_json response, or 413 request_too_large on overflow,
-// and returns the error, so callers can simply return. The default limit is
+// and returns the error, so callers can simply return. A known oversized
+// Content-Length is rejected before any byte is read. The default limit is
 // limits.DefaultMaxRequestBody; LimitRequestBody overrides it. After a successful
 // decode, the remaining body is consumed within the limit so trailing bytes
 // cannot bypass the size check; with the limit disabled it is left unread.
@@ -124,10 +125,7 @@ func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error {
 	maxBytes, limited := r.Context().Value(bodyLimitKey{}).(int64)
 	if !limited {
 		maxBytes = limits.DefaultMaxRequestBody
-		if err := limitRequestBody(w, r, maxBytes); err != nil {
-			WriteJSON(w, r, err)
-			return err
-		}
+		limitRequestBody(w, r, maxBytes)
 	}
 	err := Decode(r.Body, result)
 	// Draining only enforces the limit; with the limit disabled it would just

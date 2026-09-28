@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestErrorCorrelation(t *testing.T) {
@@ -392,3 +394,105 @@ var (
 	ErrGRPCPermissionDenied = status.New(codes.PermissionDenied, "permission denied").Err()
 	ErrGRPCInvalidArgument  = status.New(codes.InvalidArgument, "invalid argument").Err()
 )
+
+// overWire returns a copy of m decoded from its protobuf encoding, as a gRPC
+// peer receives a status.
+func overWire[T proto.Message](t *testing.T, m T) T {
+	t.Helper()
+	b, err := proto.Marshal(m)
+	require.NoError(t, err)
+	out := m.ProtoReflect().New().Interface().(T)
+	require.NoError(t, proto.Unmarshal(b, out))
+	return out
+}
+
+func TestError_GRPCRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	inconsistent, err := status.New(codes.InvalidArgument, "big").WithDetails(&anypb.Any{
+		TypeUrl: "@httperror.code",
+		Value:   []byte(httperror.CodeRequestTooLarge),
+	})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name       string
+		err        error
+		rpc        codes.Code
+		httpStatus int
+		code       string
+		requestID  string
+	}{
+		{
+			name:       "request too large",
+			err:        httperror.RequestTooLarge("big").WithContext(ctx),
+			rpc:        codes.ResourceExhausted,
+			httpStatus: http.StatusRequestEntityTooLarge,
+			code:       httperror.CodeRequestTooLarge,
+			requestID:  cid,
+		},
+		{
+			name:       "many request too large",
+			err:        httperror.NewMany(http.StatusRequestEntityTooLarge, httperror.CodeRequestTooLarge, "big"),
+			rpc:        codes.ResourceExhausted,
+			httpStatus: http.StatusRequestEntityTooLarge,
+			code:       httperror.CodeRequestTooLarge,
+		},
+		{
+			name:       "rate limit keeps 429",
+			err:        httperror.RateLimitExceeded("slow down"),
+			rpc:        codes.ResourceExhausted,
+			httpStatus: http.StatusTooManyRequests,
+			code:       "too_many_requests",
+		},
+		{
+			name:       "grpc message size keeps 429",
+			err:        status.Error(codes.ResourceExhausted, "grpc: received message larger than max"),
+			rpc:        codes.ResourceExhausted,
+			httpStatus: http.StatusTooManyRequests,
+			code:       "too_many_requests",
+		},
+		{
+			name:       "invalid param",
+			err:        httperror.InvalidParam("id"),
+			rpc:        codes.InvalidArgument,
+			httpStatus: http.StatusBadRequest,
+			code:       "bad_request",
+		},
+		{
+			name:       "detail inconsistent with code is ignored",
+			err:        inconsistent.Err(),
+			rpc:        codes.InvalidArgument,
+			httpStatus: http.StatusBadRequest,
+			code:       "bad_request",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			received := status.ErrorProto(overWire(t, status.Convert(tc.err).Proto()))
+
+			e := httperror.NewFromPb(received)
+			assert.Equal(t, tc.rpc, e.RPCStatus)
+			assert.Equal(t, tc.httpStatus, e.HTTPStatus)
+			assert.Equal(t, tc.code, e.Code)
+			assert.Equal(t, tc.requestID, e.RequestID)
+
+			assert.Equal(t, tc.httpStatus, httperror.Status(received))
+
+			wrapped := httperror.Wrap(received, "proxied")
+			assert.Equal(t, tc.httpStatus, wrapped.HTTPStatus)
+			assert.Equal(t, tc.code, wrapped.Code)
+		})
+	}
+}
+
+func TestError_GRPCStatusWithoutRPCCode(t *testing.T) {
+	t.Parallel()
+	// A custom code has no gRPC mapping (OK), which cannot carry details.
+	e := httperror.New(http.StatusTeapot, "custom", "brew")
+	e.RequestID = "123"
+	st := e.GRPCStatus()
+	require.NotNil(t, st)
+	assert.Equal(t, codes.OK, st.Code())
+	assert.Empty(t, st.Details())
+}

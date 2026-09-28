@@ -284,7 +284,7 @@ var statusCode = map[string]codes.Code{
 	CodeNotReady:                codes.Unavailable,
 	CodeRateLimitExceeded:       codes.ResourceExhausted,
 	CodeRequestFailed:           codes.Unknown,
-	CodeRequestTooLarge:         codes.InvalidArgument, // P-079: converts back to 400
+	CodeRequestTooLarge:         codes.ResourceExhausted,
 	CodeTimeout:                 codes.DeadlineExceeded,
 	CodeTooEarly:                codes.ResourceExhausted,
 	CodeUnauthorized:            codes.PermissionDenied,

@@ -79,6 +79,7 @@ type Config struct {
 
 	// Timeouts bounds HTTP reads, cmux detection and eager TLS handshakes.
 	// Zero fields select limits defaults; negative fields disable deadlines.
+	// Read does not apply to native gRPC streams, on any listener.
 	Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
 
 	// MaxRequestBody limits HTTP body bytes, including TLS gRPC/gRPC-Web streams.

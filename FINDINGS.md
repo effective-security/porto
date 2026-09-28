@@ -86,9 +86,6 @@ byte-exact test.
 | P-074 | pkg/transport, pkg/tlsconfig            | `keepalive_listener.go`, `cipher_suites.go`                              | Modernization: `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones                                  | correctness | LOW      | Needs Approval |
 | P-075 | pkg/cache                               | `cache_test.go` `TestProvider/redis` (pub/sub)                           | Flaky under load: Redis `ReceiveMessage` hits a 5s i/o timeout; `require` used inside goroutines                                             | docs        | LOW      | Open           |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
-| P-077 | gserver                                 | `serve.go` `serveCtx.serve` (TLS listener)                               | TLS gRPC client/bidi streams are cut by `Timeouts.Read` (30s) and a cumulative `MaxRequestBody` (10 MiB)                                     | correctness | MEDIUM   | Needs Approval |
-| P-078 | gserver, restserver, xhttp/marshal      | `serve.go` `serveCtx.serve`; `server.go` `NewMux`; `limits.go`           | Early 413 from `LimitRequestBody` bypasses CORS, request logging and metrics; gRPC callers get JSON                                          | correctness | LOW      | Open           |
-| P-079 | xhttp/httperror                         | `codes.go` `statusCode`                                                  | `request_too_large` (HTTP 413) maps to gRPC `InvalidArgument`, which converts back to HTTP 400                                               | correctness | LOW      | Needs Approval |
 
 ## Details
 
@@ -303,24 +300,6 @@ byte-exact test.
 - Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
 - Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
-### P-077 TLS gRPC streams bounded by HTTP read and body limits
-
-- Evidence: on TLS listeners native gRPC is served through `http.Server` and `grpcHandlerFunc`, wrapped by `marshal.LimitRequestBody` and `Timeouts.ApplyHTTP`. net/http's HTTP/2 server arms `ReadTimeout` per stream (`stream.onReadTimeout` closes the request body with `os.ErrDeadlineExceeded`), and `http.MaxBytesReader` counts every message on the stream.
-- Impact: with defaults, a client-streaming or bidi RPC that is still sending after 30s, or that sends more than 10 MiB in total, fails on TLS listeners, while the same RPC on a plaintext (h2c) listener is limited only per message by `MaxRecvMsgSize`. The B06 decision records this trade-off ("raise or disable read/body limits for long request streams").
-- Fix (needs approval): in `grpcHandlerFunc`, for native gRPC (`application/grpc`, not gRPC-Web) clear the stream read deadline with `http.NewResponseController(w).SetReadDeadline(time.Time{})` and skip the HTTP body limit, relying on gRPC keepalive and `MaxRecvMsgSize`.
-
-### P-078 Early 413 bypasses the handler chain
-
-- Evidence: `LimitRequestBody` rejects a known oversized `Content-Length` before calling next. In `gserver` it wraps the rate limiter, correlation, CORS, identity, metrics and logging; in `restserver.NewMux` it sits outside identity, metrics and logging, and CORS lives in the router.
-- Impact: browsers see a CORS failure instead of HTTP 413; the rejection has no correlation ID (gserver) and is absent from request logs and metrics; gRPC and gRPC-Web callers receive a JSON body without `grpc-status`.
-- Fix: keep `MaxBytesReader` at the outer layer but move the `Content-Length` rejection inside the telemetry/CORS chain, or answer gRPC content types with a gRPC status.
-
-### P-079 `request_too_large` gRPC mapping
-
-- Evidence: `RequestTooLarge` now returns HTTP 413, but `statusCode[CodeRequestTooLarge]` is `codes.InvalidArgument`; `NewFromPb` converts that back with `HTTPStatusFromRPC` to 400 `bad_request`.
-- Impact: an oversized request reported over gRPC reaches REST clients of a proxying service as 400, not 413.
-- Fix (needs approval): map `CodeRequestTooLarge` to `codes.ResourceExhausted` (the code grpc-go uses for oversized messages) and decide the HTTP status for that code.
-
 ## Notes on items needing approval
 
 - P-006: new rate-limit defaults that deployments may need to configure.
@@ -330,5 +309,3 @@ byte-exact test.
 - P-043, P-047: rate limiter and lock semantics change under concurrency.
 - P-044, P-064: key layout changes for keys containing `..`, `//` or a prefix.
 - P-052, P-073, P-074: public type behavior or config surface.
-- P-077: changes the recorded B06 network-limit decision for TLS gRPC streams.
-- P-079: changes the gRPC code clients observe for oversized requests.

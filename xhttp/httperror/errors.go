@@ -250,9 +250,8 @@ func Wrap(err error, msgAndArgs ...any) *Error {
 		GRPCStatus() *status.Status
 	}); ok {
 		st := se.GRPCStatus()
-		code := st.Code()
-		status := codeStatus[code]
-		return New(status, httpCode[status], "%s", errMsg(st.Message(), msgAndArgs...)).WithCause(err)
+		status, code := statusHTTP(st)
+		return New(status, code, "%s", errMsg(st.Message(), msgAndArgs...)).WithCause(err)
 	}
 
 	var errstr string
@@ -362,7 +361,8 @@ var notFoundErrors = []string{"not found", "Not Found", "404"}
 
 // Status returns the HTTP status for err: 200 for nil, HTTPStatus for a
 // direct *Error or *ManyError, otherwise the gRPC status code of err mapped
-// with HTTPStatusFromRPC (500 for non-status errors).
+// with HTTPStatusFromRPC (500 for non-status errors), or 413 when the status
+// carries the request_too_large code detail (see NewFromPb).
 func Status(err error) int {
 	if err == nil {
 		return http.StatusOK
@@ -374,8 +374,8 @@ func Status(err error) int {
 	case *ManyError:
 		return e.HTTPStatus
 	}
-	code := status.Code(err)
-	return codeStatus[code]
+	hs, _ := statusHTTP(status.Convert(err))
+	return hs
 }
 
 // WriteHTTPResponse writes the error as an application/json body with
