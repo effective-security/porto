@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -50,8 +51,19 @@ type serveCtx struct {
 
 	cfg *Config
 
-	gopts    []grpc.ServerOption
-	serversC chan *servers
+	gopts []grpc.ServerOption
+	// serversC carries the servers serve started; Close ranges over it, so it
+	// must always be closed (see closeServers).
+	serversC    chan *servers
+	serversOnce sync.Once
+}
+
+// closeServers closes serversC exactly once. serve calls it after publishing
+// its servers, its deferred cleanup calls it when serve fails before that,
+// and Server.abort calls it when serve never runs, so Close never waits on a
+// channel nobody will close.
+func (sctx *serveCtx) closeServers() {
+	sctx.serversOnce.Do(func() { close(sctx.serversC) })
 }
 
 type servers struct {
@@ -60,13 +72,39 @@ type servers struct {
 	http   *http.Server
 }
 
-func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
+// configureListeners parses cfg.ListenURLs, builds the shared server TLS
+// config (which starts its certificate reloader) when cfg.ServerTLS is set,
+// and opens one listener per unique address. On error every listener opened
+// so far is closed and the reloader is stopped. The caller owns the returned
+// TLSInfo and must Close it.
+func configureListeners(cfg *Config) (_ map[string]*serveCtx, _ *transport.TLSInfo, err error) {
 	urls, err := cfg.ParseListenURLs()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
+	// The cleanup reads these locals: the results are nil on every error return.
 	var tlsInfo *transport.TLSInfo
+	sctxs := make(map[string]*serveCtx)
+	defer func() {
+		if err == nil {
+			return
+		}
+		for _, sctx := range sctxs {
+			if sctx.listener != nil {
+				logger.KV(xlog.INFO,
+					"reason", "error",
+					"network", sctx.network,
+					"address", sctx.addr,
+					"err", err)
+				sctx.listener.Close()
+			}
+		}
+		if tlsInfo != nil {
+			tlsInfo.Close()
+		}
+	}()
+
 	if !cfg.ServerTLS.Empty() {
 		from := cfg.ServerTLS
 		clientauthType := tls.VerifyClientCertIfGiven
@@ -84,9 +122,8 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			// CRLVerifier : TODO
 		}
 
-		_, err = tlsInfo.ServerTLSWithReloader()
-		if err != nil {
-			return nil, err
+		if _, err = tlsInfo.ServerTLSWithReloader(); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -108,34 +145,16 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 	}
 	gopts = append(gopts, grpc.KeepaliveParams(ka))
 
-	sctxs = make(map[string]*serveCtx)
-	defer func() {
-		if err == nil {
-			return
-		}
-		// clean up on error
-		for _, sctx := range sctxs {
-			if sctx.listener != nil {
-				logger.KV(xlog.INFO,
-					"reason", "error",
-					"network", sctx.network,
-					"address", sctx.addr,
-					"err", err)
-				sctx.listener.Close()
-			}
-		}
-	}()
-
 	for _, u := range urls {
 		if u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "unix" && u.Scheme != "unixs" {
-			return nil, errors.Errorf("unsupported URL scheme %q", u.Scheme)
+			return nil, nil, errors.Errorf("unsupported URL scheme %q", u.Scheme)
 		}
 
 		if u.Scheme == "" && tlsInfo != nil {
 			u.Scheme = "https"
 		}
 		if (u.Scheme == "https" || u.Scheme == "unixs") && tlsInfo == nil {
-			return nil, errors.Errorf("TLS key/cert must be provided for the url %s with HTTPS scheme", u.String())
+			return nil, nil, errors.Errorf("TLS key/cert must be provided for the url %s with HTTPS scheme", u.String())
 		}
 		if (u.Scheme == "http" || u.Scheme == "unix") && tlsInfo != nil {
 			logger.KV(xlog.WARNING, "reason", "tls_without_https_scheme", "url", u.String())
@@ -176,54 +195,59 @@ func configureListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			"address", sctx.addr)
 
 		if sctx.listener, err = net.Listen(sctx.network, sctx.addr); err != nil {
-			return nil, errors.WithStack(err)
+			return nil, nil, errors.WithStack(err)
 		}
+		// Registered before wrapping so the cleanup closes the raw listener
+		// if the wrapper fails.
+		sctxs[sctx.addr] = sctx
 
 		if sctx.network == "tcp" {
-			if sctx.listener, err = transport.NewKeepAliveListener(sctx.listener, sctx.network, nil); err != nil {
-				return nil, err
+			var kal net.Listener
+			if kal, err = transport.NewKeepAliveListener(sctx.listener, sctx.network, nil); err != nil {
+				return nil, nil, err
 			}
+			sctx.listener = kal
 		}
 		// TODO: register profiler, tracer, etc
-
-		sctxs[sctx.addr] = sctx
 	}
 
-	return sctxs, nil
+	return sctxs, tlsInfo, nil
 }
 
 // serve accepts incoming connections on the listener l,
 // creating a new service goroutine for each. The service goroutines
 // read requests and then call handler to reply to them.
 func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
-	//<-s.ReadyNotify()
+	// Close ranges over serversC; when serve fails before publishing its
+	// servers, the channel must still be closed or Close blocks forever.
+	defer sctx.closeServers()
 
 	logger.KV(xlog.INFO, "status", "ready_to_serve", "service", s.Name(), "network", sctx.network, "address", sctx.addr)
-
-	var gsSecure *grpc.Server
-	var gsInsecure *grpc.Server
-
-	defer func() {
-		if err == nil {
-			return
-		}
-		if gsSecure != nil {
-			gsSecure.Stop()
-		}
-		if gsInsecure != nil {
-			gsInsecure.Stop()
-		}
-	}()
 
 	router := restRouter(s)
 
 	m := cmux.New(sctx.listener)
 	m.SetReadTimeout(s.cfg.Timeouts.WithDefaults().Handshake)
 
+	// Every step that can fail runs before any server starts serving: a
+	// gRPC server blocked in Accept on a cmux listener cannot be stopped
+	// until m.Serve runs, so a failure must leave nothing to stop.
+	var insecure, secure *servers
+	var grpcL, httpL, tlsL net.Listener
+	defer func() {
+		if err == nil {
+			return
+		}
+		if secure != nil {
+			secure.grpc.Stop()
+		}
+		if insecure != nil {
+			insecure.grpc.Stop()
+		}
+	}()
+
 	if sctx.insecure {
-		gsInsecure = grpcServer(s, nil, sctx.gopts...)
-		grpcL := m.Match(cmux.HTTP2())
-		go func() { errHandler(gsInsecure.Serve(grpcL)) }()
+		grpcL = m.Match(cmux.HTTP2())
 
 		handler := router.Handler()
 		handler = configureHandlers(s, handler)
@@ -237,22 +261,19 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 			//ErrorLog: logger, // do not log user error
 		}
 		s.cfg.Timeouts.ApplyHTTP(srv)
+		httpL = m.Match(cmux.HTTP1())
 
-		httpL := m.Match(cmux.HTTP1())
-		go func() { errHandler(srv.Serve(httpL)) }()
-
-		sctx.serversC <- &servers{grpc: gsInsecure, http: srv}
-
-		logger.KV(xlog.WARNING, "reason", "insecure", "service", s.Name(), "address", sctx.addr)
+		insecure = &servers{grpc: grpcServer(s, nil, sctx.gopts...), http: srv}
 	}
 
 	if sctx.secure {
-		gsSecure = grpcServer(s, sctx.tlsInfo.Config(), sctx.gopts...)
+		tlsCfg := sctx.tlsInfo.Config()
+		gs := grpcServer(s, tlsCfg, sctx.gopts...)
 		handler := router.Handler()
 		handler = configureHandlers(s, handler)
 
 		// mux between http and grpc
-		handler = sctx.grpcHandlerFunc(gsSecure, handler)
+		handler = sctx.grpcHandlerFunc(gs, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
 		// The body limit also bounds native gRPC streams here: grpc-go's
@@ -263,31 +284,40 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 
 		srv := &http.Server{
 			Handler:   handler,
-			TLSConfig: sctx.tlsInfo.Config(),
+			TLSConfig: tlsCfg,
 			//ErrorLog:  logger, // do not log user error
 		}
 		s.cfg.Timeouts.ApplyHTTP(srv)
-		grpcL, err := transport.NewTLSListener(m.Match(cmux.Any()), sctx.tlsInfo)
-		if err != nil {
+		secure = &servers{secure: true, grpc: gs, http: srv}
+		if tlsL, err = transport.NewTLSListener(m.Match(cmux.Any()), sctx.tlsInfo); err != nil {
 			return err
 		}
-		go func() { errHandler(srv.Serve(grpcL)) }()
+	}
 
-		sctx.serversC <- &servers{secure: true, grpc: gsSecure, http: srv}
+	if insecure != nil {
+		go func() { errHandler(insecure.grpc.Serve(grpcL)) }()
+		go func() { errHandler(insecure.http.Serve(httpL)) }()
+		sctx.serversC <- insecure
+
+		logger.KV(xlog.WARNING, "reason", "insecure", "service", s.Name(), "address", sctx.addr)
+	}
+
+	if secure != nil {
+		go func() { errHandler(secure.http.Serve(tlsL)) }()
+		sctx.serversC <- secure
 	}
 
 	logger.KV(xlog.INFO, "status", "serving", "service", s.Name(), "address", sctx.listener.Addr().String(), "secure", sctx.secure, "insecure", sctx.insecure)
 
-	close(sctx.serversC)
+	sctx.closeServers()
 
 	// Serve starts multiplexing the listener.
 	// Serve blocks and perhaps should be invoked concurrently within a go routine.
 	return m.Serve()
 }
 
-// rateLookupRemoteAddr is the tollbooth IP lookup that reads r.RemoteAddr.
-const rateLookupRemoteAddr = "RemoteAddr"
-
+// configureRateLimiter wraps handler with the tollbooth limiter described by
+// cfg, which Start has already checked with RateLimit.Validate.
 func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
 	if !cfg.GetEnabled() {
 		return handler
@@ -296,7 +326,7 @@ func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
 
 	ttl := cfg.ExpirationTTL
 	if ttl == 0 {
-		ttl = 10 * time.Minute
+		ttl = defaultRateLimitTTL
 	}
 	ops := limiter.ExpirableOptions{
 		DefaultExpirationTTL: ttl,

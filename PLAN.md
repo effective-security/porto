@@ -102,6 +102,40 @@ close it when done. The server wrapper clears static certificates so clients
 without SNI also use the callback; the HTTP wrapper closes idle connections
 on `Close`.
 
+## Completed B07 decision — gserver lifecycle and rate limits
+
+An enabled `rate_limit` block is validated by `Start` through
+`Config.Validate` instead of receiving a default: `requests_per_second` must
+be positive; `expiration_ttl` must not be negative and, when set, must be at
+least one second (tollbooth recreates an expired bucket with a full burst, so
+a shorter TTL grants a burst that often); every `headers_ip_lookups` entry
+must be one of the names tollbooth understands (`RemoteAddr`,
+`X-Forwarded-For`, `X-Real-IP`, spelled exactly); and every `metods` entry
+must be a single upper-case HTTP method token (RFC 9110 tchar characters,
+so `"GET "` or `"GET,POST"` are rejected too), because tollbooth compares
+both exactly and a non-matching entry limits nothing. A disabled or absent block is not
+validated. No default rate is applied: the previous behavior (one request
+per client, then 429) was never a working configuration, and a silent
+default would pick an arbitrary limit. Deployments that set `enabled: true`
+without a rate, with a negative or sub-second TTL, with a misspelled lookup
+name or with a method entry that is not an upper-case token now fail at
+startup and must fix the block.
+
+`Start` releases everything it acquired when it fails (created services,
+listeners and the TLS reloader) on every error path: a failed or missing
+service factory now closes the services created before it, and the cleanup
+no longer depends on a shadowed error variable. `configureListeners` now
+really closes the listeners it opened before a later listen URL failed (its
+deferred cleanup previously read a named result that the error return had
+already reset to nil, so the first listener stayed bound) and stops the
+reloader it started. `serve` starts no
+server until every fallible step succeeded and always closes its server
+channel, so `Close` returns after a failed listener setup instead of
+blocking. `Close` stops the TLS certificate reloader after closing the
+listeners, and its teardown runs once under `closeOnce`: services are closed
+once, and a repeated or concurrent `Close` returns after the first teardown
+has finished (previously a second call closed the services again).
+
 ## Completed B05 decision — trusted proxy headers
 
 Forwarding headers are ignored unless the socket peer belongs to an explicitly
@@ -123,11 +157,10 @@ set by a trusted proxy.
 
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |
 | B11 — Cache pub/sub                        | P2       | `pkg/cache`: prevent blocked or leaked subscription goroutines, define publish behavior for slow consumers, and stabilize the Redis pub/sub test.                                                                                                                     | P-041, P-042, P-075                                                         | Slow-subscriber policy                                |
 | B12 — Redis coordination and secrets       | P2       | `pkg/redisclient`: make rate-limit windows atomic and non-starving, make lock release owner-bound, redact connection logging, and fix close and eviction error handling.                                                                                              | P-043, P-045, P-047, P-062, P-063                                           | Rate-limit, lock, and close semantics                 |
 | B13 — Key namespaces                       | P2       | `pkg/redisclient`, `pkg/cache`: prevent `..` from escaping a prefix and align memory/Redis `Keys` prefix and pattern behavior.                                                                                                                                        | P-044, P-064                                                                | Key layout and pattern contract                       |
-| B15 — TLS listener and policy              | P2       | `pkg/transport`: enforce or remove documented `TLSInfo` checks, preserve temporary accept errors, and modernize keepalive configuration. Handshake deadlines are in B06.                                                                                              | P-052, P-053, P-074 (transport portion)                                     | TLSInfo contract                                      |
+| B15 — TLS listener and policy              | P2       | `pkg/transport`: enforce or remove documented `TLSInfo` checks, preserve temporary accept errors, stop caching a half-built server TLS config after an error, and modernize keepalive configuration. Handshake deadlines are in B06.                                  | P-052, P-053, P-074 (transport portion), P-080                              | TLSInfo contract                                      |
 | B16 — HTTP client retry behavior           | P2       | `pkg/retriable`: preserve the default retry limit, make backoff and context cancellation correct, handle 429 and nonce retries, avoid transport type panics/mutation, fix URL parsing, path expansion, and the blocking network wait, and bound error-body reads.     | P-046, P-056, P-057, P-058, P-060, P-061, P-065, P-066 (remaining portions) | Retry and transport behavior                          |
 | B17 — HTTP telemetry and response writer   | P2       | `restserver/telemetry`: use bounded route labels, expose the underlying writer for upgrades/controllers, and guard zero granularity.                                                                                                                                  | P-023, P-024, P-031                                                         | Metric label contract                                 |
 | B19 — Caller credentials and role handling | P3       | `gserver/credentials`, `gserver/roles`: synchronize credential refresh, repair `NewWithMode`, remove CSRF values from logs, add bounded negative STS caching, and enforce cookie CSRF consistently.                                                                   | P-009, P-010, P-013, P-014, P-015                                           | Cookie/CSRF contract                                  |

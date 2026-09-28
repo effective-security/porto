@@ -113,6 +113,8 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		return info.tlsCfg, nil
 	}
 
+	// FINDINGS P-080: tlsCfg stays set when a later step fails, so a retry
+	// returns the rejected config without a reloader.
 	info.tlsCfg, err = tlsconfig.NewServerTLSFromFiles(
 		info.CertFile,
 		info.KeyFile,

@@ -2,6 +2,7 @@ package gserver
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,6 +116,156 @@ func TestCORSValidate(t *testing.T) {
 	}
 }
 
+func TestRateLimitValidate(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	disabled := false
+	tests := []struct {
+		name    string
+		rl      *RateLimit
+		wantErr string
+	}{
+		{
+			name: "absent configuration",
+		},
+		{
+			name: "disabled without rate",
+			rl:   &RateLimit{Enabled: &disabled},
+		},
+		{
+			name: "enabled with rate",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+			},
+		},
+		{
+			name: "enabled with known lookups and methods",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 10,
+				ExpirationTTL:     time.Minute,
+				HeadersIPLookups:  []string{"X-Forwarded-For", "X-Real-IP", "RemoteAddr"},
+				Metods:            []string{"GET", "POST", "PROPFIND", "M-SEARCH"},
+			},
+		},
+		{
+			name: "shortest accepted TTL",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				ExpirationTTL:     time.Second,
+			},
+		},
+		{
+			name:    "enabled without rate",
+			rl:      &RateLimit{Enabled: &enabled},
+			wantErr: "rate_limit: requests_per_second must be positive when enabled, got 0",
+		},
+		{
+			name: "enabled with negative rate",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: -5,
+			},
+			wantErr: "rate_limit: requests_per_second must be positive when enabled, got -5",
+		},
+		{
+			name: "enabled with negative TTL",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				ExpirationTTL:     -time.Second,
+			},
+			wantErr: "rate_limit: expiration_ttl must not be negative, got -1s",
+		},
+		{
+			name: "enabled with sub-second TTL",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				ExpirationTTL:     time.Millisecond,
+			},
+			wantErr: "rate_limit: expiration_ttl must be at least 1s, got 1ms",
+		},
+		{
+			name: "canonical X-Real-Ip is not a tollbooth lookup",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				HeadersIPLookups:  []string{"RemoteAddr", "X-Real-Ip"},
+			},
+			wantErr: `rate_limit: unsupported headers_ip_lookups entry "X-Real-Ip"; use one of RemoteAddr, X-Forwarded-For, X-Real-IP`,
+		},
+		{
+			name: "unknown lookup",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				HeadersIPLookups:  []string{"CF-Connecting-IP"},
+			},
+			wantErr: `rate_limit: unsupported headers_ip_lookups entry "CF-Connecting-IP"; use one of RemoteAddr, X-Forwarded-For, X-Real-IP`,
+		},
+		{
+			name: "lower-case method never matches",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				Metods:            []string{"GET", "post"},
+			},
+			wantErr: `rate_limit: metods entry "post" must be an upper-case HTTP method token`,
+		},
+		{
+			name: "empty method",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				Metods:            []string{""},
+			},
+			wantErr: `rate_limit: metods entry "" must be an upper-case HTTP method token`,
+		},
+		{
+			name: "method with trailing space",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				Metods:            []string{"GET "},
+			},
+			wantErr: `rate_limit: metods entry "GET " must be an upper-case HTTP method token`,
+		},
+		{
+			name: "comma-joined methods",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				Metods:            []string{"GET,POST"},
+			},
+			wantErr: `rate_limit: metods entry "GET,POST" must be an upper-case HTTP method token`,
+		},
+		{
+			name: "slash-joined methods",
+			rl: &RateLimit{
+				Enabled:           &enabled,
+				RequestsPerSecond: 1,
+				Metods:            []string{"GET/POST"},
+			},
+			wantErr: `rate_limit: metods entry "GET/POST" must be an upper-case HTTP method token`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tt.rl.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	t.Parallel()
 	enabled := true
@@ -127,6 +278,13 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "empty configuration",
 			cfg:  &Config{},
+		},
+		{
+			name: "rate limit enabled without rate",
+			cfg: &Config{
+				RateLimit: &RateLimit{Enabled: &enabled},
+			},
+			wantErr: "rate_limit: requests_per_second must be positive when enabled, got 0",
 		},
 		{
 			name: "invalid CORS block",

@@ -40,9 +40,6 @@ byte-exact test.
 | ID    | Package                                 | Location                                                                 | Title                                                                                                                                        | Type        | Severity | Status         |
 | ----- | --------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------- | -------------- |
 | P-001 | (module)                                | `go.mod` `google.golang.org/grpc v1.84.0`                                | GO-2026-6443: gRPC server panic via missing authority/Host headers                                                                           | security    | HIGH     | Fixed          |
-| P-003 | gserver                                 | `serve.go` `serveCtx.serve`, `server.go` `Server.Close`                  | `Close` deadlocks if a listener's `serve` fails before publishing servers                                                                    | bug         | MEDIUM   | Open           |
-| P-004 | gserver                                 | `serve.go` `configureListeners`, `server.go` `Server.Close`              | TLS keypair reloader goroutine leaked on `Close`                                                                                             | bug         | MEDIUM   | Open           |
-| P-006 | gserver                                 | `serve.go` `configureRateLimiter`                                        | `rate_limit.enabled` without `requests_per_second` blocks nearly all traffic                                                                 | correctness | MEDIUM   | Needs Approval |
 | P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Fixed          |
 | P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
 | P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
@@ -64,6 +61,7 @@ byte-exact test.
 | P-047 | pkg/redisclient                         | `redisclient.go` `ReleaseLock`, `TryLock`                                | Lock release is not owner-bound and not atomic                                                                                               | correctness | MEDIUM   | Needs Approval |
 | P-052 | pkg/transport                           | `tls.go` `TLSInfo`                                                       | `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`, `SkipClientSANVerify` are never enforced                      | security    | MEDIUM   | Needs Approval |
 | P-053 | pkg/transport                           | `keepalive_listener.go` `Accept`                                         | `errors.WithStack` on accept errors defeats `Temporary()` retry in net/http and grpc                                                         | bug         | MEDIUM   | Open           |
+| P-080 | pkg/transport                           | `tls.go` `TLSInfo.ServerTLSWithReloader`                                 | A failed first call caches a half-built `tls.Config`; later calls return it without error or reloader                                        | correctness | LOW      | Open           |
 | P-056 | pkg/retriable                           | `retriable.go` `Do`                                                      | Backoff sleep ignores the request context; drained bodies are not closed                                                                     | correctness | LOW      | Open           |
 | P-057 | pkg/retriable                           | `retriable.go` `executeRequest`                                          | `RequestTimeout` cancel func discarded; timers live until the deadline                                                                       | performance | LOW      | Open           |
 | P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
@@ -88,24 +86,6 @@ byte-exact test.
 - Evidence: `govulncheck ./...` reports `gserver/serve.go` `grpcHandlerFunc` calls `grpc.Server.ServeHTTP`, which reaches the vulnerable `transport.http2Server.HandleStreams`.
 - Impact: a request without `:authority`/`Host` can panic the gRPC server.
 - Fix: upgrade to the first released `google.golang.org/grpc` that contains the fix (only `v1.85.0-dev` pseudo-versions exist as of the audit). Pin a pseudo-version or wait for `v1.85.0`.
-
-### P-003 `Server.Close` deadlock after a failed `serve`
-
-- Evidence: `serve` returns on `transport.NewTLSListener` error before `close(sctx.serversC)`; `Close` ranges over `serversC` and blocks forever. `Start`'s deferred cleanup only closes the channel when `!serving`, but `serveClients` always returns nil.
-- Impact: when TLS listener setup fails at runtime, `Err()` delivers the error and the caller's `Close()` hangs.
-- Fix: `defer close(sctx.serversC)` once at the top of `serve` (guarded by `sync.Once`).
-
-### P-004 TLS keypair reloader leaked
-
-- Evidence: `configureListeners` calls `tlsInfo.ServerTLSWithReloader()`, which starts a `tlsconfig.KeypairReloader` ticker goroutine; nothing in gserver calls `tlsInfo.Close()`.
-- Impact: one ticker goroutine per `Start`/`Close` cycle.
-- Fix: call `tlsInfo.Close()` in `Server.Close` after closing the listeners.
-
-### P-006 `rate_limit.enabled` without `requests_per_second`
-
-- Evidence: `tollbooth.NewLimiter(float64(cfg.RequestsPerSecond), &ops)` with max 0 yields burst 1 that never refills.
-- Impact: one request per client key, then 429 forever; no startup validation.
-- Fix: return an error from `Start`, or apply a documented default, when `Enabled && RequestsPerSecond <= 0`.
 
 ### P-007 Rate limiter keyed on `X-Forwarded-For`
 
@@ -263,9 +243,14 @@ byte-exact test.
 - Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
 - Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
+### P-080 `ServerTLSWithReloader` caches a half-built config after an error
+
+- Evidence: `info.tlsCfg` is assigned by `tlsconfig.NewServerTLSFromFiles` before the expiry check, `UpdateCipherSuites` and `NewKeypairReloader`. When one of those fails the method returns an error but leaves `tlsCfg` set, so the next call takes the `info.tlsCfg != nil` shortcut and returns a config with static `Certificates`, no `GetCertificate` and no reloader, without an error. `Config()` also returns it.
+- Impact: a caller that retries `ServerTLSWithReloader` or `NewTLSListener` after an expired certificate or an invalid cipher list serves with the rejected configuration and never reloads. `gserver` is not affected: `configureListeners` fails on the first call and closes the `TLSInfo`.
+- Fix: build into a local and assign `info.tlsCfg` only after every step succeeded, or reset `info.tlsCfg = nil` on each error return.
+
 ## Notes on items needing approval
 
-- P-006: new rate-limit defaults that deployments may need to configure.
 - P-013: changes observable auth behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
 - P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.

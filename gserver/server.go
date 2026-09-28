@@ -11,6 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/pkg/discovery"
+	"github.com/effective-security/porto/pkg/transport"
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/xhttp/identity"
@@ -89,9 +90,12 @@ type GServer interface {
 	Discovery() discovery.Discovery
 	// Err returns error channel
 	Err() <-chan error
-	// Close gracefully shuts down all servers/listeners.
+	// Close gracefully shuts down all servers/listeners and stops the TLS
+	// certificate reloader.
 	// Client requests will be terminated with request timeout.
-	// After timeout, enforce remaning requests be closed immediately.
+	// After timeout, enforce remaining requests be closed immediately.
+	// The teardown runs once: later or concurrent calls return after it
+	// has finished.
 	Close()
 }
 
@@ -106,6 +110,9 @@ type Server struct {
 	hostname string
 	// a map of contexts for the servers that serves client requests.
 	sctxs map[string]*serveCtx
+	// tlsInfo is the server TLS config shared by the TLS listeners, or nil;
+	// its certificate reloader runs until Close.
+	tlsInfo *transport.TLSInfo
 
 	di   *dig.Container
 	name string
@@ -129,9 +136,10 @@ type Server struct {
 // Start creates the services from serviceFactories, opens the listeners from
 // cfg.ListenURLs and begins serving in background goroutines, returning the
 // running server. The container must provide discovery.Discovery and, when
-// cfg.IdentityMap enables JWT or DPoP, a jwt.Parser. On error any partially
-// opened listeners are closed and the error is returned; on success the caller
-// must eventually call Close. Serve errors are reported on Err.
+// cfg.IdentityMap enables JWT or DPoP, a jwt.Parser. On error the created
+// services are closed, the opened listeners are closed, the TLS reloader is
+// stopped and the error is returned; on success the caller must eventually
+// call Close. Serve errors are reported on Err.
 func Start(
 	name string,
 	cfg *Config,
@@ -139,40 +147,42 @@ func Start(
 	serviceFactories map[string]ServiceFactory,
 	opts ...Option,
 ) (GServer, error) {
-	var e *Server
-	var err error
-	serving := false
-	defer func() {
-		// if no error, then do nothing
-		if e == nil || err == nil {
-			return
-		}
-		if !serving {
-			// errored before starting gRPC server for serveCtx.serversC
-			for _, sctx := range e.sctxs {
-				close(sctx.serversC)
-			}
-		}
-		e.Close()
-		e = nil
-	}()
-
-	e, err = newServer(name, cfg, container, serviceFactories, opts...)
+	e, err := newServer(name, cfg, container, serviceFactories, opts...)
 	if err != nil {
+		if e != nil {
+			e.abort()
+		}
 		return nil, err
 	}
-	err = container.Invoke(func(
-		d discovery.Discovery,
-	) error {
+	if err = e.resolveDependencies(container); err != nil {
+		e.abort()
+		return nil, err
+	}
+
+	e.serveClients()
+
+	// Register services
+	for _, svc := range e.services {
+		_ = e.disco.Register(e.Name(), svc)
+	}
+
+	return e, nil
+}
+
+// resolveDependencies injects discovery from the container and builds the
+// identity and authorization providers from the configuration.
+func (e *Server) resolveDependencies(container *dig.Container) error {
+	err := container.Invoke(func(d discovery.Discovery) error {
 		e.disco = d
 		return nil
 	})
 	if err != nil {
-		return nil, errors.WithMessagef(err, "unable to inject dependencies")
+		return errors.WithMessage(err, "unable to inject dependencies")
 	}
 
-	if cfg.IdentityMap != nil {
-		var jwtparser jwt.Parser
+	identityMap := e.cfg.IdentityMap
+	var jwtparser jwt.Parser
+	if identityMap != nil {
 		err = container.Invoke(func(jwtParser jwt.Parser) error {
 			jwtparser = jwtParser
 			return nil
@@ -180,40 +190,36 @@ func Start(
 		if err != nil {
 			logger.KV(xlog.ERROR, "reason", "jwt.Parser not provided", "err", err)
 		}
-		iden, err := roles.New(cfg.IdentityMap, jwtparser)
-		if err != nil {
-			return nil, errors.WithMessagef(err, "unable to create roles AuthZ")
-		}
-		e.identity = iden
 	} else {
-		iden, err := roles.New(&roles.IdentityMap{}, nil)
+		identityMap = &roles.IdentityMap{}
+	}
+	e.identity, err = roles.New(identityMap, jwtparser)
+	if err != nil {
+		return errors.WithMessage(err, "unable to create roles AuthZ")
+	}
+
+	authzCfg := e.cfg.Authz
+	if authzCfg != nil &&
+		(len(authzCfg.Allow) > 0 ||
+			len(authzCfg.AllowAny) > 0 ||
+			len(authzCfg.AllowAnyRole) > 0) {
+		e.authz, err = authz.New(authzCfg)
 		if err != nil {
-			logger.KV(xlog.ERROR, "err", err)
-		}
-		e.identity = iden
-	}
-
-	if cfg.Authz != nil &&
-		(len(cfg.Authz.Allow) > 0 ||
-			len(cfg.Authz.AllowAny) > 0 ||
-			len(cfg.Authz.AllowAnyRole) > 0) {
-		e.authz, err = authz.New(cfg.Authz)
-		if err != nil {
-			return nil, err
+			return err
 		}
 	}
+	return nil
+}
 
-	if err = e.serveClients(); err != nil {
-		return e, err
+// abort releases a server that never started serving. No serve goroutine
+// will close the serve channels, so they are closed here first and Close
+// does not wait on them; Close then releases the services, the listeners
+// and the TLS reloader.
+func (e *Server) abort() {
+	for _, sctx := range e.sctxs {
+		sctx.closeServers()
 	}
-
-	// Register services
-	for _, svc := range e.services {
-		_ = e.disco.Register(e.Name(), svc)
-	}
-
-	serving = true
-	return e, nil
+	e.Close()
 }
 
 func newServer(
@@ -252,21 +258,23 @@ func newServer(
 		o.apply(&e.opts)
 	}
 
+	// From here on, e is returned with the error so Start can release the
+	// services already created and the listeners already opened.
 	for _, svc := range cfg.Services {
 		sf := serviceFactories[svc]
 		if sf == nil {
-			return nil, errors.Errorf("service factory is not registered: %q", svc)
+			return e, errors.Errorf("service factory is not registered: %q", svc)
 		}
 		err = container.Invoke(sf(e))
 		if err != nil {
-			return nil, errors.WithMessagef(err, "service factory failed, server=%q, service=%s",
+			return e, errors.WithMessagef(err, "service factory failed, server=%q, service=%s",
 				name, svc)
 		}
 	}
 
 	logger.KV(xlog.TRACE, "status", "configuring_listeners", "server", name)
 
-	e.sctxs, err = configureListeners(cfg)
+	e.sctxs, e.tlsInfo, err = configureListeners(cfg)
 	if err != nil {
 		return e, err
 	}
@@ -281,14 +289,14 @@ func newServer(
 	return e, nil
 }
 
-func (e *Server) serveClients() (err error) {
-	// start client servers in each goroutine
+// serveClients starts one serve goroutine per listener; serve errors are
+// reported through errHandler.
+func (e *Server) serveClients() {
 	for _, sctx := range e.sctxs {
 		go func(s *serveCtx) {
 			e.errHandler(s.serve(e, e.errHandler))
 		}(sctx)
 	}
-	return nil
 }
 
 func (e *Server) errHandler(err error) {
@@ -308,15 +316,23 @@ func (e *Server) errHandler(err error) {
 
 // Close gracefully shuts down all servers/listeners.
 // Client requests will be terminated with request timeout.
-// After timeout, enforce remaning requests be closed immediately.
+// After timeout, enforce remaining requests be closed immediately.
+// It then closes the listeners and stops the TLS certificate reloader.
+// The teardown runs once, so services are closed once; a later or
+// concurrent call returns after the teardown has finished.
 func (e *Server) Close() {
+	e.closeOnce.Do(e.teardown)
+}
+
+// teardown is the body of Close; closeOnce serializes it.
+func (e *Server) teardown() {
 	logger.KV(xlog.INFO, "server", e.Name())
 
 	for _, svc := range e.services {
 		svc.Close()
 	}
 
-	e.closeOnce.Do(func() { close(e.stopc) })
+	close(e.stopc)
 
 	// close client requests with request timeout
 	timeout := 3 * time.Second
@@ -339,6 +355,10 @@ func (e *Server) Close() {
 		if e.Listeners[i] != nil {
 			e.Listeners[i].Close()
 		}
+	}
+
+	if e.tlsInfo != nil {
+		e.tlsInfo.Close()
 	}
 }
 
