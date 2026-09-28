@@ -12,6 +12,7 @@ import (
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
+	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/x/netutil"
 )
 
@@ -70,6 +71,10 @@ type Config struct {
 
 	// RateLimit contains configuration for the rate limiter
 	RateLimit *RateLimit `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
+
+	// TrustedProxyCIDRs permits these socket peers to supply forwarding headers.
+	// By default, only the socket address is used for client IP and scheme.
+	TrustedProxyCIDRs []string `json:"trusted_proxy_cidrs,omitempty" yaml:"trusted_proxy_cidrs,omitempty"`
 
 	// Timeout settings
 	Timeout struct {
@@ -193,21 +198,32 @@ type CORS struct {
 }
 
 // Validate returns an error for a configuration Start cannot serve safely: an
-// invalid CORS block (see CORS.Validate) or, while CORS is enabled, an
-// HTTPHeaders entry that would set an Access-Control-* header outside the
-// CORS policy. Start calls Validate.
+// invalid TrustedProxyCIDRs entry, an invalid CORS block (see CORS.Validate)
+// or, while CORS is enabled, an HTTPHeaders entry that would set an
+// Access-Control-* header outside the CORS policy. Start runs the same checks.
 func (c *Config) Validate() error {
+	_, err := c.validate()
+	return err
+}
+
+// validate implements Validate and returns the parsed trusted proxy policy,
+// so Start does not parse TrustedProxyCIDRs a second time.
+func (c *Config) validate() (*identity.TrustedProxies, error) {
+	trustedProxies, err := identity.ParseTrustedProxies(c.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.CORS.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	if c.CORS.GetEnabled() {
 		for _, name := range slices.Sorted(maps.Keys(c.HTTPHeaders)) {
 			if strings.HasPrefix(strings.ToLower(name), corsHeaderPrefix) {
-				return errors.Newf("http_headers: %q cannot be set while cors is enabled; configure it in the cors block", name)
+				return nil, errors.Newf("http_headers: %q cannot be set while cors is enabled; configure it in the cors block", name)
 			}
 		}
 	}
-	return nil
+	return trustedProxies, nil
 }
 
 // ParseListenURLs parses ListenURLs into URLs, returning an error for any
@@ -276,7 +292,9 @@ type RateLimit struct {
 	// ExpirationTTL specifies the TTL for token bucket, default 10 mins
 	ExpirationTTL time.Duration `json:"expiration_ttl,omitempty" yaml:"expiration_ttl,omitempty"`
 	// HeadersIPLookups lists the sources used to identify the client, in order;
-	// default is "X-Forwarded-For", "X-Real-IP", "RemoteAddr".
+	// default is the trusted client address derived from the socket peer and
+	// TrustedProxyCIDRs. Explicit header lookups can be spoofed and should be
+	// configured only when the deployment guarantees they are overwritten.
 	HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
 	// Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET", "POST";
 	// empty means all methods.

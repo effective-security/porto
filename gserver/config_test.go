@@ -17,6 +17,14 @@ func TestParseListenURLs(t *testing.T) {
 	assert.Equal(t, 1, len(lp))
 }
 
+func TestConfigValidateTrustedProxyCIDRs(t *testing.T) {
+	t.Parallel()
+	assert.NoError(t, (&Config{TrustedProxyCIDRs: []string{"10.0.0.0/8"}}).Validate())
+	err := (&Config{TrustedProxyCIDRs: []string{"invalid"}}).Validate()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `invalid trusted proxy CIDR "invalid"`)
+}
+
 func TestTLSInfo(t *testing.T) {
 	empty := &TLSInfo{}
 	assert.True(t, empty.Empty())

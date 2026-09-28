@@ -40,9 +40,27 @@ close it when done. The server wrapper clears static certificates so clients
 without SNI also use the callback; the HTTP wrapper closes idle connections
 on `Close`.
 
+## Completed B05 decision — trusted proxy headers
+
+Forwarding headers are ignored unless the socket peer belongs to an explicitly
+configured trusted proxy CIDR. `gserver` uses `trusted_proxy_cidrs` and
+`restserver.HTTPServer` uses `WithTrustedProxies` with a policy from
+`identity.ParseTrustedProxies`; neither trusts proxies by default. A trusted peer's XFF chain is read from right to left, stopping at
+the first untrusted address, including private addresses, or the leftmost
+entry when every hop is trusted. Invalid values
+fall back to the socket peer. `X-Real-Ip` applies only without XFF.
+`X-Forwarded-Proto` must be exactly `http` or `https`. Proxies configured here
+must overwrite forwarding headers received from clients. The client IP is
+resolved once per request at the trust boundary. A request without a socket
+peer (served in process) has no client IP and resolves to "" instead of the
+server's local IP. The default rate limiter keys on this resolved IP and
+echoes it, not the socket peer, in `X-Rate-Limit-Request-Remote-Addr`;
+requests without a client IP are not limited. Deployments with explicit
+`headers_ip_lookups` retain that override and must ensure those fields are
+set by a trusted proxy.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B05 — Trusted proxy headers                | P2       | `xhttp/identity`, `restserver`, `gserver`: fix the private-only XFF fallback, define trusted-proxy handling for IP and scheme headers, and key the default rate limiter from a trusted address.                                                                       | P-007, P-017, P-018                                                         | Proxy trust configuration and default                 |
 | B06 — Network limits                       | P2       | `gserver`, `restserver`, `xhttp/marshal`, `pkg/transport`, `pkg/appinit`: add bounded cmux/HTTP/TLS handshake timeouts and request bodies; make the Prometheus server closable with a safe bind-error path. Implement the shared defaults in ROADMAP item 2 together. | P-005, P-019, P-026, P-054, P-055                                           | Timeout/body defaults and Prometheus failure behavior |
 | B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |
 | B10 — HTTP errors and authorization        | P2       | `xhttp/httperror`, `xhttp/marshal`, `xhttp/identity`, `restserver/ready`, `restserver/authz`: remove shared error mutation, return 403 for forbidden access, avoid denial double-wrapping and internal error disclosure, and constrain the OPTIONS bypass.            | P-016, P-027, P-028, P-029, P-032, P-033                                    | Auth and error response changes                       |

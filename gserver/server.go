@@ -13,6 +13,7 @@ import (
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/authz"
+	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt"
@@ -117,9 +118,10 @@ type Server struct {
 
 	services map[string]Service
 
-	authz    *authz.Provider
-	identity roles.IdentityProvider
-	disco    discovery.Discovery
+	authz          *authz.Provider
+	identity       roles.IdentityProvider
+	trustedProxies *identity.TrustedProxies
+	disco          discovery.Discovery
 
 	opts options
 }
@@ -159,7 +161,6 @@ func Start(
 	if err != nil {
 		return nil, err
 	}
-
 	err = container.Invoke(func(
 		d discovery.Discovery,
 	) error {
@@ -222,7 +223,7 @@ func newServer(
 	serviceFactories map[string]ServiceFactory,
 	opts ...Option,
 ) (*Server, error) {
-	err := cfg.Validate()
+	trustedProxies, err := cfg.validate()
 	if err != nil {
 		return nil, err
 	}
@@ -235,12 +236,13 @@ func newServer(
 	hostname, _ := os.Hostname()
 
 	e := &Server{
-		ipaddr:   ipaddr,
-		hostname: hostname,
-		name:     name,
-		cfg:      *cfg,
-		di:       container,
-		services: make(map[string]Service),
+		ipaddr:         ipaddr,
+		hostname:       hostname,
+		name:           name,
+		cfg:            *cfg,
+		trustedProxies: trustedProxies,
+		di:             container,
+		services:       make(map[string]Service),
 		//sctxs: make(map[string]*serveCtx),
 		stopc:     make(chan struct{}),
 		startedAt: time.Now(),

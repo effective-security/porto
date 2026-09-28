@@ -87,6 +87,18 @@ func TestStartRejectsStaticCORSHeaders(t *testing.T) {
 	assert.Nil(t, srv)
 }
 
+func TestStartRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	t.Parallel()
+	cfg := &gserver.Config{
+		TrustedProxyCIDRs: []string{"10.0.0.0/8", "invalid"},
+	}
+
+	srv, err := gserver.Start("InvalidTrustedProxyCIDR", cfg, nil, nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `invalid trusted proxy CIDR "invalid"`)
+	assert.Nil(t, srv)
+}
+
 func TestRateLimit(t *testing.T) {
 	enabled := true
 	cfg := &gserver.Config{

@@ -17,6 +17,19 @@
 //
 // When no identity is present a guest identity (role "guest") is returned,
 // never nil. GuestIdentityMapper / GuestIdentityForContext are the default
-// mappers. ClientIPFromRequest trusts X-Forwarded-For and X-Real-Ip headers,
-// so it should only be relied on behind a proxy that sets them.
+// mappers. By default client IPs come from the socket peer. A server may
+// opt in to forwarding headers with ParseTrustedProxies and
+// NewTrustedProxyHandler (HTTP) or WithTrustedProxies (gRPC context). The
+// configured proxies must overwrite incoming forwarding headers.
+// NewTrustedProxyHandler resolves the client IP once per request and
+// ClientIPFromRequest returns that value in later handlers:
+//
+//	trust, err := identity.ParseTrustedProxies([]string{"10.2.0.0/16"})
+//	if err != nil {
+//		return err
+//	}
+//	h := identity.NewTrustedProxyHandler(identity.NewContextHandler(next, myMapper), trust)
+//
+// A request without a socket peer, such as one built with http.NewRequest
+// and served in process, has no client IP: ClientIPFromRequest returns "".
 package identity

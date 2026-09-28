@@ -103,7 +103,7 @@ var (
 ```
 
 <a name="NewRequestValidationUnaryInterceptor"></a>
-## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L661>)
+## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L689>)
 
 ```go
 func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor
@@ -112,7 +112,7 @@ func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor
 NewRequestValidationUnaryInterceptor returns a unary interceptor that calls Validate on requests implementing Validator and rejects the call with the returned error. It is always installed by Start.
 
 <a name="CORS"></a>
-## type [CORS](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L165-L193>)
+## type [CORS](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L170-L198>)
 
 CORS configures cross\-origin handling. When enabled the REST handler is wrapped with github.com/rs/cors; AllowedOrigins, ExposedHeaders and AllowCredentials are also applied to gRPC\-Web responses on TLS listeners. Both match origins the same way, including rs/cors origin patterns. Use AllowedOrigins with "\*" to allow every origin; an empty list allows none. "\*" cannot be combined with AllowCredentials: Start rejects that configuration \(see Validate\).
 
@@ -151,7 +151,7 @@ type CORS struct {
 ```
 
 <a name="CORS.GetAllowCredentials"></a>
-### func \(\*CORS\) [GetAllowCredentials](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L249>)
+### func \(\*CORS\) [GetAllowCredentials](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L265>)
 
 ```go
 func (c *CORS) GetAllowCredentials() bool
@@ -160,7 +160,7 @@ func (c *CORS) GetAllowCredentials() bool
 GetAllowCredentials returns the AllowCredentials flag; safe on a nil receiver.
 
 <a name="CORS.GetDebug"></a>
-### func \(\*CORS\) [GetDebug](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L244>)
+### func \(\*CORS\) [GetDebug](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L260>)
 
 ```go
 func (c *CORS) GetDebug() bool
@@ -169,7 +169,7 @@ func (c *CORS) GetDebug() bool
 GetDebug returns the Debug flag; safe on a nil receiver.
 
 <a name="CORS.GetEnabled"></a>
-### func \(\*CORS\) [GetEnabled](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L239>)
+### func \(\*CORS\) [GetEnabled](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L255>)
 
 ```go
 func (c *CORS) GetEnabled() bool
@@ -178,7 +178,7 @@ func (c *CORS) GetEnabled() bool
 GetEnabled returns true when CORS is configured and enabled; safe on a nil receiver.
 
 <a name="CORS.GetOptionsPassthrough"></a>
-### func \(\*CORS\) [GetOptionsPassthrough](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L265>)
+### func \(\*CORS\) [GetOptionsPassthrough](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L281>)
 
 ```go
 func (c *CORS) GetOptionsPassthrough() bool
@@ -187,7 +187,7 @@ func (c *CORS) GetOptionsPassthrough() bool
 GetOptionsPassthrough returns the OptionsPassthrough flag; safe on a nil receiver.
 
 <a name="CORS.Validate"></a>
-### func \(\*CORS\) [Validate](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L257>)
+### func \(\*CORS\) [Validate](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L273>)
 
 ```go
 func (c *CORS) Validate() error
@@ -196,7 +196,7 @@ func (c *CORS) Validate() error
 Validate returns an error when an enabled CORS block combines the "\*" origin with AllowCredentials, which would let every web origin read credentialed responses. A nil or disabled CORS is valid. Start calls it through Config.Validate.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L28-L97>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L29-L102>)
 
 Config is the server configuration passed to Start. It is usually unmarshalled from YAML/JSON; the yaml and json tags give the field names.
 
@@ -247,6 +247,10 @@ type Config struct {
     // RateLimit contains configuration for the rate limiter
     RateLimit *RateLimit `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
 
+    // TrustedProxyCIDRs permits these socket peers to supply forwarding headers.
+    // By default, only the socket address is used for client IP and scheme.
+    TrustedProxyCIDRs []string `json:"trusted_proxy_cidrs,omitempty" yaml:"trusted_proxy_cidrs,omitempty"`
+
     // Timeout settings
     Timeout struct {
         // Request is how long Close waits for in-flight requests to finish
@@ -274,7 +278,7 @@ type Config struct {
 ```
 
 <a name="Config.ParseListenURLs"></a>
-### func \(\*Config\) [ParseListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L215>)
+### func \(\*Config\) [ParseListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L231>)
 
 ```go
 func (c *Config) ParseListenURLs() ([]*url.URL, error)
@@ -283,16 +287,16 @@ func (c *Config) ParseListenURLs() ([]*url.URL, error)
 ParseListenURLs parses ListenURLs into URLs, returning an error for any malformed entry.
 
 <a name="Config.Validate"></a>
-### func \(\*Config\) [Validate](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L199>)
+### func \(\*Config\) [Validate](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L204>)
 
 ```go
 func (c *Config) Validate() error
 ```
 
-Validate returns an error for a configuration Start cannot serve safely: an invalid CORS block \(see CORS.Validate\) or, while CORS is enabled, an HTTPHeaders entry that would set an Access\-Control\-\* header outside the CORS policy. Start calls Validate.
+Validate returns an error for a configuration Start cannot serve safely: an invalid TrustedProxyCIDRs entry, an invalid CORS block \(see CORS.Validate\) or, while CORS is enabled, an HTTPHeaders entry that would set an Access\-Control\-\* header outside the CORS policy. Start runs the same checks.
 
 <a name="GRPCRegistrator"></a>
-## type [GRPCRegistrator](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L60-L63>)
+## type [GRPCRegistrator](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L61-L64>)
 
 GRPCRegistrator is an optional interface a Service implements to expose gRPC services; it is invoked once per gRPC server instance \(secure and insecure\).
 
@@ -304,7 +308,7 @@ type GRPCRegistrator interface {
 ```
 
 <a name="GServer"></a>
-## type [GServer](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L68-L95>)
+## type [GServer](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L69-L96>)
 
 GServer is the server handle passed to ServiceFactory functions and returned by Start. Services use it to register themselves and to query server state; it is safe for concurrent reads after Start returns.
 
@@ -340,7 +344,7 @@ type GServer interface {
 ```
 
 <a name="Start"></a>
-### func [Start](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L133-L139>)
+### func [Start](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L135-L141>)
 
 ```go
 func Start(name string, cfg *Config, container *dig.Container, serviceFactories map[string]ServiceFactory, opts ...Option) (GServer, error)
@@ -349,7 +353,7 @@ func Start(name string, cfg *Config, container *dig.Container, serviceFactories 
 Start creates the services from serviceFactories, opens the listeners from cfg.ListenURLs and begins serving in background goroutines, returning the running server. The container must provide discovery.Discovery and, when cfg.IdentityMap enables JWT or DPoP, a jwt.Parser. On error any partially opened listeners are closed and the error is returned; on success the caller must eventually call Close. Serve errors are reported on Err.
 
 <a name="KeepAliveCfg"></a>
-## type [KeepAliveCfg](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L102-L111>)
+## type [KeepAliveCfg](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L107-L116>)
 
 KeepAliveCfg configures gRPC keepalive. MinTime sets the enforcement policy; Interval and Timeout are only applied when both are positive. MaxConnectionIdle is always 5 minutes.
 
@@ -432,7 +436,7 @@ func WithUnaryServerInterceptor(other grpc.UnaryServerInterceptor) Option
 WithUnaryServerInterceptor appends a gRPC unary interceptor after the built\-in chain \(panic recovery, validation, correlation, logging, identity, authz\).
 
 <a name="RateLimit"></a>
-## type [RateLimit](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L271-L284>)
+## type [RateLimit](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L287-L302>)
 
 RateLimit configures the per\-client token bucket rate limiter \(github.com/didip/tollbooth\) that wraps the HTTP handler.
 
@@ -445,7 +449,9 @@ type RateLimit struct {
     // ExpirationTTL specifies the TTL for token bucket, default 10 mins
     ExpirationTTL time.Duration `json:"expiration_ttl,omitempty" yaml:"expiration_ttl,omitempty"`
     // HeadersIPLookups lists the sources used to identify the client, in order;
-    // default is "X-Forwarded-For", "X-Real-IP", "RemoteAddr".
+    // default is the trusted client address derived from the socket peer and
+    // TrustedProxyCIDRs. Explicit header lookups can be spoofed and should be
+    // configured only when the deployment guarantees they are overwritten.
     HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
     // Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET", "POST";
     // empty means all methods.
@@ -454,7 +460,7 @@ type RateLimit struct {
 ```
 
 <a name="RateLimit.GetEnabled"></a>
-### func \(\*RateLimit\) [GetEnabled](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L287>)
+### func \(\*RateLimit\) [GetEnabled](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L305>)
 
 ```go
 func (c *RateLimit) GetEnabled() bool
@@ -463,7 +469,7 @@ func (c *RateLimit) GetEnabled() bool
 GetEnabled returns true when rate limiting is configured and enabled; safe on a nil receiver.
 
 <a name="RouteRegistrator"></a>
-## type [RouteRegistrator](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L53-L56>)
+## type [RouteRegistrator](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L54-L57>)
 
 RouteRegistrator is an optional interface a Service implements to expose REST endpoints; it is invoked once per listener when the router is built.
 
@@ -475,7 +481,7 @@ type RouteRegistrator interface {
 ```
 
 <a name="Server"></a>
-## type [Server](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L100-L125>)
+## type [Server](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L101-L127>)
 
 Server is the GServer implementation returned by Start. It owns the listeners, the per\-listener HTTP and gRPC servers, and the registered services. Use Start to construct it; the zero value is not usable.
 
@@ -567,7 +573,7 @@ stopped server
 </details>
 
 <a name="Server.AddService"></a>
-### func \(\*Server\) [AddService](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L397>)
+### func \(\*Server\) [AddService](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L399>)
 
 ```go
 func (e *Server) AddService(svc Service)
@@ -576,7 +582,7 @@ func (e *Server) AddService(svc Service)
 AddService registers svc by its Name, replacing any service with the same name. It must be called from a ServiceFactory, before Start begins serving; the services map is not synchronized.
 
 <a name="Server.Close"></a>
-### func \(\*Server\) [Close](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L310>)
+### func \(\*Server\) [Close](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L312>)
 
 ```go
 func (e *Server) Close()
@@ -585,7 +591,7 @@ func (e *Server) Close()
 Close gracefully shuts down all servers/listeners. Client requests will be terminated with request timeout. After timeout, enforce remaning requests be closed immediately.
 
 <a name="Server.Configuration"></a>
-### func \(\*Server\) [Configuration](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L390>)
+### func \(\*Server\) [Configuration](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L392>)
 
 ```go
 func (e *Server) Configuration() *Config
@@ -594,7 +600,7 @@ func (e *Server) Configuration() *Config
 Configuration returns a pointer to the server's copy of the Config; mutating it after Start has no effect on already configured listeners.
 
 <a name="Server.Discovery"></a>
-### func \(\*Server\) [Discovery](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L443>)
+### func \(\*Server\) [Discovery](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L445>)
 
 ```go
 func (e *Server) Discovery() discovery.Discovery
@@ -603,7 +609,7 @@ func (e *Server) Discovery() discovery.Discovery
 Discovery returns the discovery.Discovery injected from the container; all services are registered with it under the server name after Start.
 
 <a name="Server.Err"></a>
-### func \(\*Server\) [Err](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L381>)
+### func \(\*Server\) [Err](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L383>)
 
 ```go
 func (e *Server) Err() <-chan error
@@ -612,7 +618,7 @@ func (e *Server) Err() <-chan error
 Err returns the channel on which listener/serve errors are reported. The channel is buffered and is never closed; errors are dropped once Close begins.
 
 <a name="Server.Hostname"></a>
-### func \(\*Server\) [Hostname](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L431>)
+### func \(\*Server\) [Hostname](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L433>)
 
 ```go
 func (e *Server) Hostname() string
@@ -621,7 +627,7 @@ func (e *Server) Hostname() string
 Hostname is the hostname
 
 <a name="Server.IsReady"></a>
-### func \(\*Server\) [IsReady](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L409>)
+### func \(\*Server\) [IsReady](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L411>)
 
 ```go
 func (e *Server) IsReady() bool
@@ -630,7 +636,7 @@ func (e *Server) IsReady() bool
 IsReady returns true when every registered service reports IsReady.
 
 <a name="Server.ListenURLs"></a>
-### func \(\*Server\) [ListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L426>)
+### func \(\*Server\) [ListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L428>)
 
 ```go
 func (e *Server) ListenURLs() []string
@@ -639,7 +645,7 @@ func (e *Server) ListenURLs() []string
 ListenURLs returns the configured Config.ListenURLs \(not the resolved listener addresses\).
 
 <a name="Server.LocalIP"></a>
-### func \(\*Server\) [LocalIP](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L437>)
+### func \(\*Server\) [LocalIP](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L439>)
 
 ```go
 func (e *Server) LocalIP() string
@@ -648,7 +654,7 @@ func (e *Server) LocalIP() string
 LocalIP returns the local IPv4 address detected at startup, or 127.0.0.1 when it could not be determined.
 
 <a name="Server.Name"></a>
-### func \(\*Server\) [Name](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L384>)
+### func \(\*Server\) [Name](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L386>)
 
 ```go
 func (e *Server) Name() string
@@ -657,7 +663,7 @@ func (e *Server) Name() string
 Name returns server name
 
 <a name="Server.Service"></a>
-### func \(\*Server\) [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L404>)
+### func \(\*Server\) [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L406>)
 
 ```go
 func (e *Server) Service(name string) Service
@@ -666,7 +672,7 @@ func (e *Server) Service(name string) Service
 Service returns the registered service with the given name, or nil.
 
 <a name="Server.StartedAt"></a>
-### func \(\*Server\) [StartedAt](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L420>)
+### func \(\*Server\) [StartedAt](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L422>)
 
 ```go
 func (e *Server) StartedAt() time.Time
@@ -675,7 +681,7 @@ func (e *Server) StartedAt() time.Time
 StartedAt returns Time when the server has started
 
 <a name="Service"></a>
-## type [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L33-L41>)
+## type [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L34-L42>)
 
 Service is a named sub\-service hosted by a Server. Services are created by a ServiceFactory and registered with GServer.AddService; a Service may additionally implement RouteRegistrator, GRPCRegistrator or StartSubcriber.
 
@@ -692,7 +698,7 @@ type Service interface {
 ```
 
 <a name="ServiceFactory"></a>
-## type [ServiceFactory](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L28>)
+## type [ServiceFactory](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L29>)
 
 ServiceFactory builds a Service for the given server. The returned value is passed to dig.Container.Invoke, so it must be a function whose parameters are resolved from the container; the function itself should call GServer.AddService.
 
@@ -701,7 +707,7 @@ type ServiceFactory func(GServer) any
 ```
 
 <a name="StartSubcriber"></a>
-## type [StartSubcriber](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L45-L49>)
+## type [StartSubcriber](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L46-L50>)
 
 StartSubcriber is an optional interface a Service can implement to be notified once the server has started.
 
@@ -714,7 +720,7 @@ type StartSubcriber interface {
 ```
 
 <a name="SwaggerCfg"></a>
-## type [SwaggerCfg](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L144-L150>)
+## type [SwaggerCfg](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L149-L155>)
 
 SwaggerCfg specifies the configuration for Swagger. It is not used by gserver itself and is provided for services that serve Swagger files.
 
@@ -729,7 +735,7 @@ type SwaggerCfg struct {
 ```
 
 <a name="TLSInfo"></a>
-## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L115-L140>)
+## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L120-L145>)
 
 TLSInfo is the server TLS configuration. Cert and key files are watched and reloaded by pkg/transport; CRLFile and OCSPFile are currently not used.
 
@@ -763,7 +769,7 @@ type TLSInfo struct {
 ```
 
 <a name="TLSInfo.Empty"></a>
-### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L220>)
+### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L236>)
 
 ```go
 func (info *TLSInfo) Empty() bool
@@ -772,7 +778,7 @@ func (info *TLSInfo) Empty() bool
 Empty returns true if the receiver is nil or either CertFile or KeyFile is unset.
 
 <a name="TLSInfo.GetClientCertAuth"></a>
-### func \(\*TLSInfo\) [GetClientCertAuth](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L225>)
+### func \(\*TLSInfo\) [GetClientCertAuth](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L241>)
 
 ```go
 func (info *TLSInfo) GetClientCertAuth() bool
@@ -781,7 +787,7 @@ func (info *TLSInfo) GetClientCertAuth() bool
 GetClientCertAuth returns true when ClientCertAuth is set and true.
 
 <a name="TLSInfo.String"></a>
-### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L230>)
+### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/gserver/config.go#L246>)
 
 ```go
 func (info *TLSInfo) String() string
@@ -790,7 +796,7 @@ func (info *TLSInfo) String() string
 String returns a loggable summary of the TLS file locations; safe on a nil receiver.
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L653-L656>)
+## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L681-L684>)
 
 Validator is implemented by request messages that can validate themselves; NewRequestValidationUnaryInterceptor calls it before the handler.
 

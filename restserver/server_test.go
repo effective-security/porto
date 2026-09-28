@@ -302,6 +302,9 @@ func Test_ResolveTCPAddr(t *testing.T) {
 }
 
 func Test_GetServerURL(t *testing.T) {
+	t.Parallel()
+	trusted, err := identity.ParseTrustedProxies([]string{"10.0.0.0/8"})
+	require.NoError(t, err)
 	cfg := &serverConfig{
 		BindAddr: "hostname:8081",
 	}
@@ -311,6 +314,7 @@ func Test_GetServerURL(t *testing.T) {
 	require.NotNil(t, server)
 
 	t.Run("without XForwardedProto", func(t *testing.T) {
+		t.Parallel()
 		r, err := http.NewRequest(http.MethodGet, "/get/GET", nil)
 		require.NoError(t, err)
 
@@ -321,9 +325,12 @@ func Test_GetServerURL(t *testing.T) {
 	})
 
 	t.Run("with XForwardedProto", func(t *testing.T) {
+		t.Parallel()
 		r, err := http.NewRequest(http.MethodGet, "/get/GET", nil)
 		require.NoError(t, err)
 		r.Header.Set(header.XForwardedProto, "https")
+		r.RemoteAddr = "10.0.0.2:123"
+		r = r.WithContext(identity.WithTrustedProxies(r.Context(), trusted))
 
 		u := rest.GetServerURL(server, r, "/another/location")
 		require.NotNil(t, u)
@@ -331,10 +338,13 @@ func Test_GetServerURL(t *testing.T) {
 		assert.Equal(t, "https://hostname:8081/another/location", u.String())
 	})
 
-	t.Run("with XForwardedProto", func(t *testing.T) {
+	t.Run("with XForwardedProto and Host", func(t *testing.T) {
+		t.Parallel()
 		r, err := http.NewRequest(http.MethodGet, "/get/GET", nil)
 		require.NoError(t, err)
 		r.Header.Set(header.XForwardedProto, "https")
+		r.RemoteAddr = "10.0.0.2:123"
+		r = r.WithContext(identity.WithTrustedProxies(r.Context(), trusted))
 		r.Host = "localhost"
 
 		u := rest.GetServerURL(server, r, "/another/location")
@@ -342,6 +352,73 @@ func Test_GetServerURL(t *testing.T) {
 
 		assert.Equal(t, "https://localhost/another/location", u.String())
 	})
+
+	t.Run("untrusted peer ignores forwarded protocol", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/get/GET", nil)
+		r.RemoteAddr = "198.51.100.7:123"
+		r.Header.Set(header.XForwardedProto, "https")
+		r = r.WithContext(identity.WithTrustedProxies(r.Context(), trusted))
+		u := rest.GetServerURL(server, r, "/another/location")
+		assert.Equal(t, server.Protocol(), u.Scheme)
+	})
+
+	t.Run("invalid forwarded protocol", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/get/GET", nil)
+		r.RemoteAddr = "10.0.0.2:123"
+		r.Header.Set(header.XForwardedProto, "javascript")
+		r = r.WithContext(identity.WithTrustedProxies(r.Context(), trusted))
+		u := rest.GetServerURL(server, r, "/another/location")
+		assert.Equal(t, server.Protocol(), u.Scheme)
+	})
+}
+
+func TestHTTPServerTrustedProxies(t *testing.T) {
+	t.Parallel()
+	cfg := &serverConfig{BindAddr: "127.0.0.1:0"}
+	server, err := rest.New("test", "", cfg, nil)
+	require.NoError(t, err)
+	trust, err := identity.ParseTrustedProxies([]string{"10.0.0.0/8"})
+	require.NoError(t, err)
+	assert.Same(t, server, server.WithTrustedProxies(trust))
+
+	var got string
+	server.WithIdentityProvider(func(r *http.Request) (identity.Identity, error) {
+		got = identity.ClientIPFromRequest(r)
+		return nil, nil
+	})
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:123"
+	r.Header.Set(header.XForwardedFor, "192.168.1.4")
+	server.NewMux().ServeHTTP(httptest.NewRecorder(), r)
+	assert.Equal(t, "192.168.1.4", got)
+}
+
+func TestCustomMuxTrustedProxies(t *testing.T) {
+	t.Parallel()
+	cfg := &serverConfig{BindAddr: testutils.CreateBindAddr("127.0.0.1")}
+	server, err := rest.New("test", "", cfg, nil)
+	require.NoError(t, err)
+	trust, err := identity.ParseTrustedProxies([]string{"127.0.0.1/32"})
+	require.NoError(t, err)
+	server.WithTrustedProxies(trust).WithMuxFactory(muxer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write([]byte(identity.ClientIPFromRequest(r)))
+		assert.NoError(t, err)
+	})))
+	require.NoError(t, server.StartHTTP())
+	defer server.StopHTTP()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+cfg.BindAddr+"/", nil)
+	require.NoError(t, err)
+	req.Header.Set(header.XForwardedFor, "192.168.1.4")
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.1.4", string(body))
 }
 
 func Test_GetServerBaseURL(t *testing.T) {

@@ -2,10 +2,17 @@
 // Service implementations behind a single httprouter-based mux.
 //
 // The server assembles a fixed middleware chain around the router
-// (outermost first): correlation ID, identity mapping, request metrics,
-// request logging, optional path/role authorization (restserver/authz),
-// readiness gating (restserver/ready), and finally the router with an
-// optional CORS wrapper. Custom chains can be supplied via WithMuxFactory.
+// (outermost first): trusted proxy policy, correlation ID, identity
+// mapping, request metrics, request logging, optional path/role
+// authorization (restserver/authz), readiness gating (restserver/ready),
+// and finally the router with an optional CORS wrapper. Custom chains can
+// be supplied via WithMuxFactory; StartHTTP still applies the trusted proxy
+// policy around them.
+//
+// By default the socket peer supplies the client IP and scheme.
+// WithTrustedProxies accepts forwarding headers from the proxies in a policy
+// built with identity.ParseTrustedProxies; the client IP is resolved once
+// per request by identity.NewTrustedProxyHandler.
 //
 // Typical usage:
 //
@@ -14,7 +21,12 @@
 //	if err != nil {
 //		return err
 //	}
+//	trust, err := identity.ParseTrustedProxies([]string{"10.2.0.0/16"}) // optional
+//	if err != nil {
+//		return err
+//	}
 //	srv.WithCORS(&restserver.CORSOptions{AllowedOrigins: []string{"*"}}).
+//		WithTrustedProxies(trust).
 //		WithAuthz(authzProvider)          // optional
 //	srv.AddService(mySvc)                 // implements restserver.Service
 //	if err := srv.StartHTTP(); err != nil { // non-blocking, serves in a goroutine

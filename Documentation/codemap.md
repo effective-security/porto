@@ -83,6 +83,8 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | CORS (REST, rs/cors)                        | gserver, restserver                        | serve.go, router.go              | `configureHandlers`, `corsHandler`, `CORSOptions`, `NewRouterWithCORS`     |
 | CORS (gRPC-Web headers)                     | gserver                                    | serve.go, grpc_web_response.go   | `grpcHandlerFunc`, `grpcWebResponse.prepareHeaders`, `mergeVaryHeader`     |
 | rate limit (tollbooth)                      | gserver                                    | serve.go, config.go              | `configureRateLimiter`, `RateLimit`                                        |
+| trusted proxy CIDRs / forwarding headers    | xhttp/identity, gserver, restserver        | realip.go, config.go, server.go  | `ParseTrustedProxies`, `WithTrustedProxies`, `NewTrustedProxyHandler`, `Config.Validate`, `HTTPServer.WithTrustedProxies` |
+| client IP resolved once per request         | xhttp/identity                             | realip.go                        | `NewTrustedProxyHandler`, `ClientIPFromRequest`, `forwarding`              |
 | HTTP middleware chain order                 | gserver, restserver                        | serve.go, server.go              | `configureHandlers`, `HTTPServer.NewMux`                                   |
 | gRPC interceptor chain                      | gserver                                    | serve.go                         | `grpcServer`                                                               |
 | panic recovery                              | gserver, xhttp/correlation, xhttp/identity | serve.go, correlation.go, ctx.go | `panicInterceptor`, `NewAuthUnaryInterceptor`                              |
@@ -142,8 +144,8 @@ imports `restserver` or `gserver`, except `pkg/retriable`, `pkg/rpcclient`,
 | identity middleware (HTTP)                  | xhttp/identity                             | ctx.go                           | `NewContextHandler`                                                        |
 | identity interceptor (gRPC)                 | xhttp/identity                             | ctx.go                           | `NewAuthUnaryInterceptor`, `NewStreamServerInterceptor`                    |
 | request context (identity/IP/UA)            | xhttp/identity                             | ctx.go                           | `FromRequest`, `FromContext`                                               |
-| `X-Forwarded-For` / `X-Real-Ip`             | xhttp/identity                             | realip.go                        | `ClientIPFromRequest`, `isPrivateIP`                                       |
-| `X-Forwarded-Proto`                         | restserver                                 | server.go                        | `GetServerURL`                                                             |
+| `X-Forwarded-For` / `X-Real-Ip`             | xhttp/identity                             | realip.go                        | `ClientIPFromRequest`, `ClientIPFromGRPC`                                  |
+| `X-Forwarded-Proto`                         | restserver, xhttp/identity                 | server.go, realip.go             | `GetServerURL`, `ForwardedProto`                                            |
 | basic auth parsing                          | xhttp/identity                             | basicauth.go                     | `BasicAuthFromRequest`                                                     |
 | test identity injection                     | xhttp/identity                             | identity.go                      | `WithTestIdentity`                                                         |
 | identity provider / role mapping            | gserver/roles                              | roles.go                         | `New`, `IdentityProvider`                                                  |
@@ -226,16 +228,16 @@ Entry points:
 - `Start(name, cfg, container, factories, opts...) (GServer, error)` — the only constructor; starts serving immediately.
 - `GServer` — `AddService`, `Service`, `IsReady`, `Err`, `Close`, `Discovery`.
 - `ServiceFactory`, `Service`, `RouteRegistrator`, `GRPCRegistrator`, `StartSubcriber` — plug-in contracts.
-- `Config` YAML keys: `listen_urls`, `server_tls{cert,key,trusted_ca,client_ca,client_cert_auth,cipher_suites}`, `services`, `identity_map`, `authz`, `cors`, `rate_limit`, `timeout.request`, `keep_alive{min_time,interval,timeout}`, `max_recv_msg_size`, `max_send_msg_size`, `http_headers`, `logger_skip_paths`, `prom_grpc`, `debug_logs`.
+- `Config` YAML keys: `listen_urls`, `server_tls{cert,key,trusted_ca,client_ca,client_cert_auth,cipher_suites}`, `services`, `identity_map`, `authz`, `cors`, `rate_limit`, `trusted_proxy_cidrs`, `timeout.request`, `keep_alive{min_time,interval,timeout}`, `max_recv_msg_size`, `max_send_msg_size`, `http_headers`, `logger_skip_paths`, `prom_grpc`, `debug_logs`.
 
 Invariants:
 
-- `Start` returns errors, starting with `Config.Validate`; `configureHandlers` panics through the logger if the authz handler cannot be built. Handler panics are recovered into 500 / `codes.Internal` (unary only; the stream chain has no recovery).
+- `Start` returns errors, starting with the `Config.Validate` checks; `newServer` calls the unexported `Config.validate`, which also returns the parsed `TrustedProxyCIDRs` policy so it is parsed once. `configureHandlers` panics through the logger if the authz handler cannot be built. Handler panics are recovered into 500 / `codes.Internal` (unary only; the stream chain has no recovery).
 - Process-global: package logger; `WarnUnaryRequestLatency`. The gRPC gzip compressor is registered by blank import.
 - Every name in `Config.Services` must exist in the factory map; factories run through `dig.Container.Invoke`. The container must provide `discovery.Discovery` and, when JWT/DPoP is enabled, `jwt.Parser`.
 - Listen URL schemes: `http`, `https`, `unix`, `unixs`; no scheme → https when TLS is configured. The same address listed twice yields one listener serving both secure and insecure.
 - Plain listeners: cmux routes HTTP/2 → gRPC (h2c), HTTP/1 → REST; gRPC-Web and `HTTPHeaders` are only handled on TLS listeners, where everything goes through `http.Server` and `grpcHandlerFunc` selects by `Content-Type`.
-- HTTP chain (outer → inner): rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
+- HTTP chain (outer → inner): trusted proxy policy → rate limit → correlation → CORS (if enabled) → identity → metrics → request logger → authz (if configured) → readiness → `WithMiddleware` → router. The default limiter keys on the client IP resolved by `NewTrustedProxyHandler`: tollbooth checks a shallow request copy whose `RemoteAddr` is that bare IP, so `X-Rate-Limit-Request-Remote-Addr` echoes the limiter key rather than the socket peer; the handler and `OnLimitReached` get the original request; a request without a client IP is not limited. Explicit `headers_ip_lookups` uses `tollbooth.LimitHandler` as is, overrides that policy, and must be used only when a proxy overwrites the chosen headers. Unary gRPC chain: panic recovery → validation → correlation → log → identity → authz (only when configured) → prometheus (opt) → custom. Stream chain: log → correlation → identity → authz (only when configured) → prometheus → custom.
 - Headers read: `Content-Type`, `Origin`, `Accept-Encoding`, `X-GRPC-Stream`. For gRPC-Web, CORS headers are written only when `CORS.GetEnabled()` and an allowed `Origin` is present. Nonempty `AllowedOrigins` uses `rs/cors` matching, including its origin patterns; explicit `*` allows all origins and an empty list allows none. `Start` rejects an enabled `*` with `AllowCredentials` (`CORS.Validate`) and, while CORS is enabled, any `Access-Control-*` name in `HTTPHeaders` (`Config.Validate`, case-insensitive), so static headers cannot bypass the CORS policy; gRPC-Web never sends `Access-Control-Allow-Credentials` with `Access-Control-Allow-Origin: *`. A disallowed gRPC-Web POST gets HTTP 403; a disallowed preflight gets no allow-origin header. REST CORS is not request or CSRF protection: `rs/cors` still runs the handler for a disallowed actual request and only omits CORS response headers. `Access-Control-Expose-Headers` merges configured and service names with response and gRPC trailer names without case-insensitive duplicates; service response metadata cannot override server CORS policy headers. Reflected and denied origins add `Vary: Origin`; `prepareHeaders` merges service `Vary` header and trailer metadata without dropping it. Other headers written: `Content-Encoding: gzip`, `Config.HTTPHeaders`.
 - gRPC-Web compression is enabled when `Accept-Encoding` contains `gzip` as a substring (q-values ignored, P-076) and `X-GRPC-Stream` is absent.
 - Compressed gRPC-Web responses borrow a gzip writer from a pool; `Close` is idempotent because both `finishRequest` and the handler's deferred cleanup call it. Writers are reset before reuse and release the previous response writer on return to the pool. After `Close`, body writes to a compressed response return `errWriteAfterClose` and late trailer writes are logged and dropped, so raw bytes never follow the gzip footer.
@@ -306,18 +308,18 @@ Files:
 Entry points:
 
 - `New(version, ipaddr, Config, *tls.Config) (*HTTPServer, error)` — nil TLS means plain HTTP.
-- `WithAuthz` / `WithIdentityProvider` / `WithCORS` / `WithShutdownTimeout` / `WithMuxFactory` — configure before `StartHTTP`.
+- `WithAuthz` / `WithIdentityProvider` / `WithTrustedProxies` / `WithCORS` / `WithShutdownTimeout` / `WithMuxFactory` — configure before `StartHTTP`; all but `WithMuxFactory` return the server for chaining.
 - `AddService`, `StartHTTP`, `StopHTTP`, `NewMux`, `IsReady`, `OnEvent`; `Router` methods; `GetServerURL`, `GetServerBaseURL`.
 
 Invariants:
 
 - `StartHTTP` binds HTTP and HTTPS listeners synchronously and returns bind errors; serving remains asynchronous. A failed bind can be retried, but a successfully started instance cannot be restarted.
 - `AddService` panics on duplicate names; `NewMux` panics if the authz handler cannot be built.
-- Chain (outer → inner): correlation → identity → metrics → request logger → authz (if set) → ready → CORS (if set) → router. Default identity mapper is `identity.GuestIdentityMapper`; logger granularity is `time.Millisecond`.
+- Chain (outer → inner): trusted proxy policy → correlation → identity → metrics → request logger → authz (if set) → ready → CORS (if set) → router. `WithTrustedProxies` takes a policy from `identity.ParseTrustedProxies` (CIDR errors are returned there); nil trusts no proxy. `StartHTTP` applies the policy to custom mux factories too. Default identity mapper is `identity.GuestIdentityMapper`; logger granularity is `time.Millisecond`.
 - `StopHTTP`: mark unready → wait for Started callbacks → broadcast Stopping → `Shutdown` with `shutdownTimeout` (default 5s) → `Service.Close()` for all → broadcast Stopped. Calls before start do nothing; concurrent and repeated calls wait for the first shutdown. A timeout still closes services after `Shutdown` returns. Lifecycle callbacks must not call `StopHTTP` synchronously.
 - `serving` is an `atomic.Bool`; `IsReady` reads services under `lock.RLock`. `HTTPServer.Config()` and `HTTPConfig()` return the same configuration. Event handlers are copied under `lock.RLock` before callbacks run, so callbacks may register handlers.
 - `GetPort` uses `net.SplitHostPort` for host:port and defaults bare IPv6 literals to port 443. `GetHostName` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` rebuild host:port with `net.JoinHostPort`.
-- Headers read: `X-Forwarded-Proto` in `GetServerURL`. 404 → JSON `not_found`. `MaxRequestSize` (64 MiB) is advisory only (P-026).
+- `GetServerURL` accepts `X-Forwarded-Proto` only for a configured trusted peer and only when the value is `http` or `https`. 404 → JSON `not_found`. `MaxRequestSize` (64 MiB) is advisory only (P-026).
 
 Tests: `rest_test.go` suite builds CA/server/client chains with `xpki/testca` in a temp dir; `server_test.go` uses random ports via `tests/testutils`; `router_test.go` CORS; `example_test.go` uses `testdata/test-server*.pem`.
 
@@ -356,7 +358,7 @@ Files: `requestlogger.go` (`RequestLogger`, `NewRequestLogger`, `LoggerSkipPath`
 Invariants:
 
 - `NewRequestLogger` panics on a nil handler; a nil logger returns the handler unwrapped; granularity must be > 0 (P-031).
-- Log fields: method, path, status, bytes, duration, remote (`identity.ClientIPFromRequest`), agent; INFO via `ContextKV`.
+- Log fields: method, path, status, bytes, duration, remote (`identity.ClientIPFromRequest`, the IP cached by `identity.NewTrustedProxyHandler` when present), agent; INFO via `ContextKV`.
 - Metric tags: verb, status, uri (raw path, P-023), role; 404 collapses to `unknown`.
 - `LoggerSkipPath` tags `path`, `agent`; `*` wildcard; agent is a substring match.
 - `ResponseCapture` has no `Hijacker`/`Unwrap` (P-024).
@@ -379,7 +381,7 @@ Invariants:
 
 ### github.com/effective-security/porto/xhttp/header
 
-Purpose: constants for HTTP header names and content-type values, including `Vary` for response negotiation. No imports. `X-Forwarded-For` and `X-Real-Ip` are not defined here; `identity` uses literals.
+Purpose: constants for HTTP header names and content-type values, including `Vary` for response negotiation and `XForwardedFor`, `XRealIP`, `XForwardedProto` for proxy headers. No imports.
 
 ### github.com/effective-security/porto/xhttp/httperror
 
@@ -399,14 +401,14 @@ Invariants:
 
 Purpose: caller identity (role/subject/tenant/claims/auth method) and connection facts (client IP, UA, target) in request contexts for HTTP and gRPC.
 
-Files: `identity.go` (`Identity`, `NewIdentity`, `AuthMethod`, guest mappers, `WithTestIdentity`), `ctx.go` (`RequestContext`, `FromContext/FromRequest/AddToContext`, `NewContextHandler`, `NewAuthUnaryInterceptor`/`NewStreamServerInterceptor`), `realip.go` (`ClientIPFromRequest`, `ClientIPFromGRPC`, `isPrivateIP`), `basicauth.go`.
+Files: `identity.go` (`Identity`, `NewIdentity`, `AuthMethod`, guest mappers, `WithTestIdentity`), `ctx.go` (`RequestContext`, `FromContext/FromRequest/AddToContext`, `NewContextHandler`, `NewAuthUnaryInterceptor`/`NewStreamServerInterceptor`), `realip.go` (`TrustedProxies`, `ParseTrustedProxies`, `WithTrustedProxies`, `NewTrustedProxyHandler`, `ClientIPFromRequest`, `ClientIPFromGRPC`, `ForwardedProto`), `basicauth.go`.
 
 Invariants:
 
 - Never returns a nil identity: guest (`GuestRoleName = "guest"`, `MethodNone`) when missing. Mapper error → HTTP 401 JSON / gRPC `PermissionDenied`.
 - An existing `RequestContext` in ctx is respected (test injection). `FromRequest` mutates the stored context in place.
-- Headers/metadata read: `X-Real-Ip`, `X-Forwarded-For` (first non-private IP, where private means RFC 1918/ULA, loopback or link-local), `User-Agent`; gRPC `user-agent`, `x-user-agent`, `x-forwarded-for`, `x-real-ip`, else peer address. All are trusted as sent (P-017, P-018).
-- Unary gRPC interceptor recovers panics; the stream one does not.
+- Without a trusted proxy policy, client IP is the socket peer and forwarded headers are ignored. `ParseTrustedProxies` validates CIDRs; `WithTrustedProxies` stores the immutable policy in context (replacing any policy and cached IP); `NewTrustedProxyHandler` applies it to HTTP and resolves the client IP once per request. The context value (`forwarding`) holds the policy plus the resolved IP and the `RemoteAddr` it was resolved for; `ClientIPFromRequest` returns the cached IP when `RemoteAddr` still matches, so header changes after the trust boundary are ignored and a request copy with another peer is resolved again. A request with an empty `RemoteAddr` has no client IP and returns "" (the pre-B05 fallback to `netutil.GetLocalIP` was removed). For trusted peers, XFF is walked right to left to the first untrusted address, including private addresses, or to the leftmost entry when every hop is trusted; malformed values fall back to the peer. IPv4-mapped IPv6 addresses are returned as IPv4. IPv6 zones (`fe80::1%eth0`) are ignored when matching trusted CIDRs, because `netip.Prefix.Contains` rejects zoned addresses; returned addresses keep their zone. `X-Real-Ip` is used only when XFF is absent. gRPC metadata follows the same rules. Proxies must overwrite client supplied forwarding headers. `ForwardedProto` accepts only `http` or `https` from a trusted peer.
+- Unary gRPC interceptor recovers panics; the stream one does not. Only the first `trusted` argument of the gRPC interceptors is used; nil keeps a policy already in the context.
 
 ### github.com/effective-security/porto/xhttp/marshal
 
