@@ -36,7 +36,12 @@
 
 ## New features and behaviour
 
+- B06: shared `xhttp/limits` defaults bound HTTP header reads (10s), whole-request reads (30s), idle keepalive connections (60s), cmux detection and eager TLS handshakes (10s). Header deadlines follow native net/http semantics; HTTP/2 has no per-stream header deadline. Request bodies default to 10 MiB, including standalone `marshal.DecodeBody`. Unknown-length bodies and trailing bytes are bounded too; `RequestTooLarge` now returns HTTP 413.
+- Prometheus binds synchronously, returns bind errors without terminating the process, and returns a closer that shuts down its HTTP endpoint. Its endpoint also uses the shared read/body limits.
+
 ## Breaking changes: what clients must change
+
+- B06: raise or disable read/body limits for large uploads and long request streams using `gserver.Config.Timeouts`/`MaxRequestBody`, REST `WithTimeouts`/`WithMaxRequestBody`, or Prometheus `timeouts`/`max_request_body`. Zero selects defaults and negative values disable individual limits. `restserver.MaxRequestSize` is now enforced and is 10 MiB (previously an advisory 64 MiB). Native plaintext gRPC retains per-message limits; TLS gRPC/gRPC-Web request streams receive HTTP body limits. Native net/http TLS handshakes use the smaller positive header/read deadline; `Handshake` configures cmux and eager transport handshakes. Handle `appinit.Metrics` initialization errors and close its returned resource. Sinks still initialize once per process.
 
 - `KeypairReloader` now returns an error for an expired certificate at initial load or reload, and `Reload` returns an error after `Close`. Its TLS callbacks return an error if the current certificate expires; `Keypair` returns nil. `TLSInfo.ServerTLSWithReloader` also routes handshakes without SNI through that callback, so its returned config no longer exposes a static `Certificates` entry. Rotate certificates before expiry and handle reload and handshake errors. TLS constructors also reject CA files with no valid certificate. `NewHTTPTransportWithReloader` now clones a supplied transport; callers should use the returned `HTTPTransport` for requests and close it when done.
 

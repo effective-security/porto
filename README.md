@@ -33,6 +33,7 @@ go get github.com/effective-security/porto@latest
 | `xhttp/header`                              | HTTP header name and content-type constants.                                                                                                                                    |
 | `xhttp/httperror`                           | Structured API errors with HTTP status, code, gRPC status and request ID, plus gRPC ↔ HTTP mapping.                                                                             |
 | `xhttp/identity`                            | Caller identity, client IP and user agent extraction into request contexts for HTTP and gRPC.                                                                                   |
+| `xhttp/limits` | Shared HTTP, protocol detection and TLS handshake timeout defaults and body-size defaults. |
 | `xhttp/marshal`                             | JSON response writing (errors, gzip, pretty print) and strict JSON request decoding.                                                                                            |
 | `pkg/retriable`                             | HTTP client with retry policy, JSON marshalling, header propagation, Bearer/DPoP auth, replay nonces and token storage. See [pkg/retriable/README.md](pkg/retriable/README.md). |
 | `pkg/rpcclient`                             | gRPC client builder: TLS bundle, per-RPC Bearer/DPoP tokens, keepalive, message limits, optional blocking dial.                                                                 |
@@ -394,3 +395,33 @@ CI runs `make build covtest` and requires 90% total coverage. Conventions
 for contributors and agents are in [AGENTS.md](AGENTS.md); known defects
 are tracked in [FINDINGS.md](FINDINGS.md) and larger work in
 [ROADMAP.md](ROADMAP.md).
+
+## Server network limits
+
+HTTP servers now default to 10s for headers, 30s for whole-request reads,
+60s idle and 10 MiB for request bodies. cmux detection and eager TLS
+handshakes default to 10s. Zero selects a default; negative values disable
+individual limits. Header deadlines use native net/http semantics: HTTP/2 has no per-stream
+header deadline. There is no response write deadline. Raise or disable
+read/body limits for large uploads and long request streams.
+
+`gserver.Config` accepts `timeouts: {header: 10s, read: 30s, idle: 60s,
+handshake: 10s}` and `max_request_body: 10485760` in YAML. The existing
+`timeout.request` still controls shutdown only. Native gRPC on plaintext
+listeners retains its per-message limits; HTTP body limits also apply to
+TLS gRPC/gRPC-Web streams.
+
+For REST, configure `WithTimeouts(limits.Timeouts{...})` and
+`WithMaxRequestBody(bytes)` before `StartHTTP`. Both default and custom muxes
+are bounded. Native net/http TLS uses the smaller positive header/read
+value for its handshake; the Handshake field is for cmux/eager listeners.
+`transport.TLSInfo.HandshakeTimeout` overrides the eager TLS deadline.
+
+`marshal.DecodeBody` also enforces the body default when used alone.
+`marshal.LimitRequestBody(handler, bytes)` overrides it. Known oversized
+requests and oversized JSON bodies receive HTTP 413 `request_too_large`;
+other handlers reading bodies must handle `*http.MaxBytesError`.
+
+Prometheus accepts the same `timeouts` and `max_request_body` fields inside
+its metrics config block. `appinit.Metrics` returns bind errors synchronously;
+callers must handle them and close its returned closer to stop the endpoint.

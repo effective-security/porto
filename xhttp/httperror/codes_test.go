@@ -43,7 +43,7 @@ func Test_StatusCodes(t *testing.T) {
 		{httperror.InvalidContentType("1"), http.StatusBadRequest, "invalid_content_type: 1"},
 		{httperror.ContentLengthRequired(), http.StatusBadRequest, "content_length_required: Content-Length header not provided"},
 		{httperror.NotFound("1"), http.StatusNotFound, "not_found: 1"},
-		{httperror.RequestTooLarge("1"), http.StatusBadRequest, "request_too_large: 1"},
+		{httperror.RequestTooLarge("1"), http.StatusRequestEntityTooLarge, "request_too_large: 1"},
 		{httperror.FailedToReadRequestBody("1"), http.StatusInternalServerError, "request_body: 1"},
 		{httperror.RateLimitExceeded("1"), http.StatusTooManyRequests, "rate_limit_exceeded: 1"},
 		{httperror.TooEarly("1"), http.StatusTooEarly, "too_early: 1"},

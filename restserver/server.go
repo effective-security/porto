@@ -17,6 +17,7 @@ import (
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
+	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xlog"
@@ -24,10 +25,9 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto", "rest")
 
-// MaxRequestSize is the recommended maximum size in bytes (64 MiB) of a regular
-// HTTP POST body. The server does not enforce it; handlers that read bodies
-// should wrap r.Body with http.MaxBytesReader(w, r.Body, MaxRequestSize).
-const MaxRequestSize = 64 * 1024 * 1024
+// MaxRequestSize is the default HTTP request body limit in bytes (10 MiB).
+// WithMaxRequestBody overrides it for a server.
+const MaxRequestSize = limits.DefaultMaxRequestBody
 
 // Event source and message names that services may use when reporting
 // lifecycle status (for example to an audit log).
@@ -137,6 +137,8 @@ type HTTPServer struct {
 	startedEventDone chan struct{}
 	stopDone         chan struct{}
 	shutdownTimeout  time.Duration
+	timeouts         limits.Timeouts
+	maxRequestBody   int64
 }
 
 var _ Server = (*HTTPServer)(nil)
@@ -217,6 +219,21 @@ func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer {
 // drain before closing services (default 5s).
 func (server *HTTPServer) WithShutdownTimeout(timeout time.Duration) *HTTPServer {
 	server.shutdownTimeout = timeout
+	return server
+}
+
+// WithTimeouts configures HTTP read deadlines before StartHTTP. Zero fields
+// select limits defaults; negative fields disable their deadlines. TLS uses
+// net/http's smaller positive Header or Read deadline for its handshake.
+func (server *HTTPServer) WithTimeouts(timeouts limits.Timeouts) *HTTPServer {
+	server.timeouts = timeouts
+	return server
+}
+
+// WithMaxRequestBody sets the body limit in bytes before StartHTTP. Zero uses
+// MaxRequestSize; a negative value disables it. Custom muxes are also limited.
+func (server *HTTPServer) WithMaxRequestBody(maxBytes int64) *HTTPServer {
+	server.maxRequestBody = maxBytes
 	return server
 }
 
@@ -371,13 +388,14 @@ func (server *HTTPServer) StartHTTP() error {
 	httpHandler := server.muxFactory.NewMux()
 	if server.muxFactory != server {
 		// Custom muxes do not pass through NewMux's proxy policy wrapper.
+		httpHandler = marshal.LimitRequestBody(httpHandler, server.maxRequestBody)
 		httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
 	}
 	httpServer := &http.Server{
-		IdleTimeout: time.Hour, // TODO: via config
-		ErrorLog:    xlog.Stderr,
-		Handler:     httpHandler,
+		ErrorLog: xlog.Stderr,
+		Handler:  httpHandler,
 	}
+	server.timeouts.ApplyHTTP(httpServer)
 
 	var listener net.Listener
 	var err error
@@ -477,7 +495,7 @@ func (server *HTTPServer) StopHTTP() {
 // configured) on which every registered service has called Register, wrapped
 // (innermost to outermost) by the ready verifier, the authz handler when set,
 // the request logger, request metrics, the identity context handler, the
-// correlation ID handler and, outermost, identity.NewTrustedProxyHandler
+// body limiter, correlation ID handler and, outermost, identity.NewTrustedProxyHandler
 // with the WithTrustedProxies policy, which resolves the client IP once for
 // all of them. It is called by StartHTTP through the MuxFactory; call it
 // directly only in tests. It panics via the logger if the authz handler
@@ -528,7 +546,8 @@ func (server *HTTPServer) NewMux() http.Handler {
 		httpHandler = identity.NewContextHandler(httpHandler, identity.GuestIdentityMapper)
 	}
 
-	// Add correlationID
+	// Bound request bodies, then add correlationID
+	httpHandler = marshal.LimitRequestBody(httpHandler, server.maxRequestBody)
 	httpHandler = correlation.NewHandler(httpHandler)
 	httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
 

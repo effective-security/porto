@@ -11,6 +11,27 @@ configuration choice resolved before changing the affected behavior. Its
 reproduction, tests, and design can proceed while that choice is pending.
 The related larger designs are recorded in [ROADMAP.md](ROADMAP.md).
 
+## Completed B06 decision — network limits
+
+Zero selects shared defaults: HTTP headers 10s, whole-request reads 30s,
+idle connections 60s, cmux detection and eager TLS handshakes 10s, and
+HTTP request bodies 10 MiB. Positive values override; negative values disable
+individual limits. `gserver.Config.Timeouts` is separate from the existing
+shutdown-only `Timeout.Request`. REST exposes fluent options without changing
+its Config interface. Native net/http TLS handshakes use the smaller positive
+header/read deadline. No response write deadline is introduced. Header uses
+native net/http semantics; HTTP/2 has no per-stream header deadline.
+
+Body limits apply to HTTP handlers, including custom REST muxes, and to
+standalone `marshal.DecodeBody`; native gRPC keeps its per-message limits.
+On TLS listeners, HTTP body limits also apply to gRPC/gRPC-Web request streams.
+Known oversized bodies and oversized JSON decoding return HTTP 413.
+Prometheus binds synchronously and returns bind errors; its returned closer
+closes the HTTP server. Unexpected serve errors are logged, never fatal.
+Deployments with large uploads or long request streams must raise or disable
+the relevant read/body limits; metrics callers must handle initialization
+errors and close the returned resource.
+
 ## Completed B03 decision — gRPC-Web CORS
 
 An absent or disabled `cors` block emits no gRPC-Web CORS headers and does not
@@ -61,7 +82,6 @@ set by a trusted proxy.
 
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B06 — Network limits                       | P2       | `gserver`, `restserver`, `xhttp/marshal`, `pkg/transport`, `pkg/appinit`: add bounded cmux/HTTP/TLS handshake timeouts and request bodies; make the Prometheus server closable with a safe bind-error path. Implement the shared defaults in ROADMAP item 2 together. | P-005, P-019, P-026, P-054, P-055                                           | Timeout/body defaults and Prometheus failure behavior |
 | B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |
 | B10 — HTTP errors and authorization        | P2       | `xhttp/httperror`, `xhttp/marshal`, `xhttp/identity`, `restserver/ready`, `restserver/authz`: remove shared error mutation, return 403 for forbidden access, avoid denial double-wrapping and internal error disclosure, and constrain the OPTIONS bypass.            | P-016, P-027, P-028, P-029, P-032, P-033                                    | Auth and error response changes                       |
 | B11 — Cache pub/sub                        | P2       | `pkg/cache`: prevent blocked or leaked subscription goroutines, define publish behavior for slow consumers, and stabilize the Redis pub/sub test.                                                                                                                     | P-041, P-042, P-075                                                         | Slow-subscriber policy                                |

@@ -39,7 +39,7 @@ The "cloudwatch" key has no omitempty tag and is always emitted on marshal. Clou
 
 
 <a name="CloudWatch"></a>
-## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L55-L78>)
+## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L64-L87>)
 
 CloudWatch configures the CloudWatch sink. AdditionalTags and ReplaceTags are parsed but not currently applied by appinit.Metrics.
 
@@ -71,7 +71,7 @@ type CloudWatch struct {
 ```
 
 <a name="Metrics"></a>
-## type [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L6-L37>)
+## type [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L10-L41>)
 
 Metrics specifies the metrics pipeline configuration for appinit.Metrics.
 
@@ -111,7 +111,7 @@ type Metrics struct {
 ```
 
 <a name="Metrics.GetDisabled"></a>
-### func \(\*Metrics\) [GetDisabled](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L40>)
+### func \(\*Metrics\) [GetDisabled](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L44>)
 
 ```go
 func (c *Metrics) GetDisabled() bool
@@ -120,7 +120,7 @@ func (c *Metrics) GetDisabled() bool
 GetDisabled reports whether Disabled is set to true.
 
 <a name="Prometheus"></a>
-## type [Prometheus](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L45-L51>)
+## type [Prometheus](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L49-L60>)
 
 Prometheus configures the Prometheus sink.
 
@@ -131,6 +131,11 @@ type Prometheus struct {
     // Expiration is the duration a metric is valid for, after which it will be
     // untracked. If the value is zero, a default expiration applied
     Expiration time.Duration `json:"expiration,omitempty" yaml:"expiration,omitempty"`
+    // Timeouts configures HTTP read deadlines; zero fields select shared defaults.
+    Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
+    // MaxRequestBody limits HTTP request bytes; zero uses the shared default,
+    // and a negative value disables it.
+    MaxRequestBody int64 `json:"max_request_body,omitempty" yaml:"max_request_body,omitempty"`
 }
 ```
 

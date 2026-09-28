@@ -11,11 +11,13 @@
 //	func (s *svc) get(w http.ResponseWriter, r *http.Request, _ restserver.Params) {
 //		var req ItemRequest
 //		if marshal.DecodeBody(w, r, &req) != nil {
-//			return // 400 invalid_json already written
+//			return // 400 invalid_json or 413 request_too_large already written
 //		}
 //		item, err := s.store.Get(r.Context(), req.ID)
 //		marshal.WriteJSON(w, r, err, item) // first non-nil value wins
 //	}
 //
 // Decoding is strict: unknown JSON fields are an error (DecoderHandle).
+// DecodeBody limits request bodies to 10 MiB by default; LimitRequestBody
+// configures a different limit or explicitly disables it with a negative value.
 package marshal

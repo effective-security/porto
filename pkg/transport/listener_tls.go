@@ -19,8 +19,10 @@ import (
 	"crypto/tls"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/certutil"
 	"golang.org/x/crypto/ocsp"
@@ -35,6 +37,7 @@ type tlsListener struct {
 	donec            chan struct{}
 	err              error
 	handshakeFailure func(*tls.Conn, error)
+	handshakeTimeout time.Duration
 	check            tlsCheckFunc
 }
 
@@ -47,7 +50,8 @@ type tlsCheckFunc func(context.Context, *tls.Conn) error
 // so the tls.Config is available afterwards via tlsinfo.Config(). If tlsinfo
 // is nil or Empty, l is closed and an error returned. The caller must Close
 // the returned listener; Close blocks until the accept loop and pending
-// handshakes finish. Handshakes have no deadline.
+// handshakes finish. HandshakeTimeout defaults to 10s; a negative value
+// disables it. The deadline is cleared before a successful connection is returned.
 func NewTLSListener(l net.Listener, tlsinfo *TLSInfo) (net.Listener, error) {
 	check := func(context.Context, *tls.Conn) error { return nil }
 	return newTLSListener(l, tlsinfo, check)
@@ -115,6 +119,7 @@ func newTLSListener(l net.Listener, tlsinfo *TLSInfo, check tlsCheckFunc) (net.L
 		donec:            make(chan struct{}),
 		handshakeFailure: hf,
 		check:            check,
+		handshakeTimeout: (limits.Timeouts{Handshake: tlsinfo.HandshakeTimeout}).WithDefaults().Handshake,
 	}
 	go tlsl.acceptLoop()
 	return tlsl, nil
@@ -175,7 +180,7 @@ func (l *tlsListener) acceptLoop() {
 			}()
 
 			tlsConn := conn.(*tls.Conn)
-			herr := tlsConn.Handshake()
+			herr := l.handshake(tlsConn)
 			pendingMu.Lock()
 			delete(pending, conn)
 			pendingMu.Unlock()
@@ -196,6 +201,21 @@ func (l *tlsListener) acceptLoop() {
 			}
 		}()
 	}
+}
+
+func (l *tlsListener) handshake(conn *tls.Conn) error {
+	if l.handshakeTimeout > 0 {
+		if err := conn.SetDeadline(time.Now().Add(l.handshakeTimeout)); err != nil {
+			return errors.WithMessage(err, "unable to set TLS handshake deadline")
+		}
+	}
+	if err := conn.Handshake(); err != nil {
+		return errors.WithMessage(err, "TLS handshake failed")
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return errors.WithMessage(err, "unable to clear TLS handshake deadline")
+	}
+	return nil
 }
 
 /*

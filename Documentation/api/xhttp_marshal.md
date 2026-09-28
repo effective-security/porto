@@ -14,14 +14,14 @@ WriteJSON is the single response path used by porto handlers: it writes errors \
 func (s *svc) get(w http.ResponseWriter, r *http.Request, _ restserver.Params) {
 	var req ItemRequest
 	if marshal.DecodeBody(w, r, &req) != nil {
-		return // 400 invalid_json already written
+		return // 400 invalid_json or 413 request_too_large already written
 	}
 	item, err := s.store.Get(r.Context(), req.ID)
 	marshal.WriteJSON(w, r, err, item) // first non-nil value wins
 }
 ```
 
-Decoding is strict: unknown JSON fields are an error \(DecoderHandle\).
+Decoding is strict: unknown JSON fields are an error \(DecoderHandle\). DecodeBody limits request bodies to 10 MiB by default; LimitRequestBody configures a different limit or explicitly disables it with a negative value.
 
 ## Index
 
@@ -30,6 +30,7 @@ Decoding is strict: unknown JSON fields are an error \(DecoderHandle\).
 - [func DecodeBytes\(data \[\]byte, result any\) error](<#DecodeBytes>)
 - [func DecoderHandle\(\) \*codec.JsonHandle](<#DecoderHandle>)
 - [func EncodeBytes\(printSetting PrettyPrintSetting, value any\) \(\[\]byte, error\)](<#EncodeBytes>)
+- [func LimitRequestBody\(next http.Handler, maxBytes int64\) http.Handler](<#LimitRequestBody>)
 - [func NewEncoder\(w io.Writer, r \*http.Request\) \*codec.Encoder](<#NewEncoder>)
 - [func NewRequest\(method string, url string, req any\) \(\*http.Request, error\)](<#NewRequest>)
 - [func WriteJSON\(w http.ResponseWriter, r \*http.Request, bodies ...any\)](<#WriteJSON>)
@@ -39,7 +40,7 @@ Decoding is strict: unknown JSON fields are an error \(DecoderHandle\).
 
 
 <a name="Decode"></a>
-## func [Decode](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L105>)
+## func [Decode](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L106>)
 
 ```go
 func Decode(r io.Reader, result any) error
@@ -48,16 +49,16 @@ func Decode(r io.Reader, result any) error
 Decode reads JSON from r and decodes it into result using DecoderHandle. The reader is not size\-limited; wrap request bodies with http.MaxBytesReader first.
 
 <a name="DecodeBody"></a>
-## func [DecodeBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L119>)
+## func [DecodeBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L123>)
 
 ```go
 func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error
 ```
 
-DecodeBody decodes the JSON request body into result. On failure it writes a 400 invalid\_json response \(including the decode error text\) to w and returns the error, so callers can simply return. The body is not size\-limited.
+DecodeBody decodes the JSON request body into result. On failure it writes a 400 invalid\_json response, or 413 request\_too\_large on overflow, and returns the error, so callers can simply return. The default limit is limits.DefaultMaxRequestBody; LimitRequestBody overrides it. After a successful decode, the remaining body is consumed within the limit so trailing bytes cannot bypass the size check; with the limit disabled it is left unread. Decode and DecodeBytes remain unbounded.
 
 <a name="DecodeBytes"></a>
-## func [DecodeBytes](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L94>)
+## func [DecodeBytes](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L95>)
 
 ```go
 func DecodeBytes(data []byte, result any) error
@@ -66,7 +67,7 @@ func DecodeBytes(data []byte, result any) error
 DecodeBytes decodes JSON data into result using DecoderHandle \(strict: unknown fields are an error\).
 
 <a name="DecoderHandle"></a>
-## func [DecoderHandle](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L71>)
+## func [DecoderHandle](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L72>)
 
 ```go
 func DecoderHandle() *codec.JsonHandle
@@ -75,7 +76,7 @@ func DecoderHandle() *codec.JsonHandle
 DecoderHandle returns the codec handle used for decoding JSON into Go types. It errors when a JSON field has no matching Go field, and decodes untyped objects into map\[string\]any. The returned handle is shared and must not be mutated by callers.
 
 <a name="EncodeBytes"></a>
-## func [EncodeBytes](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L83>)
+## func [EncodeBytes](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L84>)
 
 ```go
 func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error)
@@ -83,8 +84,17 @@ func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error)
 
 EncodeBytes encodes value to JSON with the given pretty\-print setting and returns the bytes.
 
+<a name="LimitRequestBody"></a>
+## func [LimitRequestBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/limits.go#L19>)
+
+```go
+func LimitRequestBody(next http.Handler, maxBytes int64) http.Handler
+```
+
+LimitRequestBody bounds reads from request bodies, rejecting a known oversized Content\-Length with HTTP 413 before calling next. Zero selects limits.DefaultMaxRequestBody; a negative value disables the limit. DecodeBody honors this policy and writes HTTP 413 on overflow, including chunked bodies. Other body readers must handle \*http.MaxBytesError themselves.
+
 <a name="NewEncoder"></a>
-## func [NewEncoder](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L77>)
+## func [NewEncoder](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L78>)
 
 ```go
 func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder
@@ -127,7 +137,7 @@ func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSettin
 WritePlainJSON writes body as application/json with the given status code and pretty\-print setting, without gzip, error handling or logging.
 
 <a name="PrettyPrintSetting"></a>
-## type [PrettyPrintSetting](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L28>)
+## type [PrettyPrintSetting](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L29>)
 
 PrettyPrintSetting controls how to format json when encoding a go type \-\> json
 
