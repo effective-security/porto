@@ -5,19 +5,24 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 func TestMain(m *testing.M) {
@@ -167,7 +172,84 @@ func Test_grpcFromContext(t *testing.T) {
 			return nil, errors.New("some error")
 		})
 		require.Error(t, err)
-		assert.Equal(t, "rpc error: code = PermissionDenied desc = invalid identity: invalid request", err.Error())
+		// The mapper's text is logged, not returned.
+		st := status.Convert(err)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Equal(t, "invalid identity", st.Message())
+	})
+
+	t.Run("with_httperror", func(t *testing.T) {
+		shared := httperror.Forbidden("tenant disabled")
+		def := func(ctx context.Context, method string) (Identity, error) {
+			return nil, errors.Errorf("wrapped: %w", shared)
+		}
+		unary := NewAuthUnaryInterceptor(def)
+		ctx := correlation.WithID(context.Background())
+		_, err := unary(ctx, nil, info, func(ctx context.Context, req any) (any, error) {
+			return nil, errors.New("some error")
+		})
+		require.Error(t, err)
+		// An explicit httperror is the mapper's own client-safe answer.
+		assert.Equal(t, "rpc error: code = PermissionDenied desc = tenant disabled", status.Convert(err).Err().Error())
+		assert.Empty(t, shared.RequestID, "a mapper's shared error must not be modified")
+	})
+
+	t.Run("with_httperror_without_grpc_code", func(t *testing.T) {
+		def := func(ctx context.Context, method string) (Identity, error) {
+			return nil, httperror.New(http.StatusTeapot, "custom", "brew")
+		}
+		unary := NewAuthUnaryInterceptor(def)
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req any) (any, error) {
+			return nil, errors.New("some error")
+		})
+		require.Error(t, err)
+		assert.Equal(t, "rpc error: code = Unauthenticated desc = brew", err.Error())
+	})
+
+	t.Run("with_httperror_without_http_status", func(t *testing.T) {
+		def := func(ctx context.Context, method string) (Identity, error) {
+			return nil, &httperror.Error{Code: "custom", Message: "brew"}
+		}
+		unary := NewAuthUnaryInterceptor(def)
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req any) (any, error) {
+			return nil, errors.New("some error")
+		})
+		require.Error(t, err)
+		st := status.Convert(err)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Equal(t, "invalid identity", st.Message())
+	})
+
+	t.Run("with_typed_nil_httperror", func(t *testing.T) {
+		def := func(ctx context.Context, method string) (Identity, error) {
+			var typedNil *httperror.Error
+			return nil, typedNil
+		}
+		unary := NewAuthUnaryInterceptor(def)
+		_, err := unary(context.Background(), nil, info, func(ctx context.Context, req any) (any, error) {
+			return nil, errors.New("some error")
+		})
+		require.Error(t, err)
+		st := status.Convert(err)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Equal(t, "invalid identity", st.Message())
+	})
+
+	t.Run("stream_with_error", func(t *testing.T) {
+		def := func(ctx context.Context, method string) (Identity, error) {
+			return nil, errors.New("invalid request")
+		}
+		stream := NewStreamServerInterceptor(def)
+		called := false
+		err := stream(nil, testStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/test"}, func(srv any, ss grpc.ServerStream) error {
+			called = true
+			return nil
+		})
+		require.Error(t, err)
+		assert.False(t, called)
+		st := status.Convert(err)
+		assert.Equal(t, codes.Unauthenticated, st.Code())
+		assert.Equal(t, "invalid identity", st.Message())
 	})
 
 	t.Run("trusted proxy metadata", func(t *testing.T) {
@@ -266,7 +348,49 @@ func Test_RequestorIdentity(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 
-		assert.Equal(t, `{"code":"unauthorized","message":"invalid identity: missing client certificate"}`, w.Body.String())
+		// The mapper's text is logged, not returned.
+		assert.Equal(t, `{"code":"unauthorized","message":"invalid identity"}`, w.Body.String())
+	})
+
+	t.Run("mapper_httperror_without_status", func(t *testing.T) {
+		// A malformed httperror (no HTTP status) must not reach WriteHeader.
+		mapper := func(r *http.Request) (Identity, error) {
+			return nil, &httperror.Error{Code: "custom", Message: "brew"}
+		}
+		handler := NewContextHandler(http.HandlerFunc(h), mapper)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, `{"code":"unauthorized","message":"invalid identity"}`, w.Body.String())
+	})
+
+	t.Run("mapper_typed_nil_httperror", func(t *testing.T) {
+		mapper := func(r *http.Request) (Identity, error) {
+			var typedNil *httperror.Error
+			return nil, typedNil
+		}
+		handler := NewContextHandler(http.HandlerFunc(h), mapper)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/test", nil))
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, `{"code":"unauthorized","message":"invalid identity"}`, w.Body.String())
+	})
+
+	t.Run("mapper_httperror", func(t *testing.T) {
+		shared := httperror.Forbidden("tenant disabled")
+		mapper := func(r *http.Request) (Identity, error) {
+			return nil, errors.Errorf("wrapped: %w", shared)
+		}
+		handler := NewContextHandler(http.HandlerFunc(h), mapper)
+		ctx := correlation.WithID(context.Background())
+		cid := correlation.ID(ctx)
+		r := httptest.NewRequest(http.MethodGet, "/test", nil).WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		require.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, fmt.Sprintf(`{"code":"forbidden","request_id":"%s","message":"tenant disabled"}`, cid), w.Body.String())
+		assert.Empty(t, shared.RequestID, "a mapper's shared error must not be modified")
 	})
 	t.Run("ForRequest", func(t *testing.T) {
 		r, err := http.NewRequest(http.MethodGet, "/test", nil)
@@ -295,4 +419,14 @@ func identityMapperFromCNMust(r *http.Request) (Identity, error) {
 		return nil, errors.New("missing client certificate")
 	}
 	return identity{subject: r.TLS.PeerCertificates[0].Subject.CommonName, role: r.TLS.PeerCertificates[0].Subject.CommonName}, nil
+}
+
+// testStream is a grpc.ServerStream that only carries a context.
+type testStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s testStream) Context() context.Context {
+	return s.ctx
 }

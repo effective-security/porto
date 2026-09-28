@@ -75,14 +75,16 @@ type Identity interface {
 }
 
 // ProviderFromRequest maps an HTTP request to the caller's Identity. It is
-// used by NewContextHandler; returning an error rejects the request with
-// 401, returning a nil Identity yields the guest identity.
+// used by NewContextHandler; returning an error rejects the request with a
+// generic 401 (or the *httperror.Error the error wraps), returning a nil
+// Identity yields the guest identity.
 type ProviderFromRequest func(*http.Request) (Identity, error)
 
 // ProviderFromContext maps a gRPC request context and full method name to
 // the caller's Identity. It is used by the gRPC interceptors; returning an
-// error rejects the call with codes.PermissionDenied, returning a nil
-// Identity yields the guest identity.
+// error rejects the call with a generic codes.Unauthenticated status (or
+// the *httperror.Error the error wraps), returning a nil Identity yields
+// the guest identity.
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 
 // NewIdentity returns an immutable Identity with the given attributes.

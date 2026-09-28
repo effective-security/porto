@@ -22,6 +22,9 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/restserver", "authz")
 
+// msgRoleNotAllowed formats the denial message with the caller's role.
+const msgRoleNotAllowed = "%s role not allowed"
+
 var (
 	// ErrNoRoleMapperSpecified can't call NewHandler before you've set the RoleMapper function
 	ErrNoRoleMapperSpecified = errors.New("you must have a RoleMapper set to be able to create a http.Handler")
@@ -407,17 +410,29 @@ func (c *Provider) isAllowed(ctx context.Context, path, userAgent string, idn id
 	return res
 }
 
-// checkAccess ensures that access to the supplied http.request is allowed
-func (c *Provider) checkAccess(r *http.Request) error {
-	if r.Method == http.MethodOptions {
-		// always allow OPTIONS
-		return nil
+// denied returns the error for a caller whose role is not allowed: 401
+// unauthorized (codes.Unauthenticated) for an unauthenticated caller, whose
+// role is empty or guest, so it knows credentials are required; 403
+// forbidden (codes.PermissionDenied) for an authenticated role, so it knows
+// that re-authenticating will not help. An empty role is reported as guest.
+// The error carries the correlation ID of ctx.
+func denied(ctx context.Context, role string) *httperror.Error {
+	if role == "" || role == identity.GuestRoleName {
+		return httperror.Unauthorized(msgRoleNotAllowed, identity.GuestRoleName).WithContext(ctx)
 	}
+	return httperror.Forbidden(msgRoleNotAllowed, role).WithContext(ctx)
+}
 
+// checkAccess ensures that access to the supplied http.request is allowed.
+// Every method, including OPTIONS, is checked: a CORS preflight must be
+// answered by a CORS middleware placed outside this handler (restserver and
+// gserver do so), because the preflight headers are caller-controlled and
+// cannot justify skipping authorization.
+func (c *Provider) checkAccess(r *http.Request) error {
 	idn := c.requestRoleMapper(r)
 	ctx := r.Context()
 	if !c.isAllowed(ctx, r.URL.Path, r.UserAgent(), idn) {
-		return httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
+		return denied(ctx, idn.Role())
 	}
 
 	return nil
@@ -427,10 +442,13 @@ func (c *Provider) checkAccess(r *http.Request) error {
 // configuration. The handler works on a Clone of the Provider, so changes to
 // the Provider after calling NewHandler do not affect previously created
 // handlers. The handler maps the request to an identity via the role mapper,
-// checks r.URL.Path against the tree and either writes a JSON 401
-// unauthorized response or passes the request to delegate. OPTIONS requests
-// are always passed through. It returns ErrNoRoleMapperSpecified or
-// ErrNoPathsConfigured when the Provider is not usable.
+// checks r.URL.Path against the tree and either writes a JSON denial (401
+// unauthorized for a guest or empty role, 403 forbidden for any other role)
+// or passes the request to delegate. OPTIONS requests, including CORS
+// preflights, are authorized like any other method; a CORS middleware that
+// answers preflights must run before this handler. It returns
+// ErrNoRoleMapperSpecified or ErrNoPathsConfigured when the Provider is not
+// usable.
 func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error) {
 	if c.requestRoleMapper == nil {
 		return nil, errors.WithStack(ErrNoRoleMapperSpecified)
@@ -456,21 +474,22 @@ func (a *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		a.delegate.ServeHTTP(w, r)
 	} else {
-		marshal.WriteJSON(w, r, httperror.Unauthorized("%s", err.Error()))
+		marshal.WriteJSON(w, r, err)
 	}
 }
 
 // NewUnaryInterceptor returns a grpc.UnaryServerInterceptor that checks the
 // identity from the gRPC role mapper against info.FullMethod and fails with
-// httperror.Unauthorized (codes.PermissionDenied) when denied. Unlike
-// NewHandler it uses the live Provider, not a clone, and does not require a
-// configured tree (an empty tree denies everything).
+// httperror.Unauthorized (codes.Unauthenticated) for a guest or empty role
+// and httperror.Forbidden (codes.PermissionDenied) for any other role when
+// denied. Unlike NewHandler it uses the live Provider, not a clone, and does
+// not require a configured tree (an empty tree denies everything).
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		idn := c.grpcRoleMapper(ctx)
 		userAgent := headerFromContext(ctx, "user-agent")
 		if !c.isAllowed(ctx, info.FullMethod, userAgent, idn) {
-			return nil, httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
+			return nil, denied(ctx, idn.Role())
 		}
 
 		return handler(ctx, req)
@@ -485,7 +504,7 @@ func (c *Provider) NewStreamServerInterceptor() grpc.StreamServerInterceptor {
 		idn := c.grpcRoleMapper(ctx)
 		userAgent := headerFromContext(ctx, "user-agent")
 		if !c.isAllowed(ctx, info.FullMethod, userAgent, idn) {
-			return httperror.Unauthorized("%s role not allowed", idn.Role()).WithContext(ctx)
+			return denied(ctx, idn.Role())
 		}
 
 		return handler(srv, ss)

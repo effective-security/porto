@@ -3,11 +3,12 @@
 //
 // The server assembles a fixed middleware chain around the router
 // (outermost first): trusted proxy policy, correlation ID, identity
-// mapping, request metrics, request logging, optional path/role
-// authorization (restserver/authz), readiness gating (restserver/ready),
-// and finally the router with an optional CORS wrapper. Custom chains can
-// be supplied via WithMuxFactory; StartHTTP still applies the trusted proxy
-// policy around them.
+// mapping, request metrics, request logging, optional CORS (which answers
+// preflights before authorization), optional path/role authorization
+// (restserver/authz), readiness gating (restserver/ready), and finally the
+// router. Custom chains can be supplied via WithMuxFactory; StartHTTP still
+// applies the trusted proxy policy around them, and they must keep CORS
+// outside authz themselves.
 //
 // By default the socket peer supplies the client IP and scheme.
 // WithTrustedProxies accepts forwarding headers from the proxies in a policy

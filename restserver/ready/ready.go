@@ -7,9 +7,8 @@ import (
 	"github.com/effective-security/porto/xhttp/marshal"
 )
 
-var (
-	errUnavailable = httperror.New(http.StatusServiceUnavailable, "not_ready", "the service is not ready yet")
-)
+// msgNotReady is the message of the 503 not_ready response.
+const msgNotReady = "the service is not ready yet"
 
 // ServiceStatus is the readiness probe consulted on every request.
 // restserver.Server satisfies it.
@@ -42,11 +41,12 @@ func (c *ServiceReadyVerifier) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // NewServiceStatusVerifier returns a ServiceReadyVerifier that answers
-// requests with a JSON 503 not_ready error (via marshal.WriteJSON) while s is
-// not ready, and chains to delegate otherwise.
+// requests with a JSON 503 not_ready error (via marshal.WriteJSON) carrying
+// the request's correlation ID while s is not ready, and chains to delegate
+// otherwise. The error is built per request; nothing is shared.
 func NewServiceStatusVerifier(s ServiceStatus, delegate http.Handler) http.Handler {
 	unavailable := func(w http.ResponseWriter, r *http.Request) {
-		marshal.WriteJSON(w, r, errUnavailable)
+		marshal.WriteJSON(w, r, httperror.NotReady(msgNotReady))
 	}
 	v := ServiceReadyVerifier{
 		Status:          s,

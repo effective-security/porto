@@ -43,7 +43,12 @@
 //	h, err := p.NewHandler(next)        // http.Handler; snapshots the tree
 //	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(p.NewUnaryInterceptor()))
 //
-// Denied requests receive a 401 httperror.Unauthorized response
-// (or codes.PermissionDenied for gRPC). HTTP OPTIONS requests are always
-// allowed so CORS preflight can succeed.
+// Denied requests from unauthenticated callers (guest or empty role)
+// receive a 401 httperror.Unauthorized response (codes.Unauthenticated for
+// gRPC); denied requests from any other role receive a 403
+// httperror.Forbidden response (codes.PermissionDenied). OPTIONS requests,
+// including CORS preflights, are authorized like any other method: the
+// preflight headers are caller-controlled, so a CORS middleware that answers
+// preflights must run before the authz handler (restserver.NewMux and
+// gserver place it there).
 package authz

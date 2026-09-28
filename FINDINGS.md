@@ -49,17 +49,11 @@ byte-exact test.
 | P-013 | gserver/roles                           | `roles.go` `IdentityFromContext`                                         | Cookie auth over gRPC skips the CSRF check; HTTP cookie auth silently requires `cookies.csrf`                                                | security    | LOW      | Needs Approval |
 | P-014 | gserver/credentials                     | `credentials.go` `perRPCCredential.GetRequestMetadata`                   | Unsynchronized reads of `callerIdentity`/`dpopSigner`; thundering-herd token refresh                                                         | race        | LOW      | Open           |
 | P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
-| P-016 | restserver/ready                        | `ready.go` `errUnavailable`; `xhttp/httperror` `Error.WriteHTTPResponse` | Package-level error mutated per request (stale `request_id`, data race)                                                                      | race        | MEDIUM   | Open           |
 | P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
 | P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
 | P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
-| P-027 | xhttp/httperror, restserver/authz       | `codes.go` `codeStatus`; `authz.go` `authHandler.ServeHTTP`              | `PermissionDenied` maps to 401; authz denies with 401 instead of 403                                                                         | correctness | LOW      | Needs Approval |
-| P-028 | restserver/authz                        | `authz.go` `authHandler.ServeHTTP`                                       | Denial error double-wrapped, duplicating the code in the message and dropping the context                                                    | correctness | LOW      | Needs Approval |
-| P-029 | xhttp/httperror                         | `errors.go` `errMsg`                                                     | Panics on a non-string format argument                                                                                                       | bug         | LOW      | Open           |
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
-| P-032 | xhttp/marshal, xhttp/identity           | `marshal.go` `WriteJSON`; `ctx.go`                                       | Internal error text echoed to clients in 5xx/401 bodies                                                                                      | security    | LOW      | Needs Approval |
-| P-033 | restserver/authz                        | `authz.go` `checkAccess`                                                 | `OPTIONS` bypasses authz even with `OptionsPassthrough`                                                                                      | security    | LOW      | Needs Approval |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
 | P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
 | P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
@@ -151,12 +145,6 @@ byte-exact test.
 
 - Fix: return an error, or return the receiver.
 
-### P-016 Shared `errUnavailable` mutated per request
-
-- Evidence: `Error.WriteHTTPResponse` sets `e.RequestID` on the receiver; `ready.go` writes the package-level `errUnavailable` on every not-ready request.
-- Impact: the first 503's correlation ID is baked into the global; concurrent first requests race on a package var. Any consumer keeping `httperror.Error` values in package vars has the same hazard.
-- Fix: write from a copy (`e2 := *e`) in `WriteHTTPResponse`, or build the error per request in `ready`.
-
 ### P-017 Empty client IP with private-only `X-Forwarded-For`
 
 - Evidence: the `RemoteAddr` fallback only runs when both headers are empty; after the loop finds no public IP the function returns `xRealIP`, which may be "". `realip_test.go` uses `h.Set` in a loop so a comma list is never tested.
@@ -188,34 +176,9 @@ byte-exact test.
 - Impact: WebSocket upgrades and `http.ResponseController` deadlines are impossible behind restserver.
 - Fix: add `Unwrap() http.ResponseWriter`; make `Flush` conditional on the delegate.
 
-### P-027 `PermissionDenied` → 401
-
-- Evidence: `codeStatus[codes.PermissionDenied] = http.StatusUnauthorized`; authz denies an authenticated role with `Unauthorized`.
-- Fix: map to 403 and use `httperror.Forbidden` in authz; tests assert the current strings.
-
-### P-028 authz double-wrap
-
-- Evidence: `checkAccess` returns `httperror.Unauthorized(...).WithContext(ctx)`; the handler re-wraps with `httperror.Unauthorized("%s", err.Error())`.
-- Fix: `marshal.WriteJSON(w, r, err)` directly.
-
-### P-029 `errMsg` unchecked type assertion
-
-- Evidence: `fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)`.
-- Fix: check the assertion and fall back to `fmt.Sprint`.
-
 ### P-031 Granularity divide by zero
 
 - Fix: clamp to `max(1, int64(granularity))` in `NewRequestLogger`.
-
-### P-032 Internal error text echoed
-
-- Evidence: non-`httperror` errors become a 500 whose `message` is `err.Error()`; identity mapper errors are returned verbatim.
-- Fix: generic message for 5xx; keep logging the cause.
-
-### P-033 `OPTIONS` bypasses authz
-
-- Evidence: `if r.Method == http.MethodOptions { return nil }` unconditionally.
-- Fix: short-circuit only when `Access-Control-Request-Method` is present.
 
 ### P-035 Coverage below CI gate
 
@@ -303,7 +266,7 @@ byte-exact test.
 ## Notes on items needing approval
 
 - P-006: new rate-limit defaults that deployments may need to configure.
-- P-013, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
+- P-013: changes observable auth behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
 - P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
 - P-043, P-047: rate limiter and lock semantics change under concurrency.

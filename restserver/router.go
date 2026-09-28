@@ -112,32 +112,38 @@ func NewRouter(notfoundhandler http.HandlerFunc) Router {
 
 // NewRouterWithCORS returns a Router whose Handler is wrapped by the rs/cors
 // middleware configured from opt; a nil opt uses cors.Default() (all origins,
-// simple methods, no credentials).
+// simple methods, no credentials). Custom mux factories that also use
+// restserver/authz must place the authz handler inside this Router's
+// Handler, or wrap the authz handler with newCORS-equivalent middleware,
+// so that preflights never bypass authorization; NewMux does the latter.
 func NewRouterWithCORS(notfoundhandler http.HandlerFunc, opt *CORSOptions) Router {
-	var c *cors.Cors
-	if opt != nil {
-		c = cors.New(cors.Options{
-			AllowedOrigins:             opt.AllowedOrigins,
-			AllowOriginFunc:            opt.AllowOriginFunc,
-			AllowOriginVaryRequestFunc: wrapAllowOriginRequestFunc(opt.AllowOriginRequestFunc),
-			AllowedMethods:             opt.AllowedMethods,
-			AllowedHeaders:             opt.AllowedHeaders,
-			ExposedHeaders:             opt.ExposedHeaders,
-			MaxAge:                     opt.MaxAge,
-			AllowCredentials:           opt.AllowCredentials,
-			OptionsPassthrough:         opt.OptionsPassthrough,
-			Debug:                      opt.Debug,
-		})
-	} else {
-		c = cors.Default()
-	}
-
 	r := &proxy{
 		router: httprouter.New(),
-		cors:   c,
+		cors:   newCORS(opt),
 	}
 	r.router.NotFound = notfoundhandler
 	return r
+}
+
+// newCORS builds the rs/cors middleware from opt; a nil opt uses
+// cors.Default(). Unless OptionsPassthrough is set, the middleware answers
+// CORS preflights itself and never calls the wrapped handler for them.
+func newCORS(opt *CORSOptions) *cors.Cors {
+	if opt == nil {
+		return cors.Default()
+	}
+	return cors.New(cors.Options{
+		AllowedOrigins:             opt.AllowedOrigins,
+		AllowOriginFunc:            opt.AllowOriginFunc,
+		AllowOriginVaryRequestFunc: wrapAllowOriginRequestFunc(opt.AllowOriginRequestFunc),
+		AllowedMethods:             opt.AllowedMethods,
+		AllowedHeaders:             opt.AllowedHeaders,
+		ExposedHeaders:             opt.ExposedHeaders,
+		MaxAge:                     opt.MaxAge,
+		AllowCredentials:           opt.AllowCredentials,
+		OptionsPassthrough:         opt.OptionsPassthrough,
+		Debug:                      opt.Debug,
+	})
 }
 
 func proxyHandle(handle Handle) httprouter.Handle {

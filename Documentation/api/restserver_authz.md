@@ -46,7 +46,7 @@ h, err := p.NewHandler(next)        // http.Handler; snapshots the tree
 grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(p.NewUnaryInterceptor()))
 ```
 
-Denied requests receive a 401 httperror.Unauthorized response \(or codes.PermissionDenied for gRPC\). HTTP OPTIONS requests are always allowed so CORS preflight can succeed.
+Denied requests from unauthenticated callers \(guest or empty role\) receive a 401 httperror.Unauthorized response \(codes.Unauthenticated for gRPC\); denied requests from any other role receive a 403 httperror.Forbidden response \(codes.PermissionDenied\). OPTIONS requests, including CORS preflights, are authorized like any other method: the preflight headers are caller\-controlled, so a CORS middleware that answers preflights must run before the authz handler \(restserver.NewMux and gserver place it there\).
 
 ## Index
 
@@ -81,7 +81,7 @@ var (
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L66-L92>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L69-L95>)
 
 Config is the declarative authorization configuration consumed by New. It is typically loaded from YAML/JSON; see the package documentation for the field names. Paths must start with "/".
 
@@ -116,7 +116,7 @@ type Config struct {
 ```
 
 <a name="GRPCAuthz"></a>
-## type [GRPCAuthz](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L50-L61>)
+## type [GRPCAuthz](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L53-L64>)
 
 GRPCAuthz is the gRPC\-facing authorization contract. \*Provider implements it; the full method name \(e.g. "/pkg.Service/Method"\) is matched against the path tree exactly like an HTTP path.
 
@@ -136,7 +136,7 @@ type GRPCAuthz interface {
 ```
 
 <a name="HTTPAuthz"></a>
-## type [HTTPAuthz](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L34-L45>)
+## type [HTTPAuthz](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L37-L48>)
 
 HTTPAuthz is the HTTP\-facing authorization contract consumed by restserver.HTTPServer.WithAuthz. \*Provider implements it.
 
@@ -156,7 +156,7 @@ type HTTPAuthz interface {
 ```
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L100-L105>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L103-L108>)
 
 Provider holds the path/role tree and the role mappers, and implements HTTPAuthz and GRPCAuthz. Build it with New \(or configure a zero value via Allow/AllowAny/AllowAnyRole, but note that isAllowed dereferences cfg, so a Provider created without New must not be used for checks\). Mutating calls \(Allow\*, Set\*Mapper\) are not synchronised and must complete before the handlers/interceptors serve traffic.
 
@@ -167,7 +167,7 @@ type Provider struct {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L144>)
+### func [New](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L147>)
 
 ```go
 func New(cfg *Config) (*Provider, error)
@@ -176,7 +176,7 @@ func New(cfg *Config) (*Provider, error)
 New builds a Provider from cfg with the default role mappers. Each Config.Allow entry must be "$\{path\}:$\{role\}\[,$\{role\}...\]", otherwise an error is returned. cfg must not be nil. Paths that do not start with "/" panic.
 
 <a name="Provider.Allow"></a>
-### func \(\*Provider\) [Allow](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L317>)
+### func \(\*Provider\) [Allow](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L320>)
 
 ```go
 func (c *Provider) Allow(path string, roles ...string)
@@ -185,7 +185,7 @@ func (c *Provider) Allow(path string, roles ...string)
 Allow allows the specified roles access to this path and its children \[unless a specific Allow/AllowAny is called for a child path\]. Multiple calls to Allow for the same path are cumulative; empty role names are ignored. Panics if path does not start with "/".
 
 <a name="Provider.AllowAny"></a>
-### func \(\*Provider\) [AllowAny](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L301>)
+### func \(\*Provider\) [AllowAny](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L304>)
 
 ```go
 func (c *Provider) AllowAny(path string)
@@ -194,7 +194,7 @@ func (c *Provider) AllowAny(path string)
 AllowAny allows any request, including unauthenticated guests, access to this path and its children \[unless a specific Allow/AllowAny is called for a child path\]. It replaces any AllowAnyRole flag on the node; roles added with Allow are kept but ignored while AllowAny is set. Panics if path does not start with "/".
 
 <a name="Provider.AllowAnyRole"></a>
-### func \(\*Provider\) [AllowAnyRole](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L309>)
+### func \(\*Provider\) [AllowAnyRole](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L312>)
 
 ```go
 func (c *Provider) AllowAnyRole(path string)
@@ -203,7 +203,7 @@ func (c *Provider) AllowAnyRole(path string)
 AllowAnyRole allows any request whose role is non\-empty and not the guest role access to this path and its children \[unless a specific Allow/AllowAny is called for a child path\]. Panics if path does not start with "/".
 
 <a name="Provider.Clone"></a>
-### func \(\*Provider\) [Clone](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L270>)
+### func \(\*Provider\) [Clone](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L273>)
 
 ```go
 func (c *Provider) Clone() *Provider
@@ -212,16 +212,16 @@ func (c *Provider) Clone() *Provider
 Clone returns a deep copy of this Provider \(tree, mappers and config\), so later mutations of the original do not affect the copy.
 
 <a name="Provider.NewHandler"></a>
-### func \(\*Provider\) [NewHandler](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L434>)
+### func \(\*Provider\) [NewHandler](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L452>)
 
 ```go
 func (c *Provider) NewHandler(delegate http.Handler) (http.Handler, error)
 ```
 
-NewHandler returns a http.Handler that enforces the current authorization configuration. The handler works on a Clone of the Provider, so changes to the Provider after calling NewHandler do not affect previously created handlers. The handler maps the request to an identity via the role mapper, checks r.URL.Path against the tree and either writes a JSON 401 unauthorized response or passes the request to delegate. OPTIONS requests are always passed through. It returns ErrNoRoleMapperSpecified or ErrNoPathsConfigured when the Provider is not usable.
+NewHandler returns a http.Handler that enforces the current authorization configuration. The handler works on a Clone of the Provider, so changes to the Provider after calling NewHandler do not affect previously created handlers. The handler maps the request to an identity via the role mapper, checks r.URL.Path against the tree and either writes a JSON denial \(401 unauthorized for a guest or empty role, 403 forbidden for any other role\) or passes the request to delegate. OPTIONS requests, including CORS preflights, are authorized like any other method; a CORS middleware that answers preflights must run before this handler. It returns ErrNoRoleMapperSpecified or ErrNoPathsConfigured when the Provider is not usable.
 
 <a name="Provider.NewStreamServerInterceptor"></a>
-### func \(\*Provider\) [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L482>)
+### func \(\*Provider\) [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L501>)
 
 ```go
 func (c *Provider) NewStreamServerInterceptor() grpc.StreamServerInterceptor
@@ -230,16 +230,16 @@ func (c *Provider) NewStreamServerInterceptor() grpc.StreamServerInterceptor
 NewStreamServerInterceptor returns the streaming counterpart of NewUnaryInterceptor, checking access once when the stream is opened.
 
 <a name="Provider.NewUnaryInterceptor"></a>
-### func \(\*Provider\) [NewUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L468>)
+### func \(\*Provider\) [NewUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L487>)
 
 ```go
 func (c *Provider) NewUnaryInterceptor() grpc.UnaryServerInterceptor
 ```
 
-NewUnaryInterceptor returns a grpc.UnaryServerInterceptor that checks the identity from the gRPC role mapper against info.FullMethod and fails with httperror.Unauthorized \(codes.PermissionDenied\) when denied. Unlike NewHandler it uses the live Provider, not a clone, and does not require a configured tree \(an empty tree denies everything\).
+NewUnaryInterceptor returns a grpc.UnaryServerInterceptor that checks the identity from the gRPC role mapper against info.FullMethod and fails with httperror.Unauthorized \(codes.Unauthenticated\) for a guest or empty role and httperror.Forbidden \(codes.PermissionDenied\) for any other role when denied. Unlike NewHandler it uses the live Provider, not a clone, and does not require a configured tree \(an empty tree denies everything\).
 
 <a name="Provider.SetGRPCRoleMapper"></a>
-### func \(\*Provider\) [SetGRPCRoleMapper](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L292>)
+### func \(\*Provider\) [SetGRPCRoleMapper](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L295>)
 
 ```go
 func (c *Provider) SetGRPCRoleMapper(m func(ctx context.Context) identity.Identity)
@@ -248,7 +248,7 @@ func (c *Provider) SetGRPCRoleMapper(m func(ctx context.Context) identity.Identi
 SetGRPCRoleMapper configures the function that maps a gRPC context to the identity whose Role\(\) is authorized by the interceptors.
 
 <a name="Provider.SetRoleMapper"></a>
-### func \(\*Provider\) [SetRoleMapper](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L286>)
+### func \(\*Provider\) [SetRoleMapper](<https://github.com/effective-security/porto/blob/main/restserver/authz/authz.go#L289>)
 
 ```go
 func (c *Provider) SetRoleMapper(m func(r *http.Request) identity.Identity)

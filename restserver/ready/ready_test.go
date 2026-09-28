@@ -1,11 +1,15 @@
 package ready
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
+	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,4 +67,40 @@ func (th *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(th.statusCode)
 	_, _ = w.Write(th.responseBody)
+}
+
+func Test_ServiceStatusVerifier_NotReadyBody(t *testing.T) {
+	t.Parallel()
+	handler := testHandler{t, http.StatusOK, []byte("OK")}
+	sv := NewServiceStatusVerifier(new(serviceWithReady), &handler)
+
+	notReady := func(ctx context.Context) *httptest.ResponseRecorder {
+		res := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/foo", nil).WithContext(ctx)
+		sv.ServeHTTP(res, req)
+		assert.Equal(t, http.StatusServiceUnavailable, res.Code)
+		assert.Equal(t, header.ApplicationJSON, res.Header().Get(header.ContentType))
+		return res
+	}
+
+	res := notReady(context.Background())
+	assert.Equal(t, `{"code":"not_ready","message":"the service is not ready yet"}`, res.Body.String())
+
+	// Every response carries its own request ID; the first one is not baked in.
+	const requests = 8
+	var wg sync.WaitGroup
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := correlation.WithID(context.Background())
+			cid := correlation.ID(ctx)
+			res := notReady(ctx)
+			assert.Equal(t, fmt.Sprintf(`{"code":"not_ready","request_id":"%s","message":"the service is not ready yet"}`, cid), res.Body.String())
+		}()
+	}
+	wg.Wait()
+
+	res = notReady(context.Background())
+	assert.Equal(t, `{"code":"not_ready","message":"the service is not ready yet"}`, res.Body.String())
 }

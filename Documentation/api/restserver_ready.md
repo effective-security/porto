@@ -29,10 +29,10 @@ restserver uses it so that a server whose services are still initialising \(or t
 func NewServiceStatusVerifier(s ServiceStatus, delegate http.Handler) http.Handler
 ```
 
-NewServiceStatusVerifier returns a ServiceReadyVerifier that answers requests with a JSON 503 not\_ready error \(via marshal.WriteJSON\) while s is not ready, and chains to delegate otherwise.
+NewServiceStatusVerifier returns a ServiceReadyVerifier that answers requests with a JSON 503 not\_ready error \(via marshal.WriteJSON\) carrying the request's correlation ID while s is not ready, and chains to delegate otherwise. The error is built per request; nothing is shared.
 
 <a name="ServiceReadyVerifier"></a>
-## type [ServiceReadyVerifier](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L26-L33>)
+## type [ServiceReadyVerifier](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L25-L32>)
 
 ServiceReadyVerifier is a http.Handler that checks if the service is ready to serve, and if so chains to Delegate, otherwise calls NotReadyHandler. All fields must be set; NewServiceStatusVerifier provides the JSON 503 default for NotReadyHandler.
 
@@ -48,7 +48,7 @@ type ServiceReadyVerifier struct {
 ```
 
 <a name="ServiceReadyVerifier.ServeHTTP"></a>
-### func \(\*ServiceReadyVerifier\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L36>)
+### func \(\*ServiceReadyVerifier\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L35>)
 
 ```go
 func (c *ServiceReadyVerifier) ServeHTTP(w http.ResponseWriter, r *http.Request)
@@ -57,7 +57,7 @@ func (c *ServiceReadyVerifier) ServeHTTP(w http.ResponseWriter, r *http.Request)
 ServeHTTP implements the http.Handler interface
 
 <a name="ServiceStatus"></a>
-## type [ServiceStatus](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L16-L20>)
+## type [ServiceStatus](<https://github.com/effective-security/porto/blob/main/restserver/ready/ready.go#L15-L19>)
 
 ServiceStatus is the readiness probe consulted on every request. restserver.Server satisfies it.
 

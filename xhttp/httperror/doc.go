@@ -19,7 +19,11 @@
 //
 // Code* constants list the well-known codes. HTTPStatusFromRPC, NewGrpc,
 // NewFromPb and Status convert between gRPC codes and HTTP statuses using
-// the Google API error mapping (note: PermissionDenied maps to 401).
-// GRPCStatus attaches the Code as a status detail, so request_too_large,
-// sent as ResourceExhausted, converts back to 413 rather than 429.
+// the Google API error mapping: Unauthenticated is 401 (Unauthorized) and
+// PermissionDenied is 403 (Forbidden). GRPCStatus attaches the Code as a
+// status detail, so request_too_large, sent as ResourceExhausted, converts
+// back to 413 rather than 429.
+//
+// WriteHTTPResponse never modifies the error it writes, so Error values may
+// be built once and shared across requests.
 package httperror

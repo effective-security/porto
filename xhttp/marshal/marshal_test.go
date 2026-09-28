@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var errWithStack = errors.Errorf("important info")
@@ -132,6 +133,10 @@ func TestWriteJSONVaryExisting(t *testing.T) {
 }
 
 func TestWriteJSON_Error(t *testing.T) {
+	withRequestID := httperror.Unexpected("db down")
+	withRequestID.RequestID = "req-1"
+	statusWithRequestID := status.ErrorProto(withRequestID.GRPCStatus().Proto())
+
 	tcases := []struct {
 		err error
 		exp string
@@ -162,16 +167,40 @@ func TestWriteJSON_Error(t *testing.T) {
 			`{"code":"unexpected","message":"bar"}`,
 			"E | pkg=xhttp, type=INTERNAL_ERROR, path=\"/test\", status=500, code=unexpected, msg=bar, content-length=0, fn=marshal_test.go, ln=%d\n",
 		},
-		// {
-		// 	errors.Errorf("generic"),
-		// 	`{"code":"unexpected","message":"generic"}`,
-		// 	"E | pkg=xhttp, err=\"generic\\ngithub.com/effective-security/porto/xhttp/marshal.TestWriteJSON_Error\\n\\t/home/dissoupov/code/es/porto/xhttp/marshal/marshal_test.go:94\\ntesting.tRunner\\n\\t/usr/local/go/src/testing/testing.go:1576\\nruntime.goexit\\n\\t/usr/local/go/src/runtime/asm_amd64.s:1598\"\nE | pkg=xhttp, type=\"INTERNAL_ERROR\", path=\"/test\", status=500, code=\"unexpected\", msg=\"generic\", content-length=0, fn=\"marshal.go\", ln=73\n",
-		// },
-		// {
-		// 	errors.Errorf("fmt"),
-		// 	`{"code":"unexpected","message":"fmt"}`,
-		// 	"E | pkg=xhttp, err=\"fmt\\n(1) attached stack trace\\n  -- stack trace:\\n  | github.com/effective-security/porto/xhttp/marshal.TestWriteJSON_Error\\n  | \\t/home/denis/code/es/porto/xhttp/marshal/marshal_test.go:109\\n",
-		// },
+		{
+			// A plain error is a server-side failure: the client gets the
+			// generic status text, the log keeps the error and the caller's line.
+			errors.Errorf("generic"),
+			`{"code":"unexpected","message":"Internal Server Error"}`,
+			"E | pkg=xhttp, type=INTERNAL_ERROR, path=\"/test\", status=500, code=unexpected, msg=\"Internal Server Error\", content-length=0, fn=marshal_test.go, ln=%d, err=\"generic",
+		},
+		{
+			status.Error(codes.Internal, "db down"),
+			`{"code":"unexpected","message":"Internal Server Error"}`,
+			"E | pkg=xhttp, type=INTERNAL_ERROR, path=\"/test\", status=500, code=unexpected, msg=\"Internal Server Error\", content-length=0, fn=marshal_test.go, ln=%d, err=\"rpc error: code = Internal desc = db down\"",
+		},
+		{
+			// The correlation ID carried by a status detail survives the generic message.
+			statusWithRequestID,
+			`{"code":"unexpected","request_id":"req-1","message":"Internal Server Error"}`,
+			"E | pkg=xhttp, type=INTERNAL_ERROR, path=\"/test\", status=500, code=unexpected, msg=\"Internal Server Error\", content-length=0, fn=marshal_test.go, ln=%d, err=\"rpc error: code = Internal desc = db down\"",
+		},
+		{
+			status.Error(codes.Unavailable, "upstream down"),
+			`{"code":"unavailable","message":"Service Unavailable"}`,
+			"E | pkg=xhttp, type=INTERNAL_ERROR, path=\"/test\", status=503, code=unavailable, msg=\"Service Unavailable\", content-length=0, fn=marshal_test.go, ln=%d, err=\"rpc error: code = Unavailable desc = upstream down\"",
+		},
+		{
+			// Client errors keep their message.
+			status.Error(codes.PermissionDenied, "not for you"),
+			`{"code":"forbidden","message":"not for you"}`,
+			"I | pkg=xhttp, type=API_ERROR, path=\"/test\", status=403, code=forbidden, msg=\"not for you\", content-length=0, fn=marshal_test.go, ln=%d\n",
+		},
+		{
+			status.Error(codes.NotFound, "no such thing"),
+			`{"code":"not_found","message":"no such thing"}`,
+			"",
+		},
 		{
 			errors.WithMessage(httperror.InvalidParam("bar"), "wrapped"),
 			`{"code":"invalid_parameter","message":"bar"}`,

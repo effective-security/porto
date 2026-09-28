@@ -38,6 +38,41 @@ Deployments with large uploads or long request streams must raise or disable
 the relevant read/body limits; metrics callers must handle initialization
 errors and close the returned resource.
 
+## Completed B10 decision — HTTP errors and authorization
+
+`httperror` follows the Google API mapping for authentication and
+authorization: `codes.Unauthenticated` ↔ HTTP 401 `unauthorized` and
+`codes.PermissionDenied` ↔ HTTP 403 `forbidden`, so both statuses round-trip
+through gRPC (`CodeUnauthorized` now maps to `Unauthenticated`, previously
+`PermissionDenied`, and `PermissionDenied` now converts to 403, previously
+401). `restserver/authz` denies an empty or `guest` role with 401
+`unauthorized` (`Unauthenticated`) and any other role with 403 `forbidden`
+(`PermissionDenied`); the message is `<role> role not allowed` (an empty
+role is reported as `guest`) without a second wrapping, and the request ID
+is the `request_id` field. authz never skips `OPTIONS`: the preflight
+headers are caller-controlled, so CORS preflights are answered by the CORS
+middleware placed outside authz (`restserver.NewMux` now wraps authz with
+CORS instead of the router; `gserver` already did), and with
+`OptionsPassthrough` an `OPTIONS` request is authorized like any method.
+Denied and not-ready REST responses now carry CORS headers.
+`Error.WriteHTTPResponse` and `ManyError.WriteHTTPResponse` never
+modify the error they write: a missing `request_id` is filled in a
+per-request copy, so `Error` values may be shared (`ManyError` snapshots
+its nested errors under its lock and writes after releasing it), and
+`restserver/ready` builds its 503 per request. `marshal.WriteJSON` sends converted non-`httperror`
+errors that map to 5xx with the generic `http.StatusText` message and logs
+the original as the cause; 4xx conversions and explicit `httperror` values
+keep their text. Identity mapper failures are logged and answered with a
+generic `invalid identity` 401 (`Unauthenticated` over gRPC) unless the
+mapper's error wraps a non-nil `*httperror.Error` with an HTTP status,
+which is returned unmodified.
+`errMsg` no longer panics on a non-string format value. Clients that
+matched 401 for authenticated-but-denied requests, `PermissionDenied` for
+`httperror.Unauthorized`, or relied on the previous 5xx or identity error
+text must adjust; REST `OPTIONS` requests other than preflights answered by
+CORS now need authorization, and custom mux factories must keep CORS outside
+authz.
+
 ## Completed B03 decision — gRPC-Web CORS
 
 An absent or disabled `cors` block emits no gRPC-Web CORS headers and does not
@@ -89,7 +124,6 @@ set by a trusted proxy.
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
 | B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |
-| B10 — HTTP errors and authorization        | P2       | `xhttp/httperror`, `xhttp/marshal`, `xhttp/identity`, `restserver/ready`, `restserver/authz`: remove shared error mutation, return 403 for forbidden access, avoid denial double-wrapping and internal error disclosure, and constrain the OPTIONS bypass.            | P-016, P-027, P-028, P-029, P-032, P-033                                    | Auth and error response changes                       |
 | B11 — Cache pub/sub                        | P2       | `pkg/cache`: prevent blocked or leaked subscription goroutines, define publish behavior for slow consumers, and stabilize the Redis pub/sub test.                                                                                                                     | P-041, P-042, P-075                                                         | Slow-subscriber policy                                |
 | B12 — Redis coordination and secrets       | P2       | `pkg/redisclient`: make rate-limit windows atomic and non-starving, make lock release owner-bound, redact connection logging, and fix close and eviction error handling.                                                                                              | P-043, P-045, P-047, P-062, P-063                                           | Rate-limit, lock, and close semantics                 |
 | B13 — Key namespaces                       | P2       | `pkg/redisclient`, `pkg/cache`: prevent `..` from escaping a prefix and align memory/Redis `Keys` prefix and pattern behavior.                                                                                                                                        | P-044, P-064                                                                | Key layout and pattern contract                       |

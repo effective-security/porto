@@ -276,21 +276,30 @@ func WrapWithCtx(ctx context.Context, err error, msgAndArgs ...any) *Error {
 	return Wrap(err, msgAndArgs...).WithContext(ctx)
 }
 
+// errMsg returns the message override from msgAndArgs, or err when there is
+// none: a single value is used as is (formatted with %+v when it is not a
+// string); several values are a format string followed by its arguments,
+// or, when the first value is not a string, are formatted with %+v and
+// joined with spaces. The values are never forwarded as a whole to a
+// fmt print function, so vet does not treat Wrap as a print wrapper.
 func errMsg(err string, msgAndArgs ...any) string {
-	if len(msgAndArgs) == 0 || msgAndArgs == nil {
+	switch len(msgAndArgs) {
+	case 0:
 		return err
-	}
-	if len(msgAndArgs) == 1 {
-		msg := msgAndArgs[0]
-		if msgAsStr, ok := msg.(string); ok {
+	case 1:
+		if msgAsStr, ok := msgAndArgs[0].(string); ok {
 			return msgAsStr
 		}
-		return fmt.Sprintf("%+v", msg)
+		return fmt.Sprintf("%+v", msgAndArgs[0])
 	}
-	if len(msgAndArgs) > 1 {
-		return fmt.Sprintf(msgAndArgs[0].(string), msgAndArgs[1:]...)
+	if format, ok := msgAndArgs[0].(string); ok {
+		return fmt.Sprintf(format, msgAndArgs[1:]...)
 	}
-	return err
+	parts := make([]string, len(msgAndArgs))
+	for i, v := range msgAndArgs {
+		parts[i] = fmt.Sprintf("%+v", v)
+	}
+	return strings.Join(parts, " ")
 }
 
 // IsInvalidModel reports whether the error text contains "invalid model".
@@ -380,14 +389,19 @@ func Status(err error) int {
 
 // WriteHTTPResponse writes the error as an application/json body with
 // HTTPStatus, pretty-printed when the URL has a "pp" query parameter. If
-// RequestID is empty it is filled from the request's correlation ID, which
-// mutates the receiver.
+// RequestID is empty the body carries the request's correlation ID instead.
+// The receiver is not modified, so an Error may be shared across requests.
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
 	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
 	w.WriteHeader(e.HTTPStatus)
+	body := e
 	if e.RequestID == "" {
-		e.RequestID = correlation.ID(r.Context())
+		if id := correlation.ID(r.Context()); id != "" {
+			copied := *e
+			copied.RequestID = id
+			body = &copied
+		}
 	}
-	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(e)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(body)
 }

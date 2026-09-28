@@ -6,6 +6,8 @@ import (
 
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func Test_ErrorCodes(t *testing.T) {
@@ -70,4 +72,26 @@ func Test_OAuthError(t *testing.T) {
 	assert.EqualError(t, httperror.FromOAuth("temporarily_unavailable", "aaa"), "temporarily_unavailable: aaa")
 	assert.EqualError(t, httperror.FromOAuth("server_error", "aaa"), "server_error: aaa")
 	assert.EqualError(t, httperror.FromOAuth("invalid_client", "aaa"), "invalid_client: aaa")
+}
+
+func Test_AuthStatusMapping(t *testing.T) {
+	t.Parallel()
+	// Google API mapping: Unauthenticated is 401, PermissionDenied is 403.
+	assert.Equal(t, http.StatusUnauthorized, httperror.HTTPStatusFromRPC(codes.Unauthenticated))
+	assert.Equal(t, http.StatusForbidden, httperror.HTTPStatusFromRPC(codes.PermissionDenied))
+	assert.Equal(t, codes.Unauthenticated, httperror.Unauthorized("1").RPCStatus)
+	assert.Equal(t, codes.PermissionDenied, httperror.Forbidden("1").RPCStatus)
+
+	denied := httperror.NewFromPb(status.Error(codes.PermissionDenied, "denied"))
+	assert.Equal(t, http.StatusForbidden, denied.HTTPStatus)
+	assert.Equal(t, httperror.CodeForbidden, denied.Code)
+	assert.Equal(t, http.StatusForbidden, httperror.Status(status.Error(codes.PermissionDenied, "denied")))
+
+	unauthenticated := httperror.NewFromPb(status.Error(codes.Unauthenticated, "who"))
+	assert.Equal(t, http.StatusUnauthorized, unauthenticated.HTTPStatus)
+	assert.Equal(t, httperror.CodeUnauthorized, unauthenticated.Code)
+	assert.Equal(t, http.StatusUnauthorized, httperror.Status(status.Error(codes.Unauthenticated, "who")))
+
+	assert.Equal(t, http.StatusForbidden, httperror.NewGrpc(codes.PermissionDenied, "denied").HTTPStatus)
+	assert.Equal(t, http.StatusUnauthorized, httperror.NewGrpc(codes.Unauthenticated, "who").HTTPStatus)
 }

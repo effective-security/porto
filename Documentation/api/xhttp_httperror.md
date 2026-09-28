@@ -22,7 +22,9 @@ if err != nil {
 
 The JSON wire format is \{"code": "...", "message": "...", "request\_id": "..."\}; ManyError adds an "errors" map keyed by field or item.
 
-Code\* constants list the well\-known codes. HTTPStatusFromRPC, NewGrpc, NewFromPb and Status convert between gRPC codes and HTTP statuses using the Google API error mapping \(note: PermissionDenied maps to 401\). GRPCStatus attaches the Code as a status detail, so request\_too\_large, sent as ResourceExhausted, converts back to 413 rather than 429.
+Code\* constants list the well\-known codes. HTTPStatusFromRPC, NewGrpc, NewFromPb and Status convert between gRPC codes and HTTP statuses using the Google API error mapping: Unauthenticated is 401 \(Unauthorized\) and PermissionDenied is 403 \(Forbidden\). GRPCStatus attaches the Code as a status detail, so request\_too\_large, sent as ResourceExhausted, converts back to 413 rather than 429.
+
+WriteHTTPResponse never modifies the error it writes, so Error values may be built once and shared across requests.
 
 ## Index
 
@@ -137,7 +139,7 @@ const (
 ```
 
 <a name="CorrelationID"></a>
-## func [CorrelationID](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L129>)
+## func [CorrelationID](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L132>)
 
 ```go
 func CorrelationID(err error) string
@@ -146,7 +148,7 @@ func CorrelationID(err error) string
 CorrelationID extracts the correlation ID from an \*Error or from the detail attached by Error.GRPCStatus to a gRPC status error; "" if none.
 
 <a name="GRPCCode"></a>
-## func [GRPCCode](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L182>)
+## func [GRPCCode](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L185>)
 
 ```go
 func GRPCCode(err error) codes.Code
@@ -155,7 +157,7 @@ func GRPCCode(err error) codes.Code
 GRPCCode returns the status code of a gRPC error, or codes.Internal for errors that carry no status.
 
 <a name="GRPCMessage"></a>
-## func [GRPCMessage](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L173>)
+## func [GRPCMessage](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/rpc.go#L176>)
 
 ```go
 func GRPCMessage(err error) string
@@ -164,7 +166,7 @@ func GRPCMessage(err error) string
 GRPCMessage returns the status message of a gRPC error, or err.Error\(\) for other errors.
 
 <a name="HTTPStatusFromRPC"></a>
-## func [HTTPStatusFromRPC](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L266>)
+## func [HTTPStatusFromRPC](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L268>)
 
 ```go
 func HTTPStatusFromRPC(c codes.Code) int
@@ -173,7 +175,7 @@ func HTTPStatusFromRPC(c codes.Code) int
 HTTPStatusFromRPC maps a gRPC status code to an HTTP status following the Google API error model; unknown codes map to 0.
 
 <a name="IsInvalidModel"></a>
-## func [IsInvalidModel](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L297>)
+## func [IsInvalidModel](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L306>)
 
 ```go
 func IsInvalidModel(err error) bool
@@ -182,7 +184,7 @@ func IsInvalidModel(err error) bool
 IsInvalidModel reports whether the error text contains "invalid model".
 
 <a name="IsInvalidRequestError"></a>
-## func [IsInvalidRequestError](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L304>)
+## func [IsInvalidRequestError](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L313>)
 
 ```go
 func IsInvalidRequestError(err error, errStrings ...string) bool
@@ -191,7 +193,7 @@ func IsInvalidRequestError(err error, errStrings ...string) bool
 IsInvalidRequestError reports whether err \(or any of errStrings\) looks like a client error, by substring match on "invalid", "Invalid", "bad" or "400".
 
 <a name="IsNotFound"></a>
-## func [IsNotFound](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L343>)
+## func [IsNotFound](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L352>)
 
 ```go
 func IsNotFound(err error, errStrings ...string) bool
@@ -200,7 +202,7 @@ func IsNotFound(err error, errStrings ...string) bool
 IsNotFound reports whether err is an xdb not\-found error, or whether err \(or any of errStrings\) contains "not found", "Not Found" or "404".
 
 <a name="IsTimeout"></a>
-## func [IsTimeout](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L321>)
+## func [IsTimeout](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L330>)
 
 ```go
 func IsTimeout(err error, errStrings ...string) bool
@@ -209,7 +211,7 @@ func IsTimeout(err error, errStrings ...string) bool
 IsTimeout reports whether err is context.DeadlineExceeded or context.Canceled, or whether err \(or any of errStrings\) contains a timeout/deadline/cancel substring.
 
 <a name="Status"></a>
-## func [Status](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L366>)
+## func [Status](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L375>)
 
 ```go
 func Status(err error) int
@@ -298,7 +300,7 @@ func Forbidden(msgFormat string, vals ...any) *Error
 Forbidden returns Error instance with Forbidden code
 
 <a name="FromOAuth"></a>
-### func [FromOAuth](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L336>)
+### func [FromOAuth](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L338>)
 
 ```go
 func FromOAuth(code, descr string) *Error
@@ -559,16 +561,16 @@ func (e *Error) WithContext(ctx context.Context) *Error
 WithContext records ctx on the error and copies its correlation ID into RequestID. It mutates and returns the receiver.
 
 <a name="Error.WriteHTTPResponse"></a>
-### func \(\*Error\) [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L385>)
+### func \(\*Error\) [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/errors.go#L394>)
 
 ```go
 func (e *Error) WriteHTTPResponse(w http.ResponseWriter, r *http.Request)
 ```
 
-WriteHTTPResponse writes the error as an application/json body with HTTPStatus, pretty\-printed when the URL has a "pp" query parameter. If RequestID is empty it is filled from the request's correlation ID, which mutates the receiver.
+WriteHTTPResponse writes the error as an application/json body with HTTPStatus, pretty\-printed when the URL has a "pp" query parameter. If RequestID is empty the body carries the request's correlation ID instead. The receiver is not modified, so an Error may be shared across requests.
 
 <a name="ManyError"></a>
-## type [ManyError](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L17-L40>)
+## type [ManyError](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L18-L41>)
 
 ManyError identifies many errors from API.
 
@@ -596,7 +598,7 @@ type ManyError struct {
 ```
 
 <a name="NewMany"></a>
-### func [NewMany](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L89>)
+### func [NewMany](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L90>)
 
 ```go
 func NewMany(status int, code string, msgFormat string, vals ...any) *ManyError
@@ -605,7 +607,7 @@ func NewMany(status int, code string, msgFormat string, vals ...any) *ManyError
 NewMany returns a ManyError with the given HTTP status and code and an empty Errors map; add nested errors with Add.
 
 <a name="ManyError.Add"></a>
-### func \(\*ManyError\) [Add](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L103>)
+### func \(\*ManyError\) [Add](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L104>)
 
 ```go
 func (m *ManyError) Add(key string, err error) *ManyError
@@ -614,7 +616,7 @@ func (m *ManyError) Add(key string, err error) *ManyError
 Add records err under key \(replacing any previous entry\) and returns the receiver. Non\-\*Error values are wrapped as CodeUnexpected. The first error added becomes the Cause. Add is safe for concurrent use and allocates a new ManyError when called on a nil receiver.
 
 <a name="ManyError.Cause"></a>
-### func \(\*ManyError\) [Cause](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L77>)
+### func \(\*ManyError\) [Cause](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L78>)
 
 ```go
 func (m *ManyError) Cause() error
@@ -623,7 +625,7 @@ func (m *ManyError) Cause() error
 Cause returns original error
 
 <a name="ManyError.CorrelationID"></a>
-### func \(\*ManyError\) [CorrelationID](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L72>)
+### func \(\*ManyError\) [CorrelationID](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L73>)
 
 ```go
 func (m *ManyError) CorrelationID() string
@@ -632,7 +634,7 @@ func (m *ManyError) CorrelationID() string
 CorrelationID implements the Correlation interface, and returns request ID
 
 <a name="ManyError.Error"></a>
-### func \(\*ManyError\) [Error](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L51>)
+### func \(\*ManyError\) [Error](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L52>)
 
 ```go
 func (m *ManyError) Error() string
@@ -641,7 +643,7 @@ func (m *ManyError) Error() string
 Error returns "code: message" \(prefixed with the request ID when set\) or, when Code is empty, the nested errors joined by ";".
 
 <a name="ManyError.GRPCStatus"></a>
-### func \(\*ManyError\) [GRPCStatus](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L45>)
+### func \(\*ManyError\) [GRPCStatus](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L46>)
 
 ```go
 func (m *ManyError) GRPCStatus() *status.Status
@@ -650,7 +652,7 @@ func (m *ManyError) GRPCStatus() *status.Status
 GRPCStatus returns the gRPC status derived from Code and Message, with the Code and RequestID details that Error.GRPCStatus attaches, so a \*ManyError can be returned from gRPC handlers.
 
 <a name="ManyError.HasErrors"></a>
-### func \(\*ManyError\) [HasErrors](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L130>)
+### func \(\*ManyError\) [HasErrors](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L131>)
 
 ```go
 func (m *ManyError) HasErrors() bool
@@ -659,7 +661,7 @@ func (m *ManyError) HasErrors() bool
 HasErrors check if ManyError has any nested error associated with it.
 
 <a name="ManyError.WithCause"></a>
-### func \(\*ManyError\) [WithCause](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L82>)
+### func \(\*ManyError\) [WithCause](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L83>)
 
 ```go
 func (m *ManyError) WithCause(err error) *ManyError
@@ -668,12 +670,12 @@ func (m *ManyError) WithCause(err error) *ManyError
 WithCause adds the cause error
 
 <a name="ManyError.WriteHTTPResponse"></a>
-### func \(\*ManyError\) [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L136>)
+### func \(\*ManyError\) [WriteHTTPResponse](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/many.go#L141>)
 
 ```go
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request)
 ```
 
-WriteHTTPResponse writes the error and its nested Errors as an application/json body with HTTPStatus; see Error.WriteHTTPResponse.
+WriteHTTPResponse writes the error and its nested Errors as an application/json body with HTTPStatus; see Error.WriteHTTPResponse. The receiver is not modified: when RequestID is empty the body carries the request's correlation ID. The nested errors are snapshotted under the Add lock, which is released before anything is written, so a slow client never blocks other users of a shared ManyError.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

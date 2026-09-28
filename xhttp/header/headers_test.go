@@ -9,6 +9,8 @@ import (
 
 func Test_Headers(t *testing.T) {
 	assert.Equal(t, "Accept", header.Accept)
+	assert.Equal(t, "Access-Control-Request-Method", header.AccessControlRequestMethod)
+	assert.Equal(t, "Origin", header.Origin)
 	assert.Equal(t, "application/json", header.ApplicationJSON)
 	assert.Equal(t, "application/jose+json", header.ApplicationJoseJSON)
 	assert.Equal(t, "application/grpc", header.ApplicationGRPC)
