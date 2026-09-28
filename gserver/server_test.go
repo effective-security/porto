@@ -99,6 +99,18 @@ func TestStartRejectsInvalidTrustedProxyCIDR(t *testing.T) {
 	assert.Nil(t, srv)
 }
 
+func TestStartRejectsRateLimitWithoutRate(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	cfg := &gserver.Config{
+		RateLimit: &gserver.RateLimit{Enabled: &enabled},
+	}
+
+	srv, err := gserver.Start("RateLimitWithoutRate", cfg, nil, nil)
+	require.EqualError(t, err, "rate_limit: requests_per_second must be positive when enabled, got 0")
+	assert.Nil(t, srv)
+}
+
 func TestRateLimit(t *testing.T) {
 	enabled := true
 	cfg := &gserver.Config{

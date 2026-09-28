@@ -12,6 +12,7 @@ import (
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/effective-security/x/netutil"
@@ -23,7 +24,25 @@ const (
 	// corsHeaderPrefix is the lower-case prefix of CORS response header names,
 	// which an enabled CORS block owns.
 	corsHeaderPrefix = "access-control-"
+
+	// rateLookupRemoteAddr is the tollbooth IP lookup that reads r.RemoteAddr.
+	rateLookupRemoteAddr = "RemoteAddr"
+	// rateLookupXRealIP is the tollbooth spelling of the X-Real-Ip lookup.
+	// tollbooth compares lookup names exactly, so header.XRealIP would not match.
+	rateLookupXRealIP = "X-Real-IP"
+
+	// defaultRateLimitTTL is the RateLimit.ExpirationTTL used when zero.
+	defaultRateLimitTTL = 10 * time.Minute
+	// minRateLimitTTL is the shortest accepted positive RateLimit.ExpirationTTL:
+	// an expired bucket is recreated with a full burst, so a shorter TTL
+	// would grant a burst that often instead of RequestsPerSecond.
+	minRateLimitTTL = time.Second
 )
+
+// rateIPLookups lists the RateLimit.HeadersIPLookups values tollbooth
+// understands. It ignores any other name, which would leave requests
+// unlimited, so RateLimit.Validate rejects them.
+var rateIPLookups = []string{rateLookupRemoteAddr, header.XForwardedFor, rateLookupXRealIP}
 
 // Config is the server configuration passed to Start. It is usually
 // unmarshalled from YAML/JSON; the yaml and json tags give the field names.
@@ -209,9 +228,10 @@ type CORS struct {
 }
 
 // Validate returns an error for a configuration Start cannot serve safely: an
-// invalid TrustedProxyCIDRs entry, an invalid CORS block (see CORS.Validate)
-// or, while CORS is enabled, an HTTPHeaders entry that would set an
-// Access-Control-* header outside the CORS policy. Start runs the same checks.
+// invalid TrustedProxyCIDRs entry, an invalid CORS block (see CORS.Validate),
+// an invalid enabled RateLimit block (see RateLimit.Validate) or, while CORS
+// is enabled, an HTTPHeaders entry that would set an Access-Control-* header
+// outside the CORS policy. Start runs the same checks.
 func (c *Config) Validate() error {
 	_, err := c.validate()
 	return err
@@ -225,6 +245,9 @@ func (c *Config) validate() (*identity.TrustedProxies, error) {
 		return nil, err
 	}
 	if err := c.CORS.Validate(); err != nil {
+		return nil, err
+	}
+	if err := c.RateLimit.Validate(); err != nil {
 		return nil, err
 	}
 	if c.CORS.GetEnabled() {
@@ -294,25 +317,96 @@ func (c *CORS) GetOptionsPassthrough() bool {
 }
 
 // RateLimit configures the per-client token bucket rate limiter
-// (github.com/didip/tollbooth) that wraps the HTTP handler.
+// (github.com/didip/tollbooth) that wraps the HTTP handler. An enabled block
+// must pass Validate; Start rejects one that does not.
 type RateLimit struct {
 	// Enabled specifies if rate limiting is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	// RequestsPerSecond specifies the maximum number of requests per second.
+	// RequestsPerSecond specifies the maximum number of requests per second
+	// per client; it is also the burst size. It must be positive when Enabled:
+	// with zero, tollbooth admits one request per client and then rejects
+	// every later one.
 	RequestsPerSecond int `json:"requests_per_second,omitempty" yaml:"requests_per_second,omitempty"`
-	// ExpirationTTL specifies the TTL for token bucket, default 10 mins
+	// ExpirationTTL specifies how long a client's token bucket is kept before
+	// it is recreated with a full burst; zero selects 10 minutes. Negative
+	// values and values below one second are rejected, and the TTL should
+	// stay long relative to the refill interval.
 	ExpirationTTL time.Duration `json:"expiration_ttl,omitempty" yaml:"expiration_ttl,omitempty"`
-	// HeadersIPLookups lists the sources used to identify the client, in order;
-	// default is the trusted client address derived from the socket peer and
-	// TrustedProxyCIDRs. Explicit header lookups can be spoofed and should be
-	// configured only when the deployment guarantees they are overwritten.
+	// HeadersIPLookups lists the sources used to identify the client, in
+	// order: "RemoteAddr", "X-Forwarded-For" or "X-Real-IP" (as spelled by
+	// tollbooth; any other name is rejected because tollbooth would ignore it
+	// and leave requests unlimited). The default is the trusted client
+	// address derived from the socket peer and TrustedProxyCIDRs. Explicit
+	// header lookups can be spoofed and should be configured only when the
+	// deployment guarantees they are overwritten.
 	HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
-	// Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET", "POST";
-	// empty means all methods.
+	// Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET",
+	// "POST"; empty means all methods. tollbooth compares them exactly, so
+	// each entry must be a single upper-case HTTP method token (RFC 9110
+	// tchar characters only); any other entry is rejected because it would
+	// never match and leave every request unlimited.
 	Metods []string `json:"metods,omitempty" yaml:"metods,omitempty"`
 }
 
 // GetEnabled returns true when rate limiting is configured and enabled; safe on a nil receiver.
 func (c *RateLimit) GetEnabled() bool {
 	return c != nil && c.Enabled != nil && *c.Enabled
+}
+
+// Validate returns an error when rate limiting is enabled with settings that
+// would not limit as configured: a RequestsPerSecond that is not positive, a
+// negative or sub-second ExpirationTTL, a HeadersIPLookups entry tollbooth
+// does not understand, or a Metods entry that is not an upper-case method
+// name. A nil or disabled RateLimit is valid. Start calls it through
+// Config.Validate.
+func (c *RateLimit) Validate() error {
+	if !c.GetEnabled() {
+		return nil
+	}
+	if c.RequestsPerSecond <= 0 {
+		return errors.Newf("rate_limit: requests_per_second must be positive when enabled, got %d", c.RequestsPerSecond)
+	}
+	if c.ExpirationTTL < 0 {
+		return errors.Newf("rate_limit: expiration_ttl must not be negative, got %s", c.ExpirationTTL)
+	}
+	if c.ExpirationTTL > 0 && c.ExpirationTTL < minRateLimitTTL {
+		return errors.Newf("rate_limit: expiration_ttl must be at least %s, got %s", minRateLimitTTL, c.ExpirationTTL)
+	}
+	for _, lookup := range c.HeadersIPLookups {
+		if !slices.Contains(rateIPLookups, lookup) {
+			return errors.Newf("rate_limit: unsupported headers_ip_lookups entry %q; use one of %s",
+				lookup, strings.Join(rateIPLookups, ", "))
+		}
+	}
+	for _, method := range c.Metods {
+		if !isUpperMethodToken(method) {
+			return errors.Newf("rate_limit: metods entry %q must be an upper-case HTTP method token", method)
+		}
+	}
+	return nil
+}
+
+// isUpperMethodToken reports whether s is a non-empty HTTP method token
+// (RFC 9110 tchar characters) without lower-case letters, i.e. a value that
+// can equal the method of an incoming request.
+func isUpperMethodToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if !isMethodTokenChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isMethodTokenChar reports whether c is an RFC 9110 tchar other than a
+// lower-case letter.
+func isMethodTokenChar(c byte) bool {
+	switch {
+	case c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
 }

@@ -22,6 +22,8 @@
 
 - Synchronize scheduler and task state, and make repeated `Stop` calls safe. A stopped scheduler can be restarted.
 
+- B07: `gserver.Server.Close` no longer blocks when a listener's setup failed after `Start`; `serve` starts no server until its TLS listener is ready and always closes the channel `Close` waits on. `Close` now stops the TLS certificate reloader, which previously leaked one goroutine per `Start`/`Close` cycle, and runs its teardown once: services are closed once, and a repeated or concurrent `Close` returns after the first teardown has finished (previously a second call closed the services again). A failed `Start` now releases everything on every error path: the reloader is stopped, services created by earlier factories are closed when a later factory fails or is missing, and the cleanup no longer depends on a shadowed error variable. `configureListeners` now really closes the listeners it opened before a later listen URL failed (its previous deferred cleanup read a result that the error return had already reset, so the first listener stayed bound) and stops the reloader it started.
+
 ### Correctness and interoperability
 
 - Return REST server HTTP bind errors from `StartHTTP`, support `Config()` and IPv6 bind addresses (`HostName()` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` add them), and make `StopHTTP` safe before start and on repeated calls.
@@ -54,6 +56,8 @@
 - `KeypairReloader` now returns an error for an expired certificate at initial load or reload, and `Reload` returns an error after `Close`. Its TLS callbacks return an error if the current certificate expires; `Keypair` returns nil. `TLSInfo.ServerTLSWithReloader` also routes handshakes without SNI through that callback, so its returned config no longer exposes a static `Certificates` entry. Rotate certificates before expiry and handle reload and handshake errors. TLS constructors also reject CA files with no valid certificate. `NewHTTPTransportWithReloader` now clones a supplied transport; callers should use the returned `HTTPTransport` for requests and close it when done.
 
 - `restserver.StopHTTP` now drains active requests before calling `Service.Close`. Services that must stop accepting work earlier can use a `ServerStoppingEvent` handler. After the shutdown timeout, services still close even if handlers have not finished.
+
+- B07: `gserver.Start` now rejects an enabled `rate_limit` block whose `requests_per_second` is not positive (previously one request per client was admitted and every later one got 429), whose `expiration_ttl` is negative or shorter than one second (an expired bucket is recreated with a full burst), whose `headers_ip_lookups` contains a name other than `RemoteAddr`, `X-Forwarded-For` or `X-Real-IP` spelled exactly, or whose `metods` contains an entry that is not a single upper-case HTTP method token, such as `get`, `"GET "` or `GET,POST` (tollbooth ignored other names and methods and limited nothing). `Config.Validate` and the new `RateLimit.Validate` report the same errors.
 
 - `rpcclient.New` now rejects a TLS configuration paired with `http://`, `unix://`, or a bare endpoint. Change the endpoint to `https://` or `unixs://` to keep TLS and per-RPC credentials enabled.
 
