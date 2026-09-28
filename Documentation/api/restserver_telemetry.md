@@ -37,13 +37,13 @@ Metrics are emitted through porto/metricskey \(HTTPReqPerf, HTTPReqByRole\) keye
 
 
 <a name="NewRequestLogger"></a>
-## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L66-L70>)
+## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L67-L71>)
 
 ```go
 func NewRequestLogger(handler http.Handler, granularity time.Duration, logger xlog.KeyValueLogger, opts ...Option) http.Handler
 ```
 
-NewRequestLogger creates a RequestLogger that chains to handler. The logged duration is expressed in units of granularity \(e.g. time.Millisecond\), which must be greater than zero. It panics if handler is nil and returns handler unchanged \(no logging\) if logger is nil. The remote address logged is identity.ClientIPFromRequest, which honours X\-Forwarded\-For.
+NewRequestLogger creates a RequestLogger that chains to handler. The logged duration is expressed in units of granularity \(e.g. time.Millisecond\), which must be greater than zero. It panics if handler is nil and returns handler unchanged \(no logging\) if logger is nil. The remote address logged is identity.ClientIPFromRequest, which accepts forwarding headers only from configured trusted proxies.
 
 <a name="NewRequestMetrics"></a>
 ## func [NewRequestMetrics](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/request_metrics.go#L23>)
@@ -105,7 +105,7 @@ type RequestLogger struct {
 ```
 
 <a name="RequestLogger.ServeHTTP"></a>
-### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L97>)
+### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L98>)
 
 ```go
 func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request)

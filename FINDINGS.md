@@ -44,15 +44,15 @@ byte-exact test.
 | P-004 | gserver                                 | `serve.go` `configureListeners`, `server.go` `Server.Close`              | TLS keypair reloader goroutine leaked on `Close`                                                                                             | bug         | MEDIUM   | Open           |
 | P-005 | gserver                                 | `serve.go` `serveCtx.serve`                                              | cmux and `http.Server` have no read/header/idle timeouts (slowloris)                                                                         | security    | MEDIUM   | Open           |
 | P-006 | gserver                                 | `serve.go` `configureRateLimiter`                                        | `rate_limit.enabled` without `requests_per_second` blocks nearly all traffic                                                                 | correctness | MEDIUM   | Needs Approval |
-| P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Needs Approval |
+| P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Fixed          |
 | P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
 | P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
 | P-013 | gserver/roles                           | `roles.go` `IdentityFromContext`                                         | Cookie auth over gRPC skips the CSRF check; HTTP cookie auth silently requires `cookies.csrf`                                                | security    | LOW      | Needs Approval |
 | P-014 | gserver/credentials                     | `credentials.go` `perRPCCredential.GetRequestMetadata`                   | Unsynchronized reads of `callerIdentity`/`dpopSigner`; thundering-herd token refresh                                                         | race        | LOW      | Open           |
 | P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
 | P-016 | restserver/ready                        | `ready.go` `errUnavailable`; `xhttp/httperror` `Error.WriteHTTPResponse` | Package-level error mutated per request (stale `request_id`, data race)                                                                      | race        | MEDIUM   | Open           |
-| P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Open           |
-| P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Needs Approval |
+| P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
+| P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
 | P-019 | restserver                              | `server.go` `StartHTTP`                                                  | No `ReadHeaderTimeout`/`ReadTimeout`; `IdleTimeout` is one hour                                                                              | security    | MEDIUM   | Needs Approval |
 | P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
@@ -129,6 +129,12 @@ byte-exact test.
 - Evidence: when `HeadersIPLookups` is empty tollbooth defaults to `X-Forwarded-For`, `X-Real-IP`, then `RemoteAddr`.
 - Impact: without a trusted proxy, clients bypass the limiter by rotating a fake `X-Forwarded-For`.
 - Fix: default to `["RemoteAddr"]`; document that header lookups are only safe behind a trusted proxy.
+- Resolution: the default limiter keys on the resolved client address. Direct
+  requests use the socket peer; trusted proxy requests use the validated XFF
+  chain. Explicit `headers_ip_lookups` remains an administrator override.
+  The default limiter's `X-Rate-Limit-Request-Remote-Addr` response header
+  now carries that client IP instead of the socket peer's `host:port`, and a
+  request without a client IP is not limited.
 
 ### P-009 CSRF values in error text
 
@@ -166,12 +172,21 @@ byte-exact test.
 
 - Evidence: the `RemoteAddr` fallback only runs when both headers are empty; after the loop finds no public IP the function returns `xRealIP`, which may be "". `realip_test.go` uses `h.Set` in a loop so a comma list is never tested.
 - Fix: fall back to the last XFF entry or `RemoteAddr`; fix the test to join the values.
+- Resolution: private client addresses are returned from trusted XFF chains;
+  malformed or absent values fall back to the socket peer. Tests cover comma
+  lists and multiple header lines. Compatibility: a request with an empty
+  `RemoteAddr` (in-process `http.NewRequest`) now returns "" instead of the
+  server's `netutil.GetLocalIP`, matching `ClientIPFromGRPC` for unknown peers;
+  the server's own address is not the caller's.
 
 ### P-018 Proxy headers trusted from any client
 
 - Evidence: `ClientIPFromRequest`, `ClientIPFromGRPC`, `createIdentityContext` and `GetServerURL` read `X-Forwarded-*`/`X-Real-Ip` unconditionally; gRPC variants return the raw metadata value.
 - Impact: spoofed audit IPs and attacker-chosen scheme in generated URLs.
 - Fix: opt-in trusted-proxy CIDR list or `TrustProxyHeaders` flag; validate `X-Forwarded-Proto` against `http`/`https`.
+- Resolution: `gserver` and `restserver` now use opt-in proxy CIDRs. HTTP and
+  gRPC client IP extraction reject untrusted or malformed forwarding data;
+  URL schemes accept only trusted `http` or `https` values.
 
 ### P-019 restserver `http.Server` timeouts
 
@@ -318,8 +333,8 @@ byte-exact test.
 
 ## Notes on items needing approval
 
-- P-006, P-007, P-019, P-026: new defaults or limits that deployments may need to raise.
-- P-013, P-018, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
+- P-006, P-019, P-026: new defaults or limits that deployments may need to raise.
+- P-013, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
 - P-055: replace fail-fast Fatal with errors; some deployments may rely on the crash.
 - P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.

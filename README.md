@@ -188,7 +188,6 @@ cors:
 rate_limit:
   enabled: true
   requests_per_second: 100
-  headers_ip_lookups: ["RemoteAddr"]
 timeout:
   request: 10s
 identity_map:
@@ -208,6 +207,22 @@ identity_map:
 authz:
   allow_any: ["/healthz"]
   allow: ["/v1:jwt_user,admin", "/pb.API/:admin"]
+```
+
+Client IPs use the socket peer by default; `X-Forwarded-Proto` is ignored
+unless the peer is trusted. When a
+reverse proxy overwrites incoming forwarding headers, configure
+`trusted_proxy_cidrs` with its network ranges (for example,
+`["10.2.0.0/16"]`). The default rate limiter then uses the resolved client
+IP. `restserver.HTTPServer` supports the same policy; set it before
+`StartHTTP`:
+
+```go
+trust, err := identity.ParseTrustedProxies([]string{"10.2.0.0/16"})
+if err != nil {
+	return err
+}
+srv.WithTrustedProxies(trust)
 ```
 
 ### HTTP client with retries

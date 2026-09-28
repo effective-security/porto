@@ -227,6 +227,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = configureHandlers(s, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
+		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
 		srv := &http.Server{
 			Handler: handler,
@@ -250,6 +251,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = sctx.grpcHandlerFunc(gsSecure, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
+		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
 		srv := &http.Server{
 			Handler:   handler,
@@ -274,6 +276,9 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	return m.Serve()
 }
 
+// rateLookupRemoteAddr is the tollbooth IP lookup that reads r.RemoteAddr.
+const rateLookupRemoteAddr = "RemoteAddr"
+
 func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
 	if !cfg.GetEnabled() {
 		return handler
@@ -289,14 +294,37 @@ func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
 	}
 
 	lmt := tollbooth.NewLimiter(float64(cfg.RequestsPerSecond), &ops)
-	if len(cfg.HeadersIPLookups) > 0 {
-		lmt.SetIPLookups(cfg.HeadersIPLookups)
-	}
 	if len(cfg.Metods) > 0 {
 		lmt.SetMethods(cfg.Metods)
 	}
+	if len(cfg.HeadersIPLookups) > 0 {
+		// Administrator override: tollbooth reads the named headers as sent.
+		lmt.SetIPLookups(cfg.HeadersIPLookups)
+		return tollbooth.LimitHandler(lmt, handler)
+	}
 
-	return tollbooth.LimitHandler(lmt, handler)
+	// Default: key on the client IP resolved by the trusted proxy policy.
+	// tollbooth reads only RemoteAddr, so it checks a shallow copy whose
+	// RemoteAddr is the bare client IP; tollbooth also echoes that IP in
+	// X-Rate-Limit-Request-Remote-Addr. The handler and the OnLimitReached
+	// callback receive the original request. An empty IP is not limited.
+	lmt.SetIPLookups([]string{rateLookupRemoteAddr})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		limitReq := *r
+		limitReq.RemoteAddr = identity.ClientIPFromRequest(r)
+		if httpErr := tollbooth.LimitByRequest(lmt, w, &limitReq); httpErr != nil {
+			// Same response as tollbooth.LimitHandler.
+			lmt.ExecOnLimitReached(w, r)
+			if lmt.GetOverrideDefaultResponseWriter() {
+				return
+			}
+			w.Header().Add(header.ContentType, lmt.GetMessageContentType())
+			w.WriteHeader(httpErr.StatusCode)
+			_, _ = w.Write([]byte(httpErr.Message))
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func configureHandlers(s *Server, handler http.Handler) http.Handler {
@@ -396,7 +424,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		NewRequestValidationUnaryInterceptor(),
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
-		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext),
+		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
 	}
 	// authz is nil when the config has no allow rules; the interceptors
 	// would dereference it on every call.
@@ -413,7 +441,7 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		s.newLogStreamServerInterceptor(),
 		correlation.NewStreamServerInterceptor(),
-		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext),
+		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
 	}
 	if s.authz != nil {
 		chainStreamInterceptors = append(chainStreamInterceptors, s.authz.NewStreamServerInterceptor())

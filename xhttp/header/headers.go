@@ -64,8 +64,12 @@ const (
 	XDeviceID = "X-Device-ID"
 	// XFilename contains the name of the artifact to sign
 	XFilename = "X-Filename"
+	// XForwardedFor carries the proxy chain of client IP addresses.
+	XForwardedFor = "X-Forwarded-For"
 	// XForwardedProto contains the protocol
 	XForwardedProto = "X-Forwarded-Proto"
+	// XRealIP carries the client IP supplied by a reverse proxy.
+	XRealIP = "X-Real-Ip"
 	// XGRPCStream is set by gRPC-Web clients to indicate a streaming call.
 	// When present, the server must not apply HTTP-level gzip compression,
 	// as it would break streaming.

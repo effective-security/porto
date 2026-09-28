@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 func TestMain(m *testing.M) {
@@ -45,7 +48,7 @@ func Test_ForRequest(t *testing.T) {
 func Test_ClientIP(t *testing.T) {
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := FromRequest(r)
-		assert.Equal(t, "10.0.0.3", caller.ClientIP())
+		assert.Equal(t, "10.0.0.1", caller.ClientIP())
 		assert.Equal(t, "test", caller.UserAgent())
 		assert.Equal(t, "/test", caller.Target())
 	})
@@ -165,6 +168,19 @@ func Test_grpcFromContext(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Equal(t, "rpc error: code = PermissionDenied desc = invalid identity: invalid request", err.Error())
+	})
+
+	t.Run("trusted proxy metadata", func(t *testing.T) {
+		trust, err := ParseTrustedProxies([]string{"10.0.0.0/8"})
+		require.NoError(t, err)
+		ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("10.0.0.2"), Port: 123}})
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-forwarded-for", "192.168.1.4"))
+		interceptor := NewAuthUnaryInterceptor(GuestIdentityForContext, trust)
+		_, err = interceptor(ctx, nil, info, func(ctx context.Context, _ any) (any, error) {
+			assert.Equal(t, "192.168.1.4", FromContext(ctx).ClientIP())
+			return nil, nil
+		})
+		require.NoError(t, err)
 	})
 }
 

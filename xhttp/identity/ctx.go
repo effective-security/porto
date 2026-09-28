@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -186,18 +185,8 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 		if rc.userAgent == "" {
 			rc.userAgent = getMdHeader(md, "x-user-agent")
 		}
-
-		rc.clientIP = getMdHeader(md, "x-forwarded-for")
-		if rc.clientIP == "" {
-			rc.clientIP = getMdHeader(md, "x-real-ip")
-		}
-		if rc.clientIP == "" {
-			peerInfo, ok := peer.FromContext(ctx)
-			if ok {
-				rc.clientIP = peerInfo.Addr.String()
-			}
-		}
 	}
+	rc.clientIP = ClientIPFromGRPC(ctx)
 
 	ctx = AddToContext(ctx, rc)
 	role := id.Role()
@@ -231,12 +220,17 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 
 // NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls
 // identityMapper with the full method name and stores the RequestContext
-// (identity, client IP from x-forwarded-for/x-real-ip metadata or the peer
+// (identity, client IP from a trusted proxy or the peer
 // address, user agent) in the context. A mapper error fails the call with
 // codes.PermissionDenied. Panics in the handler are recovered, logged and
-// returned as an "unhandled exception" error.
-func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServerInterceptor {
+// returned as an "unhandled exception" error. The optional trusted policy
+// (only the first value is used) is stored with WithTrustedProxies; a nil or
+// omitted policy keeps any policy already in the context.
+func NewAuthUnaryInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
+		if len(trusted) > 0 && trusted[0] != nil {
+			ctx = WithTrustedProxies(ctx, trusted[0])
+		}
 		defer func() {
 			if rec := recover(); rec != nil {
 				logger.ContextKV(ctx, xlog.ERROR,
@@ -259,9 +253,13 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServe
 // NewStreamServerInterceptor returns the streaming counterpart of
 // NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext
 // so the handler sees the enriched context. It does not recover panics.
-func NewStreamServerInterceptor(identityMapper ProviderFromContext) grpc.StreamServerInterceptor {
+func NewStreamServerInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		ctx, err := createIdentityContext(ss.Context(), info.FullMethod, identityMapper)
+		ctx := ss.Context()
+		if len(trusted) > 0 && trusted[0] != nil {
+			ctx = WithTrustedProxies(ctx, trusted[0])
+		}
+		ctx, err := createIdentityContext(ctx, info.FullMethod, identityMapper)
 		if err != nil {
 			return err
 		}

@@ -15,7 +15,6 @@ import (
 	"github.com/effective-security/porto/restserver/ready"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/xhttp/correlation"
-	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/porto/xhttp/marshal"
@@ -117,6 +116,7 @@ type MuxFactory interface {
 type HTTPServer struct {
 	authz            authz.HTTPAuthz
 	identityMapper   identity.ProviderFromRequest
+	trustedProxies   *identity.TrustedProxies
 	httpConfig       Config
 	tlsConfig        *tls.Config
 	httpServer       *http.Server
@@ -195,6 +195,14 @@ func (server *HTTPServer) WithAuthz(authz authz.HTTPAuthz) *HTTPServer {
 // each request. When unset identity.GuestIdentityMapper is used.
 func (server *HTTPServer) WithIdentityProvider(provider identity.ProviderFromRequest) *HTTPServer {
 	server.identityMapper = provider
+	return server
+}
+
+// WithTrustedProxies permits forwarding headers only from socket peers in
+// trust, built with identity.ParseTrustedProxies. Configure it before
+// StartHTTP; nil or an empty policy trusts no proxy, which is the default.
+func (server *HTTPServer) WithTrustedProxies(trust *identity.TrustedProxies) *HTTPServer {
+	server.trustedProxies = trust
 	return server
 }
 
@@ -361,6 +369,10 @@ func (server *HTTPServer) StartHTTP() error {
 	}
 
 	httpHandler := server.muxFactory.NewMux()
+	if server.muxFactory != server {
+		// Custom muxes do not pass through NewMux's proxy policy wrapper.
+		httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
+	}
 	httpServer := &http.Server{
 		IdleTimeout: time.Hour, // TODO: via config
 		ErrorLog:    xlog.Stderr,
@@ -464,10 +476,12 @@ func (server *HTTPServer) StopHTTP() {
 // NewMux builds the default handler chain: a Router (with CORS when
 // configured) on which every registered service has called Register, wrapped
 // (innermost to outermost) by the ready verifier, the authz handler when set,
-// the request logger, request metrics, the identity context handler and the
-// correlation ID handler. It is called by StartHTTP through the MuxFactory;
-// call it directly only in tests. It panics via the logger if the authz
-// handler cannot be created.
+// the request logger, request metrics, the identity context handler, the
+// correlation ID handler and, outermost, identity.NewTrustedProxyHandler
+// with the WithTrustedProxies policy, which resolves the client IP once for
+// all of them. It is called by StartHTTP through the MuxFactory; call it
+// directly only in tests. It panics via the logger if the authz handler
+// cannot be created.
 func (server *HTTPServer) NewMux() http.Handler {
 	// NOTE: the handlers are executed in the reverse order
 
@@ -516,6 +530,7 @@ func (server *HTTPServer) NewMux() http.Handler {
 
 	// Add correlationID
 	httpHandler = correlation.NewHandler(httpHandler)
+	httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
 
 	return httpHandler
 }
@@ -534,15 +549,13 @@ func notFoundHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetServerURL returns the absolute URL for relativeEndpoint as seen by the
-// client of request r. The scheme is taken from the X-Forwarded-Proto header
-// when present (it is trusted as-is), otherwise from s.Protocol(); the host
+// client of request r. The scheme uses X-Forwarded-Proto only when the peer
+// is trusted and the value is http or https; otherwise it uses s.Protocol(). The host
 // from r.URL.Host, then r.Host, then the server's host:port.
 func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL {
 	proto := s.Protocol()
 
-	// Allow upstream proxies  to specify the forwarded protocol. Allow this value
-	// to override our own guess.
-	if specifiedProto := r.Header.Get(header.XForwardedProto); specifiedProto != "" {
+	if specifiedProto := identity.ForwardedProto(r); specifiedProto != "" {
 		proto = specifiedProto
 	}
 

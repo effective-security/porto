@@ -20,7 +20,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-When no identity is present a guest identity \(role "guest"\) is returned, never nil. GuestIdentityMapper / GuestIdentityForContext are the default mappers. ClientIPFromRequest trusts X\-Forwarded\-For and X\-Real\-Ip headers, so it should only be relied on behind a proxy that sets them.
+When no identity is present a guest identity \(role "guest"\) is returned, never nil. GuestIdentityMapper / GuestIdentityForContext are the default mappers. By default client IPs come from the socket peer. A server may opt in to forwarding headers with ParseTrustedProxies and NewTrustedProxyHandler \(HTTP\) or WithTrustedProxies \(gRPC context\). The configured proxies must overwrite incoming forwarding headers. NewTrustedProxyHandler resolves the client IP once per request and ClientIPFromRequest returns that value in later handlers:
+
+```
+trust, err := identity.ParseTrustedProxies([]string{"10.2.0.0/16"})
+if err != nil {
+	return err
+}
+h := identity.NewTrustedProxyHandler(identity.NewContextHandler(next, myMapper), trust)
+```
+
+A request without a socket peer, such as one built with http.NewRequest and served in process, has no client IP: ClientIPFromRequest returns "".
 
 ## Index
 
@@ -29,10 +39,13 @@ When no identity is present a guest identity \(role "guest"\) is returned, never
 - [func BasicAuthFromRequest\(r \*http.Request\) \(id string, secret string, err error\)](<#BasicAuthFromRequest>)
 - [func ClientIPFromGRPC\(ctx context.Context\) string](<#ClientIPFromGRPC>)
 - [func ClientIPFromRequest\(r \*http.Request\) string](<#ClientIPFromRequest>)
-- [func NewAuthUnaryInterceptor\(identityMapper ProviderFromContext\) grpc.UnaryServerInterceptor](<#NewAuthUnaryInterceptor>)
+- [func ForwardedProto\(r \*http.Request\) string](<#ForwardedProto>)
+- [func NewAuthUnaryInterceptor\(identityMapper ProviderFromContext, trusted ...\*TrustedProxies\) grpc.UnaryServerInterceptor](<#NewAuthUnaryInterceptor>)
 - [func NewContextHandler\(delegate http.Handler, identityMapper ProviderFromRequest\) http.Handler](<#NewContextHandler>)
-- [func NewStreamServerInterceptor\(identityMapper ProviderFromContext\) grpc.StreamServerInterceptor](<#NewStreamServerInterceptor>)
+- [func NewStreamServerInterceptor\(identityMapper ProviderFromContext, trusted ...\*TrustedProxies\) grpc.StreamServerInterceptor](<#NewStreamServerInterceptor>)
+- [func NewTrustedProxyHandler\(next http.Handler, trust \*TrustedProxies\) http.Handler](<#NewTrustedProxyHandler>)
 - [func WithTestIdentity\(r \*http.Request, identity Identity\) \*http.Request](<#WithTestIdentity>)
+- [func WithTrustedProxies\(ctx context.Context, trust \*TrustedProxies\) context.Context](<#WithTrustedProxies>)
 - [type AuthMethod](<#AuthMethod>)
   - [func \(m AuthMethod\) String\(\) string](<#AuthMethod.String>)
 - [type Context](<#Context>)
@@ -50,6 +63,8 @@ When no identity is present a guest identity \(role "guest"\) is returned, never
   - [func \(c \*RequestContext\) Identity\(\) Identity](<#RequestContext.Identity>)
   - [func \(c \*RequestContext\) Target\(\) string](<#RequestContext.Target>)
   - [func \(c \*RequestContext\) UserAgent\(\) string](<#RequestContext.UserAgent>)
+- [type TrustedProxies](<#TrustedProxies>)
+  - [func ParseTrustedProxies\(cidrs \[\]string\) \(\*TrustedProxies, error\)](<#ParseTrustedProxies>)
 
 
 ## Constants
@@ -61,7 +76,7 @@ const GuestRoleName = "guest"
 ```
 
 <a name="AddToContext"></a>
-## func [AddToContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L79>)
+## func [AddToContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L78>)
 
 ```go
 func AddToContext(ctx context.Context, rq *RequestContext) context.Context
@@ -79,34 +94,43 @@ func BasicAuthFromRequest(r *http.Request) (id string, secret string, err error)
 BasicAuthFromRequest parses the "Authorization: Basic base64\(id:secret\)" header. It returns empty values and a nil error when the header is absent or uses another scheme \(callers must check id\), an httperror.InvalidRequest when the base64 is malformed, and an empty secret when no ":" is present. The scheme prefix is matched case\-sensitively.
 
 <a name="ClientIPFromGRPC"></a>
-## func [ClientIPFromGRPC](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L58>)
+## func [ClientIPFromGRPC](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L192>)
 
 ```go
 func ClientIPFromGRPC(ctx context.Context) string
 ```
 
-ClientIPFromGRPC returns the client address for a gRPC call: the raw value of the x\-forwarded\-for or x\-real\-ip incoming metadata when present, otherwise the peer address including port, or "" when unknown.
+ClientIPFromGRPC returns the peer IP unless it is a trusted proxy; trusted peers may supply x\-forwarded\-for or x\-real\-ip metadata. Unknown peers return an empty string.
 
 <a name="ClientIPFromRequest"></a>
-## func [ClientIPFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L20>)
+## func [ClientIPFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L164>)
 
 ```go
 func ClientIPFromRequest(r *http.Request) string
 ```
 
-ClientIPFromRequest returns the client's IP address as a string. When the X\-Real\-Ip and X\-Forwarded\-For headers are both absent it is the host part of r.RemoteAddr \(or the local IP if that is empty\). Otherwise it is the first globally routable address in X\-Forwarded\-For, falling back to X\-Real\-Ip \(which may be ""\). The headers are trusted as sent, so the result is only reliable behind a proxy that overwrites them.
+ClientIPFromRequest returns the socket peer's IP unless that peer is in the request context's TrustedProxies. It then walks X\-Forwarded\-For from right to left and returns the first untrusted address, or the leftmost address when every hop is trusted. Invalid forwarding data falls back to the socket peer. A request without a RemoteAddr \(for example one built with http.NewRequest and served in process\) has no client IP and returns "". Behind NewTrustedProxyHandler it returns the IP resolved there.
 
-<a name="NewAuthUnaryInterceptor"></a>
-## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L238>)
+<a name="ForwardedProto"></a>
+## func [ForwardedProto](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L174>)
 
 ```go
-func NewAuthUnaryInterceptor(identityMapper ProviderFromContext) grpc.UnaryServerInterceptor
+func ForwardedProto(r *http.Request) string
 ```
 
-NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls identityMapper with the full method name and stores the RequestContext \(identity, client IP from x\-forwarded\-for/x\-real\-ip metadata or the peer address, user agent\) in the context. A mapper error fails the call with codes.PermissionDenied. Panics in the handler are recovered, logged and returned as an "unhandled exception" error.
+ForwardedProto returns a trusted proxy's http or https scheme, or an empty string when the peer or header is untrusted or invalid.
+
+<a name="NewAuthUnaryInterceptor"></a>
+## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L229>)
+
+```go
+func NewAuthUnaryInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.UnaryServerInterceptor
+```
+
+NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls identityMapper with the full method name and stores the RequestContext \(identity, client IP from a trusted proxy or the peer address, user agent\) in the context. A mapper error fails the call with codes.PermissionDenied. Panics in the handler are recovered, logged and returned as an "unhandled exception" error. The optional trusted policy \(only the first value is used\) is stored with WithTrustedProxies; a nil or omitted policy keeps any policy already in the context.
 
 <a name="NewContextHandler"></a>
-## func [NewContextHandler](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L107>)
+## func [NewContextHandler](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L106>)
 
 ```go
 func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest) http.Handler
@@ -115,13 +139,22 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 NewContextHandler returns middleware that calls identityMapper for each request and stores the resulting RequestContext \(identity, client IP, path, user agent\) in the request context for later handlers. A mapper error is answered with a JSON 401 unauthorized response and the request is not forwarded. For non\-guest identities tenant/user/email/role are also added to the xlog context fields. A RequestContext already present in the context \(for example from WithTestIdentity\) is left untouched.
 
 <a name="NewStreamServerInterceptor"></a>
-## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L262>)
+## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L256>)
 
 ```go
-func NewStreamServerInterceptor(identityMapper ProviderFromContext) grpc.StreamServerInterceptor
+func NewStreamServerInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.StreamServerInterceptor
 ```
 
 NewStreamServerInterceptor returns the streaming counterpart of NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext so the handler sees the enriched context. It does not recover panics.
+
+<a name="NewTrustedProxyHandler"></a>
+## func [NewTrustedProxyHandler](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L65>)
+
+```go
+func NewTrustedProxyHandler(next http.Handler, trust *TrustedProxies) http.Handler
+```
+
+NewTrustedProxyHandler stores trust in each request's context and resolves the client IP once, so that ClientIPFromRequest in later handlers \(rate limiter, identity, request logger\) returns the cached value instead of walking the forwarding headers again. Later changes to those headers do not change the cached IP; a request whose RemoteAddr differs from the one seen here is resolved again.
 
 <a name="WithTestIdentity"></a>
 ## func [WithTestIdentity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L197>)
@@ -131,6 +164,15 @@ func WithTestIdentity(r *http.Request, identity Identity) *http.Request
 ```
 
 WithTestIdentity returns a copy of r whose context carries the given identity \(with the local IP as client IP\), for use in unit tests.
+
+<a name="WithTrustedProxies"></a>
+## func [WithTrustedProxies](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L55>)
+
+```go
+func WithTrustedProxies(ctx context.Context, trust *TrustedProxies) context.Context
+```
+
+WithTrustedProxies returns a context that uses trust when resolving proxy headers. It replaces any policy, and any client IP cached by NewTrustedProxyHandler, already in ctx.
 
 <a name="AuthMethod"></a>
 ## type [AuthMethod](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L17>)
@@ -170,7 +212,7 @@ func (m AuthMethod) String() string
 String returns the method name \("Certificate", "AWS", "DPoP", "JWT", "JWTCookie"\), or "None" for MethodNone and unknown values.
 
 <a name="Context"></a>
-## type [Context](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L52-L63>)
+## type [Context](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L51-L62>)
 
 Context is the read\-only view of RequestContext.
 
@@ -263,7 +305,7 @@ type ProviderFromRequest func(*http.Request) (Identity, error)
 ```
 
 <a name="RequestContext"></a>
-## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L34-L40>)
+## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L33-L39>)
 
 RequestContext is the per\-request value stored in the context by NewContextHandler and the gRPC interceptors: the caller's Identity, client IP, target \(HTTP path or gRPC method\) and user agent. It implements Context. Correlation IDs live in xhttp/correlation, not here.
 
@@ -274,7 +316,7 @@ type RequestContext struct {
 ```
 
 <a name="FromContext"></a>
-### func [FromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L67>)
+### func [FromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L66>)
 
 ```go
 func FromContext(ctx context.Context) *RequestContext
@@ -283,7 +325,7 @@ func FromContext(ctx context.Context) *RequestContext
 FromContext returns the RequestContext stored in ctx. When none exists it returns a new RequestContext with the guest identity, never nil.
 
 <a name="FromRequest"></a>
-### func [FromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L86>)
+### func [FromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L85>)
 
 ```go
 func FromRequest(r *http.Request) *RequestContext
@@ -292,7 +334,7 @@ func FromRequest(r *http.Request) *RequestContext
 FromRequest returns the RequestContext for r \(guest when none was stored\), filling in target, client IP and user agent from the request when they are empty. Note that it updates the stored RequestContext in place.
 
 <a name="NewRequestContext"></a>
-### func [NewRequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L44>)
+### func [NewRequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L43>)
 
 ```go
 func NewRequestContext(id Identity, target string) *RequestContext
@@ -301,7 +343,7 @@ func NewRequestContext(id Identity, target string) *RequestContext
 NewRequestContext creates a request context with a specific identity and target; client IP and user agent are left empty. Store it with AddToContext.
 
 <a name="RequestContext.ClientIP"></a>
-### func \(\*RequestContext\) [ClientIP](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L282>)
+### func \(\*RequestContext\) [ClientIP](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L280>)
 
 ```go
 func (c *RequestContext) ClientIP() string
@@ -310,7 +352,7 @@ func (c *RequestContext) ClientIP() string
 ClientIP returns the request's client IP, or "" when unknown.
 
 <a name="RequestContext.Identity"></a>
-### func \(\*RequestContext\) [Identity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L277>)
+### func \(\*RequestContext\) [Identity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L275>)
 
 ```go
 func (c *RequestContext) Identity() Identity
@@ -319,7 +361,7 @@ func (c *RequestContext) Identity() Identity
 Identity returns the request's identity; never nil.
 
 <a name="RequestContext.Target"></a>
-### func \(\*RequestContext\) [Target](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L287>)
+### func \(\*RequestContext\) [Target](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L285>)
 
 ```go
 func (c *RequestContext) Target() string
@@ -328,12 +370,32 @@ func (c *RequestContext) Target() string
 Target returns the request's target: the HTTP path or gRPC full method.
 
 <a name="RequestContext.UserAgent"></a>
-### func \(\*RequestContext\) [UserAgent](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L292>)
+### func \(\*RequestContext\) [UserAgent](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L290>)
 
 ```go
 func (c *RequestContext) UserAgent() string
 ```
 
 UserAgent returns the request's user agent, or "".
+
+<a name="TrustedProxies"></a>
+## type [TrustedProxies](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L35-L37>)
+
+TrustedProxies is an immutable set of proxy networks allowed to supply forwarding headers. An empty or nil set trusts no proxy.
+
+```go
+type TrustedProxies struct {
+    // contains filtered or unexported fields
+}
+```
+
+<a name="ParseTrustedProxies"></a>
+### func [ParseTrustedProxies](<https://github.com/effective-security/porto/blob/main/xhttp/identity/realip.go#L40>)
+
+```go
+func ParseTrustedProxies(cidrs []string) (*TrustedProxies, error)
+```
+
+ParseTrustedProxies validates CIDR ranges for immediate and intermediate proxies.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)
