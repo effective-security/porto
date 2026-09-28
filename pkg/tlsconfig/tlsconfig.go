@@ -19,8 +19,8 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "t
 // is loaded from "<cert basename>.ocsp" if present. rootsFile (optional) is
 // used as both RootCAs and ClientCAs; caFile (optional) overrides ClientCAs.
 // When both are empty the OS roots are used and client certificates cannot be
-// verified. clientauthType is applied as-is. Files that contain no valid
-// certificate produce an empty pool without error. The returned config has
+// verified. clientauthType is applied as-is. CA files must contain at least
+// one valid certificate. The returned config has
 // no GetCertificate; pair it with KeypairReloader for rotation.
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType) (*tls.Config, error) {
 	tlscert, err := LoadX509KeyPairWithOCSP(certFile, keyFile)
@@ -31,13 +31,11 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientau
 	var roots *x509.CertPool
 
 	if rootsFile != "" {
-		rootsBytes, err := os.ReadFile(rootsFile)
+		var err error
+		roots, err = loadCertPool(rootsFile)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
-
-		roots = x509.NewCertPool()
-		roots.AppendCertsFromPEM(rootsBytes)
 	}
 
 	cfg := &tls.Config{
@@ -49,13 +47,10 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientau
 		RootCAs:      roots,
 	}
 	if caFile != "" {
-		caBytes, err := os.ReadFile(caFile)
+		cfg.ClientCAs, err = loadCertPool(caFile)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
-
-		cfg.ClientCAs = x509.NewCertPool()
-		cfg.ClientCAs.AppendCertsFromPEM(caBytes)
 	}
 
 	return cfg, nil
@@ -70,13 +65,11 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	var roots *x509.CertPool
 
 	if rootsFile != "" {
-		rootsBytes, err := os.ReadFile(rootsFile)
+		var err error
+		roots, err = loadCertPool(rootsFile)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
-
-		roots = x509.NewCertPool()
-		roots.AppendCertsFromPEM(rootsBytes)
 	}
 
 	cfg := &tls.Config{
@@ -105,6 +98,18 @@ func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, er
 	return cfg, nil
 }
 
+func loadCertPool(file string) (*x509.CertPool, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to read CA file %s", file)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(data) {
+		return nil, errors.Errorf("CA file %s contains no valid certificates", file)
+	}
+	return pool, nil
+}
+
 // NewClientTLSWithReloader is NewClientTLSFromFiles plus a KeypairReloader
 // wired as GetClientCertificate, polling every checkInterval. certFile and
 // keyFile are required. The caller must Close the returned reloader.
@@ -123,10 +128,10 @@ func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval
 	return tlsCfg, tlsloader, nil
 }
 
-// NewHTTPTransportWithReloader returns an HTTPTransport that installs a fresh
-// TLS client config (with the reloaded certificate) on the underlying
-// *http.Transport whenever the cert file changes, closing idle connections so
-// new dials use it. When HTTPUserTransport is nil a clone of
+// NewHTTPTransportWithReloader returns an HTTPTransport with a fixed TLS
+// client config that obtains the current certificate for each handshake.
+// Reloads close idle connections so new dials use the new pair. The supplied
+// transport is cloned before use. When HTTPUserTransport is nil a clone of
 // http.DefaultTransport with 100 max idle/per-host connections is used.
 // The caller must Close the returned transport to stop the reloader.
 func NewHTTPTransportWithReloader(
@@ -136,7 +141,10 @@ func NewHTTPTransportWithReloader(
 
 	transport := HTTPUserTransport
 	if transport == nil {
-		transport = http.DefaultTransport.(*http.Transport).Clone()
+		transport = http.DefaultTransport.(*http.Transport)
+	}
+	transport = transport.Clone()
+	if HTTPUserTransport == nil {
 		transport.MaxIdleConnsPerHost = 100
 		transport.MaxConnsPerHost = 100
 		transport.MaxIdleConns = 100
@@ -151,45 +159,35 @@ func NewHTTPTransportWithReloader(
 	if err != nil {
 		return nil, err
 	}
+	tlsCfg.Certificates = nil
+	tlsCfg.GetClientCertificate = tlsloader.GetClientCertificateFunc()
+	transport.TLSClientConfig = tlsCfg
 
 	tripper := &HTTPTransport{
 		transport: transport,
-		tlsConfig: tlsCfg,
 		reloader:  tlsloader,
 	}
 
 	tlsloader.OnReload(func(tlscert *tls.Certificate) {
 		logger.KV(xlog.NOTICE, "reason", "onReload", "cn", tlscert.Leaf.Subject.CommonName, "expires", tlscert.Leaf.NotAfter.Format(time.RFC3339))
 
-		tripper.lock.Lock()
-		tripper.tlsConfig = tripper.tlsConfig.Clone()
-		tripper.tlsConfig.Certificates = []tls.Certificate{*tlscert}
 		tripper.transport.CloseIdleConnections()
-		tripper.lock.Unlock()
 	})
 
 	return tripper, nil
 }
 
-// HTTPTransport is an http.RoundTripper that re-applies its current
-// TLSClientConfig to the wrapped *http.Transport on every request so that a
-// reloaded client certificate takes effect. Create it with
+// HTTPTransport is an http.RoundTripper that uses the current client
+// certificate for each new TLS handshake. Create it with
 // NewHTTPTransportWithReloader.
 type HTTPTransport struct {
 	transport *http.Transport
-	tlsConfig *tls.Config
 	reloader  *KeypairReloader
-	lock      sync.RWMutex
+	lock      sync.Mutex
 }
 
-// RoundTrip sets the current TLS config on the wrapped transport and forwards
-// the request. Errors are returned with a stack trace attached.
+// RoundTrip forwards the request. Errors are returned with a stack trace attached.
 func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	t.lock.Lock()
-	cfg := t.tlsConfig
-	t.transport.TLSClientConfig = cfg
-	t.lock.Unlock()
-
 	resp, err := t.transport.RoundTrip(r)
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -198,17 +196,19 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// Close stops the certificate reloader. It returns an error on a second call.
-// The wrapped *http.Transport is left open.
+// Close stops the certificate reloader and closes idle connections on the
+// wrapped transport. It returns an error on a second call.
 func (t *HTTPTransport) Close() error {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
-
+	t.lock.Lock()
 	if t.reloader == nil {
+		t.lock.Unlock()
 		return errors.New("already closed")
 	}
-	err := t.reloader.Close()
+	reloader := t.reloader
 	t.reloader = nil
+	t.lock.Unlock()
+	err := reloader.Close()
+	t.transport.CloseIdleConnections()
 	return err
 }
 

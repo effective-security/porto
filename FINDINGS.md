@@ -64,7 +64,6 @@ byte-exact test.
 | P-032 | xhttp/marshal, xhttp/identity           | `marshal.go` `WriteJSON`; `ctx.go`                                       | Internal error text echoed to clients in 5xx/401 bodies                                                                                      | security    | LOW      | Needs Approval |
 | P-033 | restserver/authz                        | `authz.go` `checkAccess`                                                 | `OPTIONS` bypasses authz even with `OptionsPassthrough`                                                                                      | security    | LOW      | Needs Approval |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 79.2% is below the 80% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-037 | pkg/tlsconfig                           | `reloader.go` `KeypairReloader.tlsCert`                                  | Process panics when the served certificate expires at runtime                                                                                | bug         | HIGH     | Needs Approval |
 | P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
 | P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
 | P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
@@ -72,8 +71,6 @@ byte-exact test.
 | P-045 | pkg/redisclient                         | `redisclient.go` `NewRedisClient`                                        | Redis URL, which may embed a password, logged at INFO                                                                                        | security    | MEDIUM   | Open           |
 | P-046 | pkg/retriable                           | `retriable.go` `New`                                                     | `request:` block without `retry_limit` silently disables retries                                                                             | correctness | MEDIUM   | Needs Approval |
 | P-047 | pkg/redisclient                         | `redisclient.go` `ReleaseLock`, `TryLock`                                | Lock release is not owner-bound and not atomic                                                                                               | correctness | MEDIUM   | Needs Approval |
-| P-050 | pkg/tlsconfig                           | `reloader.go` `Reload`                                                   | Sleeps up to 300ms holding the write lock, stalling every TLS handshake                                                                      | performance | MEDIUM   | Open           |
-| P-051 | pkg/tlsconfig                           | `tlsconfig.go` `HTTPTransport.RoundTrip`                                 | Writes `Transport.TLSClientConfig` on every request while dials read it                                                                      | race        | MEDIUM   | Needs Approval |
 | P-052 | pkg/transport                           | `tls.go` `TLSInfo`                                                       | `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`, `SkipClientSANVerify` are never enforced                      | security    | MEDIUM   | Needs Approval |
 | P-053 | pkg/transport                           | `keepalive_listener.go` `Accept`                                         | `errors.WithStack` on accept errors defeats `Temporary()` retry in net/http and grpc                                                         | bug         | MEDIUM   | Open           |
 | P-054 | pkg/transport                           | `listener_tls.go` `acceptLoop`                                           | TLS handshakes run with no deadline                                                                                                          | security    | MEDIUM   | Open           |
@@ -90,7 +87,6 @@ byte-exact test.
 | P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                                               | correctness | LOW      | Open           |
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
-| P-070 | pkg/tlsconfig                           | `tlsconfig.go`                                                           | `AppendCertsFromPEM` result ignored; malformed CA files yield an empty pool silently                                                         | correctness | LOW      | Open           |
 | P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
 | P-074 | pkg/transport, pkg/tlsconfig            | `keepalive_listener.go`, `cipher_suites.go`                              | Modernization: `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones                                  | correctness | LOW      | Needs Approval |
 | P-075 | pkg/cache                               | `cache_test.go` `TestProvider/redis` (pub/sub)                           | Flaky under load: Redis `ReceiveMessage` hits a 5s i/o timeout; `require` used inside goroutines                                             | docs        | LOW      | Open           |
@@ -232,12 +228,6 @@ byte-exact test.
 - Evidence: `go tool cover -func=coverage.out` total is 79.2%; CI `MIN_TESTCOV` is 80.
 - Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
 
-### P-037 Reloader panics on an expired certificate
-
-- Evidence: `tlsCert` calls `logger.Panic("cert expired")` when `NotAfter` has passed; it runs inside `GetCertificate` callbacks from handshake goroutines and from the background `Reload`.
-- Impact: a late rotation terminates the process on the next handshake or poll instead of failing that handshake.
-- Fix: return an error from the callbacks and log; keep serving the previous certificate.
-
 ### P-041 Redis subscription goroutine leak
 
 - Evidence: `ReceiveMessage` spawns a goroutine sending on an unbuffered channel and selects on a 1s timer; returning through the timer branch leaves the sender blocked forever.
@@ -273,16 +263,6 @@ byte-exact test.
 
 - Evidence: `TryLock` stores a timestamp value; `ReleaseLock` does `Exists` then `Del` without comparing the value.
 - Fix: return a token from `TryLock` and release with a compare-and-delete script.
-
-### P-050 Reload sleeps under the write lock
-
-- Evidence: `Lock()` then up to three `time.Sleep(100ms)` + file loads; every handshake takes `RLock`.
-- Fix: load outside the lock and swap under it.
-
-### P-051 `HTTPTransport.RoundTrip` mutation
-
-- Evidence: `t.transport.TLSClientConfig = cfg` under `t.lock` on every request; `http.Transport.dialConn` reads the field without that lock.
-- Fix: set `GetClientCertificate` once and never mutate `TLSClientConfig` after first use.
 
 ### P-052 Unenforced `TLSInfo` fields
 
@@ -322,7 +302,6 @@ byte-exact test.
 
 - P-067: `ctx: context.Background()` and `c.ctx.Done()` in `Close` cancels nothing.
 - P-068: `_ = pprof.StartCPUProfile(cpuf)`; closer keeps the file name, not the handle.
-- P-070: `roots.AppendCertsFromPEM(rootsBytes)` return value ignored in three places.
 - P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
 - P-074: `SetKeepAlive`+`SetKeepAlivePeriod`; hand-maintained cipher map including RC4/3DES.
 
@@ -342,8 +321,8 @@ byte-exact test.
 - P-006, P-007, P-019, P-026: new defaults or limits that deployments may need to raise.
 - P-013, P-018, P-027, P-028, P-032, P-033: change observable auth or error behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
-- P-037, P-055: replace fail-fast panics/Fatal with errors; some deployments may rely on the crash.
+- P-055: replace fail-fast Fatal with errors; some deployments may rely on the crash.
 - P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
 - P-043, P-047: rate limiter and lock semantics change under concurrency.
 - P-044, P-064: key layout changes for keys containing `..`, `//` or a prefix.
-- P-051, P-052, P-073, P-074: public type behavior or config surface.
+- P-052, P-073, P-074: public type behavior or config surface.

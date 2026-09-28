@@ -139,6 +139,8 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 
 	//  TODO: tlsloader.WithOCSPStaple(cfg.OCSPFile)
 	info.tlsCfg.GetCertificate = info.tlsReloader.GetKeypairFunc()
+	// Go skips GetCertificate for clients without SNI when Certificates is set.
+	info.tlsCfg.Certificates = nil
 
 	return info.tlsCfg, nil
 }
