@@ -11,10 +11,25 @@ configuration choice resolved before changing the affected behavior. Its
 reproduction, tests, and design can proceed while that choice is pending.
 The related larger designs are recorded in [ROADMAP.md](ROADMAP.md).
 
+## Completed B03 decision — gRPC-Web CORS
+
+An absent or disabled `cors` block emits no gRPC-Web CORS headers and does not
+reject requests solely because they carry `Origin`. With CORS enabled, an
+explicit `*` allows any origin; a nonempty list uses `rs/cors` matching,
+including configured origin patterns; an empty list allows none. `Start`
+rejects `*` combined with `allow_credentials`, so credentialed CORS always
+names its origins, and rejects `Access-Control-*` names in `http_headers`
+while CORS is enabled. REST and preflight CORS retain their configured pattern
+matching. A disallowed gRPC-Web POST receives HTTP 403 without gRPC-Web
+framing; preflights for disallowed origins receive no allow-origin header.
+Configured exposed headers are merged with the automatic gRPC-Web header list
+without case-insensitive duplicates. Deployments that relied on the previous
+implicit wildcard must explicitly enable CORS and configure
+`allowed_origins: ["*"]`.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
 | B02 — TLS reloader and client transport    | P1       | `pkg/tlsconfig`: return certificate expiry errors, reload outside the write lock, stop mutating an active `http.Transport`, and reject invalid CA bundles.                                                                                                            | P-037, P-050, P-051, P-070                                                  | Expiry behavior and transport contract                |
-| B03 — gRPC-Web CORS                        | P1       | `gserver`: honor disabled CORS, reject disallowed origins, and preserve configured exposed headers.                                                                                                                                                                   | P-002, P-011, P-012                                                         | Origin and response behavior                          |
 | B05 — Trusted proxy headers                | P2       | `xhttp/identity`, `restserver`, `gserver`: fix the private-only XFF fallback, define trusted-proxy handling for IP and scheme headers, and key the default rate limiter from a trusted address.                                                                       | P-007, P-017, P-018                                                         | Proxy trust configuration and default                 |
 | B06 — Network limits                       | P2       | `gserver`, `restserver`, `xhttp/marshal`, `pkg/transport`, `pkg/appinit`: add bounded cmux/HTTP/TLS handshake timeouts and request bodies; make the Prometheus server closable with a safe bind-error path. Implement the shared defaults in ROADMAP item 2 together. | P-005, P-019, P-026, P-054, P-055                                           | Timeout/body defaults and Prometheus failure behavior |
 | B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |

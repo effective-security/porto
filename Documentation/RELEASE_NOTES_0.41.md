@@ -4,6 +4,8 @@
 
 ### Security
 
+- gRPC-Web CORS now requires an enabled `cors` block and an explicit allowed origin. For both REST and gRPC-Web, an enabled CORS block with an empty origin list now allows none; set `allowed_origins: ["*"]` to retain the old wildcard behavior (and `enabled: true` if enabling gRPC-Web CORS). `Start` now returns an error when an enabled `cors` block combines `allowed_origins: ["*"]` with `allow_credentials: true`; credentialed CORS needs explicit origins or origin patterns. While `cors` is enabled, `Start` also rejects `Access-Control-*` names in `http_headers`; move those settings into the `cors` block. Disallowed gRPC-Web POSTs receive HTTP 403; disallowed preflights receive no allow-origin header. REST requests from disallowed origins still reach their handlers without CORS headers, so REST CORS is not CSRF protection. Configured exposed headers are preserved without duplicate names.
+
 - Redact credential headers from retriable HTTP client debug dumps. Token and DPoP key writes now use private temporary files and replace existing credential paths atomically; newly created credential folders use mode `0700`.
 
 ### Concurrency, deadlocks and panics

@@ -53,6 +53,40 @@ func TestStartEmptyHTTP(t *testing.T) {
 	assert.NotEmpty(t, srv.LocalIP())
 }
 
+func TestStartRejectsWildcardCORSCredentials(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	cfg := &gserver.Config{
+		CORS: &gserver.CORS{
+			Enabled:          &enabled,
+			AllowedOrigins:   []string{"*"},
+			AllowCredentials: &enabled,
+		},
+	}
+
+	srv, err := gserver.Start("WildcardCORSCredentials", cfg, nil, nil)
+	require.EqualError(t, err, `cors: allowed_origins "*" cannot be combined with allow_credentials; list explicit origins`)
+	assert.Nil(t, srv)
+}
+
+func TestStartRejectsStaticCORSHeaders(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	cfg := &gserver.Config{
+		CORS: &gserver.CORS{
+			Enabled:        &enabled,
+			AllowedOrigins: []string{"*"},
+		},
+		HTTPHeaders: map[string]string{
+			"Access-Control-Allow-Credentials": "true",
+		},
+	}
+
+	srv, err := gserver.Start("StaticCORSHeaders", cfg, nil, nil)
+	require.EqualError(t, err, `http_headers: "Access-Control-Allow-Credentials" cannot be set while cors is enabled; configure it in the cors block`)
+	assert.Nil(t, srv)
+}
+
 func TestRateLimit(t *testing.T) {
 	enabled := true
 	cfg := &gserver.Config{
