@@ -255,8 +255,9 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		handler = sctx.grpcHandlerFunc(gsSecure, handler)
 		// rate limit will be first
 		handler = configureRateLimiter(s.cfg.RateLimit, handler)
-		// P-077: this limit and Timeouts.Read also bound native gRPC streams.
-		// P-078: an early 413 bypasses CORS, telemetry and gRPC status.
+		// The body limit also bounds native gRPC streams here: grpc-go's
+		// ServeHTTP transport buffers request data without flow control
+		// (ROADMAP 12).
 		handler = marshal.LimitRequestBody(handler, s.cfg.MaxRequestBody)
 		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
@@ -634,6 +635,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					grw.Close()
 				}()
 			}
+			if !grpcWeb && r.ProtoMajor == 2 {
+				clearStreamReadDeadline(w, r)
+			}
 			if sctx.cfg.DebugLogs {
 				logger.ContextKV(r.Context(), xlog.DEBUG,
 					"method", r.Method,
@@ -678,6 +682,19 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	})
 
 	return handler
+}
+
+// clearStreamReadDeadline removes the HTTP/2 per-stream ReadTimeout from a
+// native gRPC request, so client-streaming and bidi RPCs on TLS listeners
+// are not cut after Timeouts.Read, as on plaintext listeners. The stream
+// stays bounded by MaxRequestBody.
+func clearStreamReadDeadline(w http.ResponseWriter, r *http.Request) {
+	if err := http.NewResponseController(w).SetReadDeadline(time.Time{}); err != nil {
+		logger.ContextKV(r.Context(), xlog.WARNING,
+			"reason", "clear_read_deadline",
+			"path", r.URL.Path,
+			"err", err.Error())
+	}
 }
 
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {

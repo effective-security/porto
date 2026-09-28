@@ -24,8 +24,14 @@ native net/http semantics; HTTP/2 has no per-stream header deadline.
 
 Body limits apply to HTTP handlers, including custom REST muxes, and to
 standalone `marshal.DecodeBody`; native gRPC keeps its per-message limits.
-On TLS listeners, HTTP body limits also apply to gRPC/gRPC-Web request streams.
-Known oversized bodies and oversized JSON decoding return HTTP 413.
+On TLS listeners, HTTP body limits also apply to gRPC/gRPC-Web request streams;
+native gRPC streams there are exempt from the read deadline but keep the body
+limit as a per-stream total (ROADMAP 12). The body limiter writes no response:
+a known oversized body fails on its first read before any byte is read.
+`DecodeBody` returns HTTP 413 for it and for any other oversized JSON body,
+from inside the CORS, correlation and telemetry middleware.
+`request_too_large` maps to gRPC `ResourceExhausted` and converts back to 413
+through its code detail.
 Prometheus binds synchronously and returns bind errors; its returned closer
 closes the HTTP server. Unexpected serve errors are logged, never fatal.
 Deployments with large uploads or long request streams must raise or disable

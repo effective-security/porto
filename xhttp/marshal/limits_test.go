@@ -14,6 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// countingReader records how many body bytes the server read.
+type countingReader struct {
+	io.Reader
+	read int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.Reader.Read(p)
+	c.read += n
+	return n, err
+}
+
 func TestBodyLimits(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -34,7 +46,9 @@ func TestBodyLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			body := &countingReader{Reader: strings.NewReader(tc.body)}
+			r := httptest.NewRequest(http.MethodPost, "/", body)
+			r.ContentLength = int64(len(tc.body))
 			if tc.unknownLength {
 				r.ContentLength = -1
 			}
@@ -56,15 +70,35 @@ func TestBodyLimits(t *testing.T) {
 				}
 			}), tc.limit)
 			h.ServeHTTP(w, r)
+			assert.True(t, called, "the limiter must not answer for the handler")
 			assert.Equal(t, tc.status, w.Code)
 			if tc.status == http.StatusRequestEntityTooLarge && !tc.unknownLength {
-				assert.False(t, called, "known oversized bodies must not reach the handler")
+				assert.Zero(t, body.read, "known oversized bodies must not be read")
 			}
 			if tc.status == http.StatusRequestEntityTooLarge {
 				assert.Contains(t, w.Body.String(), `"code":"request_too_large"`)
 			}
 		})
 	}
+}
+
+func TestLimitRequestBodyWritesNoResponse(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("1234567"))
+	w := httptest.NewRecorder()
+	h := marshal.LimitRequestBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		var overflow *http.MaxBytesError
+		require.ErrorAs(t, err, &overflow)
+		assert.Equal(t, int64(6), overflow.Limit)
+		assert.Empty(t, body, "a known oversized body fails before it is read")
+		require.NoError(t, r.Body.Close())
+		w.WriteHeader(http.StatusNoContent)
+	}), 6)
+	h.ServeHTTP(w, r)
+	// The handler, not the limiter, chooses the response.
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Empty(t, w.Body.String())
 }
 
 func TestDecodeBodyDisabledLimitLeavesTrailingBody(t *testing.T) {
@@ -89,13 +123,25 @@ func TestDecodeBodyDisabledLimitLeavesTrailingBody(t *testing.T) {
 
 func TestDecodeBodyDefaultLimit(t *testing.T) {
 	t.Parallel()
-	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`"`+strings.Repeat("x", int(limits.DefaultMaxRequestBody))+`"`))
-	r.ContentLength = -1
-	w := httptest.NewRecorder()
-	var value string
-	err := marshal.DecodeBody(w, r, &value)
-	require.Error(t, err)
-	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	payload := `"` + strings.Repeat("x", int(limits.DefaultMaxRequestBody)) + `"`
+	for _, unknownLength := range []bool{false, true} {
+		body := &countingReader{Reader: strings.NewReader(payload)}
+		r := httptest.NewRequest(http.MethodPost, "/", body)
+		r.ContentLength = int64(len(payload))
+		if unknownLength {
+			r.ContentLength = -1
+		}
+		w := httptest.NewRecorder()
+		var value string
+		err := marshal.DecodeBody(w, r, &value)
+		var overflow *http.MaxBytesError
+		require.ErrorAs(t, err, &overflow)
+		assert.Equal(t, int64(limits.DefaultMaxRequestBody), overflow.Limit)
+		assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+		if !unknownLength {
+			assert.Zero(t, body.read, "known oversized bodies must not be read")
+		}
+	}
 }
 
 func TestLimitRequestBodyRawReader(t *testing.T) {

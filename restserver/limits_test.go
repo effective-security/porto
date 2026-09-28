@@ -6,13 +6,13 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	rest "github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/tests/testutils"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/limits"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/stretchr/testify/assert"
@@ -87,13 +87,49 @@ func TestNetworkLimits(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF, "idle keepalive should close before the client deadline")
 }
 
+// decodeURL is a POST route that decodes a JSON body.
+const decodeURL = "/v1/decode"
+
+type decodeService struct{}
+
+func (decodeService) Name() string  { return "decode" }
+func (decodeService) IsReady() bool { return true }
+func (decodeService) Close()        {}
+
+func (decodeService) Register(r rest.Router) {
+	r.POST(decodeURL, func(w http.ResponseWriter, r *http.Request, _ rest.Params) {
+		var body any
+		if marshal.DecodeBody(w, r, &body) != nil {
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 func TestDefaultMuxBodyLimit(t *testing.T) {
 	t.Parallel()
-	srv, err := rest.New("test", "127.0.0.1", &serverConfig{BindAddr: "127.0.0.1:0"}, nil)
+	addr := testutils.CreateBindAddr("127.0.0.1")
+	srv, err := rest.New("test", "127.0.0.1", &serverConfig{BindAddr: addr}, nil)
 	require.NoError(t, err)
-	srv.WithMaxRequestBody(6)
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`"abcde"`))
-	w := httptest.NewRecorder()
-	srv.NewMux().ServeHTTP(w, req)
-	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+	srv.WithMaxRequestBody(6).WithCORS(&rest.CORSOptions{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{http.MethodPost},
+	})
+	srv.AddService(decodeService{})
+	require.NoError(t, srv.StartHTTP())
+	t.Cleanup(srv.StopHTTP)
+	require.Eventually(t, srv.IsReady, 2*time.Second, 10*time.Millisecond)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://"+addr+decodeURL, strings.NewReader(`"abcde"`))
+	require.NoError(t, err)
+	req.Header.Set(header.ContentType, header.ApplicationJSON)
+	req.Header.Set("Origin", "https://app.example.com")
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+	// The 413 comes from inside the router's CORS and the correlation handler.
+	assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
+	assert.NotEmpty(t, resp.Header.Get(header.XCorrelationID))
 }

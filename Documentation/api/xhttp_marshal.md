@@ -49,13 +49,13 @@ func Decode(r io.Reader, result any) error
 Decode reads JSON from r and decodes it into result using DecoderHandle. The reader is not size\-limited; wrap request bodies with http.MaxBytesReader first.
 
 <a name="DecodeBody"></a>
-## func [DecodeBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L123>)
+## func [DecodeBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L124>)
 
 ```go
 func DecodeBody(w http.ResponseWriter, r *http.Request, result any) error
 ```
 
-DecodeBody decodes the JSON request body into result. On failure it writes a 400 invalid\_json response, or 413 request\_too\_large on overflow, and returns the error, so callers can simply return. The default limit is limits.DefaultMaxRequestBody; LimitRequestBody overrides it. After a successful decode, the remaining body is consumed within the limit so trailing bytes cannot bypass the size check; with the limit disabled it is left unread. Decode and DecodeBytes remain unbounded.
+DecodeBody decodes the JSON request body into result. On failure it writes a 400 invalid\_json response, or 413 request\_too\_large on overflow, and returns the error, so callers can simply return. A known oversized Content\-Length is rejected before any byte is read. The default limit is limits.DefaultMaxRequestBody; LimitRequestBody overrides it. After a successful decode, the remaining body is consumed within the limit so trailing bytes cannot bypass the size check; with the limit disabled it is left unread. Decode and DecodeBytes remain unbounded.
 
 <a name="DecodeBytes"></a>
 ## func [DecodeBytes](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L95>)
@@ -85,13 +85,13 @@ func EncodeBytes(printSetting PrettyPrintSetting, value any) ([]byte, error)
 EncodeBytes encodes value to JSON with the given pretty\-print setting and returns the bytes.
 
 <a name="LimitRequestBody"></a>
-## func [LimitRequestBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/limits.go#L19>)
+## func [LimitRequestBody](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/limits.go#L23>)
 
 ```go
 func LimitRequestBody(next http.Handler, maxBytes int64) http.Handler
 ```
 
-LimitRequestBody bounds reads from request bodies, rejecting a known oversized Content\-Length with HTTP 413 before calling next. Zero selects limits.DefaultMaxRequestBody; a negative value disables the limit. DecodeBody honors this policy and writes HTTP 413 on overflow, including chunked bodies. Other body readers must handle \*http.MaxBytesError themselves.
+LimitRequestBody bounds reads from request bodies. Zero selects limits.DefaultMaxRequestBody; a negative value disables the limit. It writes no response itself, so it can wrap CORS, correlation, logging and metrics middleware without bypassing them: a body whose known Content\-Length exceeds the limit fails on its first read with \*http.MaxBytesError without reading any bytes, and other bodies fail once they exceed the limit. DecodeBody honors this policy and writes HTTP 413; other body readers must handle \*http.MaxBytesError themselves.
 
 <a name="NewEncoder"></a>
 ## func [NewEncoder](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L78>)

@@ -39,10 +39,11 @@ type ManyError struct {
 	lock sync.Mutex `json:"-"`
 }
 
-// GRPCStatus returns the gRPC status derived from Code and Message, so a
+// GRPCStatus returns the gRPC status derived from Code and Message, with
+// the Code and RequestID details that Error.GRPCStatus attaches, so a
 // *ManyError can be returned from gRPC handlers.
 func (m *ManyError) GRPCStatus() *status.Status {
-	return status.New(statusCode[m.Code], m.Message)
+	return newStatus(statusCode[m.Code], m.Message, m.Code, m.RequestID)
 }
 
 // Error returns "code: message" (prefixed with the request ID when set) or,

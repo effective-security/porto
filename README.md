@@ -409,7 +409,10 @@ read/body limits for large uploads and long request streams.
 handshake: 10s}` and `max_request_body: 10485760` in YAML. The existing
 `timeout.request` still controls shutdown only. Native gRPC on plaintext
 listeners retains its per-message limits; HTTP body limits also apply to
-TLS gRPC/gRPC-Web streams.
+TLS gRPC/gRPC-Web streams. Native gRPC streams have no read deadline, so
+long-lived client and bidi streams work on both listener types; on TLS a
+stream fails with `Unavailable` once it has sent `max_request_body` bytes in
+total.
 
 For REST, configure `WithTimeouts(limits.Timeouts{...})` and
 `WithMaxRequestBody(bytes)` before `StartHTTP`. Both default and custom muxes
@@ -418,9 +421,14 @@ value for its handshake; the Handshake field is for cmux/eager listeners.
 `transport.TLSInfo.HandshakeTimeout` overrides the eager TLS deadline.
 
 `marshal.DecodeBody` also enforces the body default when used alone.
-`marshal.LimitRequestBody(handler, bytes)` overrides it. Known oversized
-requests and oversized JSON bodies receive HTTP 413 `request_too_large`;
-other handlers reading bodies must handle `*http.MaxBytesError`.
+`marshal.LimitRequestBody(handler, bytes)` overrides it. The limiter writes
+no response, so it cannot bypass CORS, correlation, logging or metrics. A body
+with a known oversized `Content-Length` fails on its first read before any
+byte is read. `DecodeBody` answers it, and any oversized JSON body, with HTTP
+413 `request_too_large`. Other handlers that read bodies must handle
+`*http.MaxBytesError`. Over gRPC, `request_too_large` travels as
+`ResourceExhausted`; `httperror.NewFromPb` restores the 413 from the code
+detail that `GRPCStatus` attaches.
 
 Prometheus accepts the same `timeouts` and `max_request_body` fields inside
 its metrics config block. `appinit.Metrics` returns bind errors synchronously;
