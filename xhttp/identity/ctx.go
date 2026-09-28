@@ -19,6 +19,10 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/xhttp", "context")
 
+// msgInvalidIdentity is the client-facing message for identity mapper
+// failures; the mapper's error text is only logged.
+const msgInvalidIdentity = "invalid identity"
+
 type contextKey int
 
 const (
@@ -99,8 +103,10 @@ func FromRequest(r *http.Request) *RequestContext {
 // NewContextHandler returns middleware that calls identityMapper for each
 // request and stores the resulting RequestContext (identity, client IP,
 // path, user agent) in the request context for later handlers. A mapper
-// error is answered with a JSON 401 unauthorized response and the request
-// is not forwarded. For non-guest identities tenant/user/email/role are also
+// error is logged and answered with a JSON 401 unauthorized response whose
+// message is the generic "invalid identity", unless the error is (or wraps)
+// an *httperror.Error with an HTTP status, which is written as is; the
+// request is not forwarded. For non-guest identities tenant/user/email/role are also
 // added to the xlog context fields. A RequestContext already present in the
 // context (for example from WithTestIdentity) is left untouched.
 func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest) http.Handler {
@@ -118,7 +124,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 					"target", target,
 					"err", err.Error())
 
-				marshal.WriteJSON(w, r, httperror.Unauthorized("invalid identity: %s", err.Error()))
+				marshal.WriteJSON(w, r, identityError(r.Context(), err))
 				return
 			}
 			if idn == nil {
@@ -138,7 +144,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			}
 			ctx := r.Context()
 			role := idn.Role()
-			if role != "guest" {
+			if role != GuestRoleName {
 				ctx = xlog.ContextWithKV(ctx,
 					"tenant", idn.Tenant(),
 					"user", idn.Subject(),
@@ -154,6 +160,21 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 }
 
 var guestIdentity = NewIdentity(GuestRoleName, "", "", nil, "", "", MethodNone)
+
+// identityError converts an identity mapper failure into the error returned
+// to the caller. A non-nil *httperror.Error found in err's chain is the
+// mapper's deliberate, client-safe answer and is returned as is (and not
+// modified, so mappers may share such values), provided it carries a valid
+// HTTP status; any other error, including a typed nil, keeps its text in the
+// log and the caller gets a new generic 401 unauthorized
+// (codes.Unauthenticated) carrying the correlation ID of ctx and err as its
+// cause.
+func identityError(ctx context.Context, err error) *httperror.Error {
+	if he, ok := errors.AsType[*httperror.Error](err); ok && he != nil && he.HTTPStatus >= http.StatusContinue {
+		return he
+	}
+	return httperror.Unauthorized(msgInvalidIdentity).WithContext(ctx).WithCause(err)
+}
 
 func getMdHeader(md metadata.MD, name string) string {
 	vals := md.Get(name)
@@ -172,7 +193,13 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 			"reason", "access_denied",
 			"method", methodFullMethod,
 			"err", err.Error())
-		return nil, status.Errorf(codes.PermissionDenied, "invalid identity: %s", err.Error())
+		he := identityError(ctx, err)
+		if he.RPCStatus == codes.OK {
+			// A code without a gRPC mapping would read as success on the
+			// wire; report the failure with the generic authentication code.
+			return nil, status.Error(codes.Unauthenticated, he.Message)
+		}
+		return nil, he
 	}
 	if id == nil {
 		id = guestIdentity
@@ -190,7 +217,7 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 
 	ctx = AddToContext(ctx, rc)
 	role := id.Role()
-	if role != "guest" {
+	if role != GuestRoleName {
 		tenant := id.Tenant()
 		subject := id.Subject()
 		entries := []any{"role", role}
@@ -221,8 +248,10 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 // NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls
 // identityMapper with the full method name and stores the RequestContext
 // (identity, client IP from a trusted proxy or the peer
-// address, user agent) in the context. A mapper error fails the call with
-// codes.PermissionDenied. Panics in the handler are recovered, logged and
+// address, user agent) in the context. A mapper error is logged and fails
+// the call with codes.Unauthenticated and the generic "invalid identity"
+// message, unless it is (or wraps) an *httperror.Error with an HTTP status
+// and a gRPC mapping, which is returned as is. Panics in the handler are recovered, logged and
 // returned as an "unhandled exception" error. The optional trusted policy
 // (only the first value is used) is stored with WithTrustedProxies; a nil or
 // omitted policy keeps any policy already in the context.

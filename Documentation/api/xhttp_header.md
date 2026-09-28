@@ -23,6 +23,9 @@ const (
     Accept = "Accept"
     // AcceptEncoding is HTTP header for "Accept-Encoding"
     AcceptEncoding = "Accept-Encoding"
+    // AccessControlRequestMethod is sent by browsers on a CORS preflight
+    // request; its presence on an OPTIONS request identifies the preflight.
+    AccessControlRequestMethod = "Access-Control-Request-Method"
     // ApplicationJSON is HTTP header value for "application/json"
     ApplicationJSON = "application/json"
     // ApplicationJoseJSON is HTTP header value for "application/jose+json"
@@ -66,6 +69,8 @@ const (
     Link = "Link"
     // Location is HTTP header for "Location"
     Location = "Location"
+    // Origin carries the requesting site on cross-origin browser requests.
+    Origin = "Origin"
     // ReplayNonce is HTTP header for "Replay-Nonce"
     ReplayNonce = "Replay-Nonce"
     // TextPlain is HTTP header value for "text/plain"

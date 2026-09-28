@@ -12,11 +12,14 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/correlation"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 )
 
@@ -352,10 +355,60 @@ func TestConfig_checkAccess_noTLS(t *testing.T) {
 	assert.NoError(t, c.checkAccess(r), "bob should be allowed access to /foo, but wasn't")
 
 	r, _ = http.NewRequest(http.MethodGet, "/", nil)
-	assert.Error(t, c.checkAccess(r), "bob shouldn't be allowed access to / but was")
+	assert.EqualError(t, c.checkAccess(r), "forbidden: bob role not allowed", "bob shouldn't be allowed access to / but was")
 
 	r, _ = http.NewRequest(http.MethodOptions, "/", nil)
-	assert.NoError(t, c.checkAccess(r), "OPTIONS should be allowed")
+	assert.EqualError(t, c.checkAccess(r), "forbidden: bob role not allowed", "a plain OPTIONS request is authorized like any other")
+
+	// Preflight headers are caller-controlled and never bypass the check.
+	r, _ = http.NewRequest(http.MethodOptions, "/", nil)
+	r.Header.Set(header.AccessControlRequestMethod, http.MethodPost)
+	r.Header.Set(header.Origin, "https://app.example.com")
+	assert.EqualError(t, c.checkAccess(r), "forbidden: bob role not allowed", "a preflight-shaped OPTIONS request is authorized like any other")
+
+	r, _ = http.NewRequest(http.MethodOptions, "/foo", nil)
+	r.Header.Set(header.AccessControlRequestMethod, http.MethodPost)
+	assert.NoError(t, c.checkAccess(r), "bob should be allowed OPTIONS on /foo")
+}
+
+func TestConfig_checkAccess_denied(t *testing.T) {
+	t.Parallel()
+	c, err := New(&Config{})
+	require.NoError(t, err)
+	c.Allow("/foo", "bob")
+
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	require.NotEmpty(t, cid)
+
+	tcases := []struct {
+		name    string
+		role    string
+		expCode string
+		expHTTP int
+		expRPC  codes.Code
+		expMsg  string
+	}{
+		{name: "guest", role: identity.GuestRoleName, expCode: httperror.CodeUnauthorized, expHTTP: http.StatusUnauthorized, expRPC: codes.Unauthenticated, expMsg: "guest role not allowed"},
+		{name: "empty", role: "", expCode: httperror.CodeUnauthorized, expHTTP: http.StatusUnauthorized, expRPC: codes.Unauthenticated, expMsg: "guest role not allowed"},
+		{name: "authenticated", role: "alice", expCode: httperror.CodeForbidden, expHTTP: http.StatusForbidden, expRPC: codes.PermissionDenied, expMsg: "alice role not allowed"},
+	}
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := c.Clone()
+			p.SetRoleMapper(roleMapper(tc.role))
+			r := httptest.NewRequest(http.MethodGet, "/foo", nil).WithContext(ctx)
+			err := p.checkAccess(r)
+			require.Error(t, err)
+			var he *httperror.Error
+			require.True(t, errors.As(err, &he))
+			assert.Equal(t, tc.expHTTP, he.HTTPStatus)
+			assert.Equal(t, tc.expCode, he.Code)
+			assert.Equal(t, tc.expRPC, he.RPCStatus)
+			assert.Equal(t, cid, he.RequestID)
+			assert.Equal(t, tc.expMsg, he.Message)
+		})
+	}
 }
 
 func TestConfig_HandlerNotValid(t *testing.T) {
@@ -397,13 +450,13 @@ func TestConfig_Handler(t *testing.T) {
 		if allowed {
 			assert.Equal(t, http.StatusOK, w.Code, "Request to %v should be allowed but got HTTP StatusCode %d", path, w.Code)
 		} else {
-			assert.Equal(t, http.StatusUnauthorized, w.Code, "Request to %v shouldn't be authorized", path)
+			assert.Equal(t, http.StatusForbidden, w.Code, "Request to %v shouldn't be authorized", path)
 
 			ct := w.Header().Get("Content-Type")
-			assert.Equal(t, header.ApplicationJSON, ct, "Unauthorized response should have an application/json contentType")
+			assert.Equal(t, header.ApplicationJSON, ct, "Forbidden response should have an application/json contentType")
 
 			body := w.Body.String()
-			assert.JSONEq(t, `{"code":"unauthorized", "message":"unauthorized: bob role not allowed"}`, body)
+			assert.JSONEq(t, `{"code":"forbidden", "message":"bob role not allowed"}`, body)
 		}
 	}
 	testHandler("/who", true)
@@ -414,6 +467,59 @@ func TestConfig_Handler(t *testing.T) {
 	testHandler("/alice/more", false)
 	testHandler("/somewhereElse", false)
 	testHandler("/", false)
+}
+
+func TestConfig_Handler_Denied(t *testing.T) {
+	t.Parallel()
+	delegate := http.HandlerFunc(testHTTPHandler)
+	c, err := New(&Config{})
+	require.NoError(t, err)
+	c.Allow("/bob", "bob")
+
+	ctx := correlation.WithID(context.Background())
+	cid := correlation.ID(ctx)
+	require.NotEmpty(t, cid)
+
+	serve := func(role string, r *http.Request) *httptest.ResponseRecorder {
+		p := c.Clone()
+		p.SetRoleMapper(roleMapper(role))
+		h, err := p.NewHandler(delegate)
+		require.NoError(t, err)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r.WithContext(ctx))
+		return w
+	}
+
+	t.Run("guest_401", func(t *testing.T) {
+		w := serve(identity.GuestRoleName, httptest.NewRequest(http.MethodGet, "/bob", nil))
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		// The message is not wrapped twice and the request ID is a field, not text.
+		assert.Equal(t, `{"code":"unauthorized","request_id":"`+cid+`","message":"guest role not allowed"}`, w.Body.String())
+	})
+
+	t.Run("role_403", func(t *testing.T) {
+		w := serve("alice", httptest.NewRequest(http.MethodGet, "/bob", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, `{"code":"forbidden","request_id":"`+cid+`","message":"alice role not allowed"}`, w.Body.String())
+	})
+
+	t.Run("options_authorized", func(t *testing.T) {
+		w := serve("alice", httptest.NewRequest(http.MethodOptions, "/bob", nil))
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("preflight_authorized", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodOptions, "/bob", nil)
+		r.Header.Set(header.AccessControlRequestMethod, http.MethodGet)
+		r.Header.Set(header.Origin, "https://app.example.com")
+		w := serve(identity.GuestRoleName, r)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, `{"code":"unauthorized","request_id":"`+cid+`","message":"guest role not allowed"}`, w.Body.String())
+
+		w = serve("bob", r)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "Hello", w.Body.String())
+	})
 }
 
 func TestNewUnaryInterceptor(t *testing.T) {
@@ -444,6 +550,64 @@ func TestNewUnaryInterceptor(t *testing.T) {
 	_, err = unary(context.Background(), nil, si, handler)
 	require.Error(t, err)
 	assert.Equal(t, `unauthorized: guest role not allowed`, err.Error())
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+
+	c.SetGRPCRoleMapper(gRPCRoleMapper("alice"))
+	_, err = unary(context.Background(), nil, si, handler)
+	require.Error(t, err)
+	assert.Equal(t, `forbidden: alice role not allowed`, err.Error())
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	c.SetGRPCRoleMapper(gRPCRoleMapper("bob"))
+	_, err = unary(context.Background(), nil, si, handler)
+	require.NoError(t, err)
+}
+
+func TestNewStreamServerInterceptor(t *testing.T) {
+	t.Parallel()
+	c, err := New(&Config{
+		Allow: []string{
+			"/pb.Service/stream:bob",
+		},
+	})
+	require.NoError(t, err)
+
+	stream := c.NewStreamServerInterceptor()
+	called := false
+	handler := func(srv any, ss grpc.ServerStream) error {
+		called = true
+		return nil
+	}
+	info := &grpc.StreamServerInfo{
+		FullMethod: "/pb.Service/stream",
+	}
+
+	err = stream(nil, testStream{ctx: context.Background()}, info, handler)
+	require.Error(t, err)
+	assert.False(t, called)
+	assert.Equal(t, `unauthorized: guest role not allowed`, err.Error())
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+
+	c.SetGRPCRoleMapper(gRPCRoleMapper("alice"))
+	err = stream(nil, testStream{ctx: context.Background()}, info, handler)
+	require.Error(t, err)
+	assert.False(t, called)
+	assert.Equal(t, `forbidden: alice role not allowed`, err.Error())
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+
+	c.SetGRPCRoleMapper(gRPCRoleMapper("bob"))
+	require.NoError(t, stream(nil, testStream{ctx: context.Background()}, info, handler))
+	assert.True(t, called)
+}
+
+// testStream is a grpc.ServerStream that only carries a context.
+type testStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s testStream) Context() context.Context {
+	return s.ctx
 }
 
 func testHTTPHandler(w http.ResponseWriter, r *http.Request) {

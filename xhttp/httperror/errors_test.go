@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/correlation"
@@ -466,6 +468,20 @@ func TestError_GRPCRoundTrip(t *testing.T) {
 			httpStatus: http.StatusBadRequest,
 			code:       "bad_request",
 		},
+		{
+			name:       "unauthorized keeps 401",
+			err:        httperror.Unauthorized("who are you"),
+			rpc:        codes.Unauthenticated,
+			httpStatus: http.StatusUnauthorized,
+			code:       "unauthorized",
+		},
+		{
+			name:       "forbidden keeps 403",
+			err:        httperror.Forbidden("not for you"),
+			rpc:        codes.PermissionDenied,
+			httpStatus: http.StatusForbidden,
+			code:       "forbidden",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -495,4 +511,161 @@ func TestError_GRPCStatusWithoutRPCCode(t *testing.T) {
 	require.NotNil(t, st)
 	assert.Equal(t, codes.OK, st.Code())
 	assert.Empty(t, st.Details())
+}
+
+func TestError_WriteHTTPResponse_SharedValue(t *testing.T) {
+	t.Parallel()
+	shared := httperror.NotReady("not yet")
+	sharedMany := httperror.NewMany(http.StatusBadRequest, httperror.CodeInvalidRequest, "many")
+	sharedMany.Add("one", httperror.InvalidParam("one"))
+
+	write := func(ctx context.Context, e interface {
+		WriteHTTPResponse(http.ResponseWriter, *http.Request)
+	}) string {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+		e.WriteHTTPResponse(w, r)
+		return w.Body.String()
+	}
+
+	ctx1 := correlation.WithID(context.Background())
+	ctx2 := correlation.WithID(context.Background())
+	cid1 := correlation.ID(ctx1)
+	cid2 := correlation.ID(ctx2)
+	require.NotEqual(t, cid1, cid2)
+
+	assert.Equal(t, fmt.Sprintf(`{"code":"not_ready","request_id":"%s","message":"not yet"}`, cid1), write(ctx1, shared))
+	assert.Equal(t, fmt.Sprintf(`{"code":"not_ready","request_id":"%s","message":"not yet"}`, cid2), write(ctx2, shared))
+	assert.Equal(t, `{"code":"not_ready","message":"not yet"}`, write(context.Background(), shared))
+	assert.Empty(t, shared.RequestID, "WriteHTTPResponse must not modify the shared error")
+
+	expMany := `{"code":"invalid_request","request_id":"%s","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"}}}`
+	assert.Equal(t, fmt.Sprintf(expMany, cid1), write(ctx1, sharedMany))
+	assert.Equal(t, fmt.Sprintf(expMany, cid2), write(ctx2, sharedMany))
+	assert.Empty(t, sharedMany.RequestID, "WriteHTTPResponse must not modify the shared error")
+
+	// An explicit RequestID wins over the request's correlation ID.
+	own := httperror.NotReady("not yet")
+	own.RequestID = "own"
+	assert.Equal(t, `{"code":"not_ready","request_id":"own","message":"not yet"}`, write(ctx1, own))
+}
+
+func TestError_WriteHTTPResponse_Concurrent(t *testing.T) {
+	t.Parallel()
+	shared := httperror.NotReady("not yet")
+	sharedMany := httperror.NewMany(http.StatusBadRequest, httperror.CodeInvalidRequest, "many")
+
+	const writers = 16
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := correlation.WithID(context.Background())
+			cid := correlation.ID(ctx)
+			r := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+
+			w := httptest.NewRecorder()
+			shared.WriteHTTPResponse(w, r)
+			assert.Equal(t, fmt.Sprintf(`{"code":"not_ready","request_id":"%s","message":"not yet"}`, cid), w.Body.String())
+
+			// Add races with the encoder unless WriteHTTPResponse holds the lock.
+			sharedMany.Add(fmt.Sprintf("key%d", i), httperror.InvalidParam("one"))
+			w = httptest.NewRecorder()
+			sharedMany.WriteHTTPResponse(w, r)
+			assert.Contains(t, w.Body.String(), fmt.Sprintf(`"request_id":"%s"`, cid))
+		}()
+	}
+	wg.Wait()
+	assert.Empty(t, shared.RequestID)
+	assert.Empty(t, sharedMany.RequestID)
+	assert.Len(t, sharedMany.Errors, writers)
+}
+
+func TestError_WrapMsg_Format(t *testing.T) {
+	t.Parallel()
+	base := errors.New("base")
+	assert.Equal(t, "unexpected: base", httperror.Wrap(base).Error())
+	assert.Equal(t, "unexpected: item 7 failed", httperror.Wrap(base, "item %d failed", 7).Error())
+	assert.Equal(t, "unexpected: 7", httperror.Wrap(base, 7).Error())
+	// A non-string first value is not a format: nothing panics, the values are joined.
+	assert.Equal(t, "unexpected: 7 8", httperror.Wrap(base, 7, 8).Error())
+	assert.Equal(t, "7 8", httperror.Wrap(httperror.InvalidParam("id"), 7, 8).Message)
+}
+
+// blockingWriter is a ResponseWriter whose first Write blocks until release
+// is closed, simulating a slow client.
+type blockingWriter struct {
+	httptest.ResponseRecorder
+	release <-chan struct{}
+	blocked chan struct{}
+	once    sync.Once
+}
+
+func (w *blockingWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		close(w.blocked)
+		<-w.release
+	})
+	return w.ResponseRecorder.Write(p)
+}
+
+func TestError_ManyErrorWriteDoesNotHoldLock(t *testing.T) {
+	t.Parallel()
+	const wait = 5 * time.Second
+	shared := httperror.NewMany(http.StatusBadRequest, httperror.CodeInvalidRequest, "many")
+	shared.Add("one", httperror.InvalidParam("one"))
+
+	release := make(chan struct{})
+	slow := &blockingWriter{
+		ResponseRecorder: *httptest.NewRecorder(),
+		release:          release,
+		blocked:          make(chan struct{}),
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	slowDone := make(chan struct{})
+	go func() {
+		defer close(slowDone)
+		shared.WriteHTTPResponse(slow, r)
+	}()
+	select {
+	case <-slow.blocked:
+	case <-time.After(wait):
+		t.Fatal("the slow response never started writing")
+	}
+
+	// While the slow client stalls, other users of the shared error proceed.
+	addDone := make(chan struct{})
+	go func() {
+		defer close(addDone)
+		shared.Add("two", httperror.InvalidParam("two"))
+	}()
+	select {
+	case <-addDone:
+	case <-time.After(wait):
+		t.Fatal("Add blocked behind a slow response write")
+	}
+
+	fast := httptest.NewRecorder()
+	fastDone := make(chan struct{})
+	go func() {
+		defer close(fastDone)
+		shared.WriteHTTPResponse(fast, r)
+	}()
+	select {
+	case <-fastDone:
+	case <-time.After(wait):
+		t.Fatal("a second response blocked behind a slow response write")
+	}
+	assert.Equal(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"},"two":{"code":"invalid_parameter","message":"two"}}}`, fast.Body.String())
+
+	close(release)
+	select {
+	case <-slowDone:
+	case <-time.After(wait):
+		t.Fatal("the slow response never finished")
+	}
+	// The slow response was snapshotted before "two" was added.
+	assert.Equal(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"}}}`, slow.Body.String())
 }

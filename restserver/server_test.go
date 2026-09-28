@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -616,7 +617,7 @@ func Test_Authz(t *testing.T) {
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"request %s: unauthorized: guest role not allowed"}`, cid, cid), w.Body.String())
+		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"guest role not allowed"}`, cid), w.Body.String())
 		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
 		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
@@ -668,7 +669,7 @@ func Test_Authz(t *testing.T) {
 		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
 	})
 
-	t.Run("client_to_allow_401", func(t *testing.T) {
+	t.Run("client_to_allow_403", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest(http.MethodGet, "/v1/allow", nil)
 		r.TLS = tlsConnectionForClient
@@ -676,13 +677,13 @@ func Test_Authz(t *testing.T) {
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"request %s: unauthorized: client role not allowed"}`, cid, cid), w.Body.String())
-		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, fmt.Sprintf(`{"code":"forbidden","request_id":"%s","message":"client role not allowed"}`, cid), w.Body.String())
+		assertSample("authztest_http_requests_perf;verb=GET;status=403;uri=/v1/allow")
+		assertCounter("authztest_http_requests_role;verb=GET;status=403;uri=/v1/allow;role=client", 1)
 	})
 
-	t.Run("other_org_client_to_allow_401", func(t *testing.T) {
+	t.Run("other_org_client_to_allow_403", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r, _ := http.NewRequest(http.MethodGet, "/v1/allow", nil)
 		r.TLS = tlsConnectionForClientFromOtherOrg
@@ -690,10 +691,10 @@ func Test_Authz(t *testing.T) {
 		//assert.NotEmpty(t, w.Header().Get(header.XHostname))
 		cid := w.Header().Get(header.XCorrelationID)
 		assert.NotEmpty(t, cid)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, fmt.Sprintf(`{"code":"unauthorized","request_id":"%s","message":"request %s: unauthorized: client role not allowed"}`, cid, cid), w.Body.String())
-		assertSample("authztest_http_requests_perf;verb=GET;status=401;uri=/v1/allow")
-		assertCounter("authztest_http_requests_role;verb=GET;status=401;uri=/v1/allow;role=guest", 1)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Equal(t, fmt.Sprintf(`{"code":"forbidden","request_id":"%s","message":"client role not allowed"}`, cid), w.Body.String())
+		assertSample("authztest_http_requests_perf;verb=GET;status=403;uri=/v1/allow")
+		assertCounter("authztest_http_requests_role;verb=GET;status=403;uri=/v1/allow;role=client", 2)
 	})
 
 	t.Run("client_to_allowany_200", func(t *testing.T) {
@@ -790,4 +791,114 @@ func (s *serviceX) handle() rest.Handle {
 
 		marshal.WriteJSON(w, r, res)
 	}
+}
+
+// preflightService registers OPTIONS and GET handlers on a protected path
+// and counts how often they run.
+type preflightService struct {
+	calls atomic.Int32
+}
+
+func (s *preflightService) Name() string  { return "preflighttest" }
+func (s *preflightService) IsReady() bool { return true }
+func (s *preflightService) Close()        {}
+
+func (s *preflightService) Register(r rest.Router) {
+	h := func(w http.ResponseWriter, r *http.Request, _ rest.Params) {
+		s.calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}
+	r.OPTIONS("/v1/private", h)
+	r.GET("/v1/private", h)
+}
+
+func TestServer_CORSPreflightAuthz(t *testing.T) {
+	const origin = "https://app.example.com"
+	az, err := authz.New(&authz.Config{Allow: []string{"/v1/private:admin"}})
+	require.NoError(t, err)
+	admin := identity.NewIdentity("admin", "admin", "", nil, "", "", identity.MethodCertificate)
+
+	start := func(t *testing.T, cors *rest.CORSOptions) (*rest.HTTPServer, *preflightService) {
+		cfg := &serverConfig{
+			BindAddr: testutils.CreateBindAddr(""),
+			Services: []string{"preflighttest"},
+		}
+		server, err := rest.New("v1.0.123", "127.0.0.1", cfg, nil)
+		require.NoError(t, err)
+		server.WithAuthz(az).WithCORS(cors)
+		svc := &preflightService{}
+		server.AddService(svc)
+		require.NoError(t, server.StartHTTP())
+		t.Cleanup(server.StopHTTP)
+		for i := 0; i < 10 && !server.IsReady(); i++ {
+			time.Sleep(100 * time.Millisecond)
+		}
+		require.True(t, server.IsReady())
+		return server, svc
+	}
+	preflight := func() *http.Request {
+		r := httptest.NewRequest(http.MethodOptions, "/v1/private", nil)
+		r.Header.Set(header.Origin, origin)
+		r.Header.Set(header.AccessControlRequestMethod, http.MethodGet)
+		return r
+	}
+	serve := func(server *rest.HTTPServer, r *http.Request) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, r)
+		return w
+	}
+
+	t.Run("cors disabled: OPTIONS is authorized", func(t *testing.T) {
+		server, svc := start(t, nil)
+
+		w := serve(server, preflight())
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Contains(t, w.Body.String(), `"code":"unauthorized"`)
+		assert.Equal(t, int32(0), svc.calls.Load(), "a forged preflight must not reach the OPTIONS handler")
+
+		w = serve(server, identity.WithTestIdentity(preflight(), admin))
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int32(1), svc.calls.Load())
+	})
+
+	t.Run("cors enabled: preflight is answered before authz", func(t *testing.T) {
+		server, svc := start(t, &rest.CORSOptions{
+			AllowedOrigins: []string{"*"},
+			AllowedMethods: []string{http.MethodGet, http.MethodOptions},
+		})
+
+		w := serve(server, preflight())
+		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, int32(0), svc.calls.Load(), "the CORS middleware must answer the preflight itself")
+
+		// Denied actual requests carry CORS headers, so browsers can read them.
+		r := httptest.NewRequest(http.MethodGet, "/v1/private", nil)
+		r.Header.Set(header.Origin, origin)
+		w = serve(server, r)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, int32(0), svc.calls.Load())
+
+		w = serve(server, identity.WithTestIdentity(r, admin))
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int32(1), svc.calls.Load())
+	})
+
+	t.Run("options passthrough: OPTIONS is authorized", func(t *testing.T) {
+		server, svc := start(t, &rest.CORSOptions{
+			AllowedOrigins:     []string{"*"},
+			AllowedMethods:     []string{http.MethodGet, http.MethodOptions},
+			OptionsPassthrough: true,
+		})
+
+		w := serve(server, preflight())
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		assert.Equal(t, int32(0), svc.calls.Load(), "a passed-through preflight must be authorized")
+
+		w = serve(server, identity.WithTestIdentity(preflight(), admin))
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, int32(1), svc.calls.Load())
+	})
 }

@@ -208,8 +208,9 @@ func (server *HTTPServer) WithTrustedProxies(trust *identity.TrustedProxies) *HT
 	return server
 }
 
-// WithCORS enables the CORS middleware around the router with the given
-// options; nil options disable CORS.
+// WithCORS enables the CORS middleware with the given options; nil options
+// disable CORS. NewMux places it outside the authz handler, so preflights
+// are answered without authorization unless OptionsPassthrough is set.
 func (server *HTTPServer) WithCORS(cors *CORSOptions) *HTTPServer {
 	server.cors = cors
 	return server
@@ -491,24 +492,22 @@ func (server *HTTPServer) StopHTTP() {
 	server.broadcast(ServerStoppedEvent)
 }
 
-// NewMux builds the default handler chain: a Router (with CORS when
-// configured) on which every registered service has called Register, wrapped
-// (innermost to outermost) by the ready verifier, the authz handler when set,
-// the request logger, request metrics, the identity context handler, the
-// body limiter, correlation ID handler and, outermost, identity.NewTrustedProxyHandler
-// with the WithTrustedProxies policy, which resolves the client IP once for
-// all of them. It is called by StartHTTP through the MuxFactory; call it
-// directly only in tests. It panics via the logger if the authz handler
-// cannot be created.
+// NewMux builds the default handler chain: a Router on which every
+// registered service has called Register, wrapped (innermost to outermost)
+// by the ready verifier, the authz handler when set, the CORS middleware
+// when configured, the request logger, request metrics, the identity context
+// handler, the body limiter, correlation ID handler and, outermost,
+// identity.NewTrustedProxyHandler with the WithTrustedProxies policy, which
+// resolves the client IP once for all of them. CORS sits outside authz so
+// that preflights are answered before authorization (they carry no
+// credentials) and denied responses carry CORS headers; with
+// OptionsPassthrough, OPTIONS requests are authorized like any other. It is
+// called by StartHTTP through the MuxFactory; call it directly only in
+// tests. It panics via the logger if the authz handler cannot be created.
 func (server *HTTPServer) NewMux() http.Handler {
 	// NOTE: the handlers are executed in the reverse order
 
-	var router Router
-	if server.cors != nil {
-		router = NewRouterWithCORS(notFoundHandler, server.cors)
-	} else {
-		router = NewRouter(notFoundHandler)
-	}
+	router := NewRouter(notFoundHandler)
 
 	for _, f := range server.services {
 		f.Register(router)
@@ -528,6 +527,11 @@ func (server *HTTPServer) NewMux() http.Handler {
 		if err != nil {
 			logger.Panicf("failed to create authz handler: %+v", err)
 		}
+	}
+
+	// CORS answers preflights before authz sees them.
+	if server.cors != nil {
+		httpHandler = newCORS(server.cors).Handler(httpHandler)
 	}
 
 	// logging wrapper

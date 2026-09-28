@@ -2,6 +2,7 @@ package httperror
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"sync"
@@ -132,13 +133,35 @@ func (m *ManyError) HasErrors() bool {
 }
 
 // WriteHTTPResponse writes the error and its nested Errors as an
-// application/json body with HTTPStatus; see Error.WriteHTTPResponse.
+// application/json body with HTTPStatus; see Error.WriteHTTPResponse. The
+// receiver is not modified: when RequestID is empty the body carries the
+// request's correlation ID. The nested errors are snapshotted under the Add
+// lock, which is released before anything is written, so a slow client
+// never blocks other users of a shared ManyError.
 func (m *ManyError) WriteHTTPResponse(w http.ResponseWriter, r *http.Request) {
+	body := m.snapshot()
+	if body.RequestID == "" {
+		body.RequestID = correlation.ID(r.Context())
+	}
+
 	// TODO: check r.Accept
 	w.Header().Set(header.ContentType, header.ApplicationJSON)
-	w.WriteHeader(m.HTTPStatus)
-	if m.RequestID == "" {
-		m.RequestID = correlation.ID(r.Context())
+	w.WriteHeader(body.HTTPStatus)
+	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(body)
+}
+
+// snapshot returns a copy of the exported fields with a clone of the Errors
+// map, taken under the lock. The lock itself is not copied.
+func (m *ManyError) snapshot() *ManyError {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	return &ManyError{
+		HTTPStatus: m.HTTPStatus,
+		RPCStatus:  m.RPCStatus,
+		Code:       m.Code,
+		RequestID:  m.RequestID,
+		Message:    m.Message,
+		Errors:     maps.Clone(m.Errors),
 	}
-	_ = codec.NewEncoder(w, encoderHandle(shouldPrettyPrint(r))).Encode(m)
 }

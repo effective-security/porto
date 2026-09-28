@@ -41,7 +41,9 @@ type WriteHTTPResponse interface {
 // A value implementing WriteHTTPResponse writes itself (httperror values
 // set their own status); any other error is converted with
 // httperror.NewFromPb (500 unexpected unless it carries a gRPC status) and
-// written the same way; errors other than 404 are also logged with the
+// written the same way, except that a converted error with a 5xx status is
+// sent with the generic http.StatusText message while its text is only
+// logged; errors other than 404 are also logged with the
 // caller's file and line. Anything else is written as application/json
 // with status 200, gzip-compressed for payloads of at least 1 KiB when the
 // request accepts gzip, and pretty-printed when the URL has a "pp" query
@@ -79,10 +81,17 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
 		}
 
 		// you should really be using Error to get a good error response returned
-
-		// logger.ContextKV(r.Context(), xlog.WARNING, "reason", "generic_error", "type", bv, "err", bv)
-		WriteJSON(w, r, httperror.NewFromPb(bv))
-
+		e := httperror.NewFromPb(bv)
+		if e.HTTPStatus >= http.StatusInternalServerError {
+			// Server-side failures are not the client's business: keep the
+			// original text for the log below, send a generic message.
+			if e.Cause() == nil {
+				e = e.WithCause(bv)
+			}
+			e.Message = http.StatusText(e.HTTPStatus)
+		}
+		e.WriteHTTPResponse(w, r)
+		httpError(e, r)
 		return
 
 	default:

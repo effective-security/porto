@@ -76,7 +76,7 @@ const GuestRoleName = "guest"
 ```
 
 <a name="AddToContext"></a>
-## func [AddToContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L78>)
+## func [AddToContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L82>)
 
 ```go
 func AddToContext(ctx context.Context, rq *RequestContext) context.Context
@@ -121,25 +121,25 @@ func ForwardedProto(r *http.Request) string
 ForwardedProto returns a trusted proxy's http or https scheme, or an empty string when the peer or header is untrusted or invalid.
 
 <a name="NewAuthUnaryInterceptor"></a>
-## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L229>)
+## func [NewAuthUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L258>)
 
 ```go
 func NewAuthUnaryInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.UnaryServerInterceptor
 ```
 
-NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls identityMapper with the full method name and stores the RequestContext \(identity, client IP from a trusted proxy or the peer address, user agent\) in the context. A mapper error fails the call with codes.PermissionDenied. Panics in the handler are recovered, logged and returned as an "unhandled exception" error. The optional trusted policy \(only the first value is used\) is stored with WithTrustedProxies; a nil or omitted policy keeps any policy already in the context.
+NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that calls identityMapper with the full method name and stores the RequestContext \(identity, client IP from a trusted proxy or the peer address, user agent\) in the context. A mapper error is logged and fails the call with codes.Unauthenticated and the generic "invalid identity" message, unless it is \(or wraps\) an \*httperror.Error with an HTTP status and a gRPC mapping, which is returned as is. Panics in the handler are recovered, logged and returned as an "unhandled exception" error. The optional trusted policy \(only the first value is used\) is stored with WithTrustedProxies; a nil or omitted policy keeps any policy already in the context.
 
 <a name="NewContextHandler"></a>
-## func [NewContextHandler](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L106>)
+## func [NewContextHandler](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L112>)
 
 ```go
 func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest) http.Handler
 ```
 
-NewContextHandler returns middleware that calls identityMapper for each request and stores the resulting RequestContext \(identity, client IP, path, user agent\) in the request context for later handlers. A mapper error is answered with a JSON 401 unauthorized response and the request is not forwarded. For non\-guest identities tenant/user/email/role are also added to the xlog context fields. A RequestContext already present in the context \(for example from WithTestIdentity\) is left untouched.
+NewContextHandler returns middleware that calls identityMapper for each request and stores the resulting RequestContext \(identity, client IP, path, user agent\) in the request context for later handlers. A mapper error is logged and answered with a JSON 401 unauthorized response whose message is the generic "invalid identity", unless the error is \(or wraps\) an \*httperror.Error with an HTTP status, which is written as is; the request is not forwarded. For non\-guest identities tenant/user/email/role are also added to the xlog context fields. A RequestContext already present in the context \(for example from WithTestIdentity\) is left untouched.
 
 <a name="NewStreamServerInterceptor"></a>
-## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L256>)
+## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L285>)
 
 ```go
 func NewStreamServerInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.StreamServerInterceptor
@@ -157,7 +157,7 @@ func NewTrustedProxyHandler(next http.Handler, trust *TrustedProxies) http.Handl
 NewTrustedProxyHandler stores trust in each request's context and resolves the client IP once, so that ClientIPFromRequest in later handlers \(rate limiter, identity, request logger\) returns the cached value instead of walking the forwarding headers again. Later changes to those headers do not change the cached IP; a request whose RemoteAddr differs from the one seen here is resolved again.
 
 <a name="WithTestIdentity"></a>
-## func [WithTestIdentity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L197>)
+## func [WithTestIdentity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L199>)
 
 ```go
 func WithTestIdentity(r *http.Request, identity Identity) *http.Request
@@ -212,7 +212,7 @@ func (m AuthMethod) String() string
 String returns the method name \("Certificate", "AWS", "DPoP", "JWT", "JWTCookie"\), or "None" for MethodNone and unknown values.
 
 <a name="Context"></a>
-## type [Context](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L51-L62>)
+## type [Context](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L55-L66>)
 
 Context is the read\-only view of RequestContext.
 
@@ -260,7 +260,7 @@ type Identity interface {
 ```
 
 <a name="GuestIdentityForContext"></a>
-### func [GuestIdentityForContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L191>)
+### func [GuestIdentityForContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L193>)
 
 ```go
 func GuestIdentityForContext(_ context.Context, _ string) (Identity, error)
@@ -269,7 +269,7 @@ func GuestIdentityForContext(_ context.Context, _ string) (Identity, error)
 GuestIdentityForContext is a ProviderFromContext that always returns the guest role with an empty subject.
 
 <a name="GuestIdentityMapper"></a>
-### func [GuestIdentityMapper](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L179>)
+### func [GuestIdentityMapper](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L181>)
 
 ```go
 func GuestIdentityMapper(r *http.Request) (Identity, error)
@@ -278,7 +278,7 @@ func GuestIdentityMapper(r *http.Request) (Identity, error)
 GuestIdentityMapper is a ProviderFromRequest that always returns the guest role, with the subject set to the TLS client certificate CommonName when one was presented, or "unknown". It is restserver's default mapper.
 
 <a name="NewIdentity"></a>
-### func [NewIdentity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L90>)
+### func [NewIdentity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L92>)
 
 ```go
 func NewIdentity(role, subject, tenant string, claims map[string]any, accessToken, tokenType string, authMethod AuthMethod) Identity
@@ -287,25 +287,25 @@ func NewIdentity(role, subject, tenant string, claims map[string]any, accessToke
 NewIdentity returns an immutable Identity with the given attributes. claims may be nil; when provided they are copied.
 
 <a name="ProviderFromContext"></a>
-## type [ProviderFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L86>)
+## type [ProviderFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L88>)
 
-ProviderFromContext maps a gRPC request context and full method name to the caller's Identity. It is used by the gRPC interceptors; returning an error rejects the call with codes.PermissionDenied, returning a nil Identity yields the guest identity.
+ProviderFromContext maps a gRPC request context and full method name to the caller's Identity. It is used by the gRPC interceptors; returning an error rejects the call with a generic codes.Unauthenticated status \(or the \*httperror.Error the error wraps\), returning a nil Identity yields the guest identity.
 
 ```go
 type ProviderFromContext func(ctx context.Context, uri string) (Identity, error)
 ```
 
 <a name="ProviderFromRequest"></a>
-## type [ProviderFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L80>)
+## type [ProviderFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/identity.go#L81>)
 
-ProviderFromRequest maps an HTTP request to the caller's Identity. It is used by NewContextHandler; returning an error rejects the request with 401, returning a nil Identity yields the guest identity.
+ProviderFromRequest maps an HTTP request to the caller's Identity. It is used by NewContextHandler; returning an error rejects the request with a generic 401 \(or the \*httperror.Error the error wraps\), returning a nil Identity yields the guest identity.
 
 ```go
 type ProviderFromRequest func(*http.Request) (Identity, error)
 ```
 
 <a name="RequestContext"></a>
-## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L33-L39>)
+## type [RequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L37-L43>)
 
 RequestContext is the per\-request value stored in the context by NewContextHandler and the gRPC interceptors: the caller's Identity, client IP, target \(HTTP path or gRPC method\) and user agent. It implements Context. Correlation IDs live in xhttp/correlation, not here.
 
@@ -316,7 +316,7 @@ type RequestContext struct {
 ```
 
 <a name="FromContext"></a>
-### func [FromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L66>)
+### func [FromContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L70>)
 
 ```go
 func FromContext(ctx context.Context) *RequestContext
@@ -325,7 +325,7 @@ func FromContext(ctx context.Context) *RequestContext
 FromContext returns the RequestContext stored in ctx. When none exists it returns a new RequestContext with the guest identity, never nil.
 
 <a name="FromRequest"></a>
-### func [FromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L85>)
+### func [FromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L89>)
 
 ```go
 func FromRequest(r *http.Request) *RequestContext
@@ -334,7 +334,7 @@ func FromRequest(r *http.Request) *RequestContext
 FromRequest returns the RequestContext for r \(guest when none was stored\), filling in target, client IP and user agent from the request when they are empty. Note that it updates the stored RequestContext in place.
 
 <a name="NewRequestContext"></a>
-### func [NewRequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L43>)
+### func [NewRequestContext](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L47>)
 
 ```go
 func NewRequestContext(id Identity, target string) *RequestContext
@@ -343,7 +343,7 @@ func NewRequestContext(id Identity, target string) *RequestContext
 NewRequestContext creates a request context with a specific identity and target; client IP and user agent are left empty. Store it with AddToContext.
 
 <a name="RequestContext.ClientIP"></a>
-### func \(\*RequestContext\) [ClientIP](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L280>)
+### func \(\*RequestContext\) [ClientIP](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L309>)
 
 ```go
 func (c *RequestContext) ClientIP() string
@@ -352,7 +352,7 @@ func (c *RequestContext) ClientIP() string
 ClientIP returns the request's client IP, or "" when unknown.
 
 <a name="RequestContext.Identity"></a>
-### func \(\*RequestContext\) [Identity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L275>)
+### func \(\*RequestContext\) [Identity](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L304>)
 
 ```go
 func (c *RequestContext) Identity() Identity
@@ -361,7 +361,7 @@ func (c *RequestContext) Identity() Identity
 Identity returns the request's identity; never nil.
 
 <a name="RequestContext.Target"></a>
-### func \(\*RequestContext\) [Target](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L285>)
+### func \(\*RequestContext\) [Target](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L314>)
 
 ```go
 func (c *RequestContext) Target() string
@@ -370,7 +370,7 @@ func (c *RequestContext) Target() string
 Target returns the request's target: the HTTP path or gRPC full method.
 
 <a name="RequestContext.UserAgent"></a>
-### func \(\*RequestContext\) [UserAgent](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L290>)
+### func \(\*RequestContext\) [UserAgent](<https://github.com/effective-security/porto/blob/main/xhttp/identity/ctx.go#L319>)
 
 ```go
 func (c *RequestContext) UserAgent() string
