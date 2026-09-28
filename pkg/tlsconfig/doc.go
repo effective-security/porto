@@ -27,6 +27,7 @@
 //	}
 //	defer reloader.Close()
 //	cfg.GetCertificate = reloader.GetKeypairFunc()
+//	cfg.Certificates = nil // use the callback even when a client omits SNI
 //
 // Client example:
 //
@@ -37,7 +38,7 @@
 //	defer reloader.Close()
 //	client := &http.Client{Transport: &http.Transport{TLSClientConfig: cfg}}
 //
-// The reloader panics (via the package logger) when it serves a certificate
-// whose NotAfter has passed; callers that cannot tolerate that must validate
-// expiry before use (see transport.TLSInfo.ServerTLSWithReloader).
+// An expired certificate is rejected during reload. If the current
+// certificate later expires, the GetCertificate and GetClientCertificate
+// callbacks return an error instead of serving it.
 package tlsconfig

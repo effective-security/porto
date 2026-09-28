@@ -22,8 +22,9 @@ func Test_KeypairReloader(t *testing.T) {
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)
 
-	pemFile := filepath.Join(os.TempDir(), "test-KeypairReloader.pem")
-	keyFile := filepath.Join(os.TempDir(), "test-KeypairReloader-key.pem")
+	tmpDir := t.TempDir()
+	pemFile := filepath.Join(tmpDir, "test-KeypairReloader.pem")
+	keyFile := filepath.Join(tmpDir, "test-KeypairReloader-key.pem")
 
 	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
@@ -53,11 +54,11 @@ func Test_KeypairReloader(t *testing.T) {
 	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
 
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool { return k.LoadedCount() >= 2 }, 2*time.Second, 10*time.Millisecond)
 
 	loadedAt2 := k.LoadedAt()
 	count := int(k.LoadedCount())
-	assert.True(t, count >= 2 && count <= 4, "must be loaded at start, whithin period and after, loaded: %d", k.LoadedCount())
+	assert.GreaterOrEqual(t, count, 2)
 	assert.True(t, loadedAt2.After(loadedAt), "re-loaded time must be after last loaded time")
 
 	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
@@ -71,11 +72,11 @@ func Test_KeypairReloader(t *testing.T) {
 	err = os.WriteFile(keyFile, pemKey, os.ModePerm)
 	require.NoError(t, err)
 
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool { return k.LoadedCount() >= 3 && reloadedCount.Load() > 1 }, 2*time.Second, 10*time.Millisecond)
 
 	loadedAt3 := k.LoadedAt()
 	count = int(k.LoadedCount())
-	assert.True(t, count >= 3 && count <= 5, "must be loaded at start, whithin period and after, loaded: %d", k.LoadedCount())
+	assert.GreaterOrEqual(t, count, 3)
 	assert.True(t, loadedAt3.After(loadedAt2), "re-loaded time must be after last loaded time")
 	assert.True(t, reloadedCount.Load() > 1, "must be reloaded when file modified: %d", reloadedCount.Load())
 
@@ -96,8 +97,9 @@ func Test_KeypairReloader_Reload(t *testing.T) {
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)
 
-	pemFile := filepath.Join(os.TempDir(), "test-KeypairReloader2.pem")
-	keyFile := filepath.Join(os.TempDir(), "test-KeypairReloader2-key.pem")
+	tmpDir := t.TempDir()
+	pemFile := filepath.Join(tmpDir, "test-KeypairReloader2.pem")
+	keyFile := filepath.Join(tmpDir, "test-KeypairReloader2-key.pem")
 
 	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)

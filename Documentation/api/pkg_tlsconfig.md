@@ -28,6 +28,7 @@ if err != nil {
 }
 defer reloader.Close()
 cfg.GetCertificate = reloader.GetKeypairFunc()
+cfg.Certificates = nil // use the callback even when a client omits SNI
 ```
 
 Client example:
@@ -41,7 +42,7 @@ defer reloader.Close()
 client := &http.Client{Transport: &http.Transport{TLSClientConfig: cfg}}
 ```
 
-The reloader panics \(via the package logger\) when it serves a certificate whose NotAfter has passed; callers that cannot tolerate that must validate expiry before use \(see transport.TLSInfo.ServerTLSWithReloader\).
+An expired certificate is rejected during reload. If the current certificate later expires, the GetCertificate and GetClientCertificate callbacks return an error instead of serving it.
 
 ## Index
 
@@ -90,7 +91,7 @@ func LoadX509KeyPairWithOCSP(certFile, keyFile string) (*tls.Certificate, error)
 LoadX509KeyPairWithOCSP reads a PEM certificate chain and private key from files and, if a file named "\<certFile without extension\>.ocsp" exists, uses its content as the OCSP staple \(see X509KeyPairWithOCSP\). A missing OCSP file is not an error. The certificate file may contain intermediates after the leaf.
 
 <a name="NewClientTLSFromFiles"></a>
-## func [NewClientTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L69>)
+## func [NewClientTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L64>)
 
 ```go
 func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, error)
@@ -105,7 +106,7 @@ NewClientTLSFromFiles builds a client tls.Config \(MinVersion TLS 1.2, ALPN h2/h
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType) (*tls.Config, error)
 ```
 
-NewServerTLSFromFiles builds a server tls.Config \(MinVersion TLS 1.2, ALPN h2/http1.1\) from PEM files. certFile and keyFile are required; an OCSP staple is loaded from "\<cert basename\>.ocsp" if present. rootsFile \(optional\) is used as both RootCAs and ClientCAs; caFile \(optional\) overrides ClientCAs. When both are empty the OS roots are used and client certificates cannot be verified. clientauthType is applied as\-is. Files that contain no valid certificate produce an empty pool without error. The returned config has no GetCertificate; pair it with KeypairReloader for rotation.
+NewServerTLSFromFiles builds a server tls.Config \(MinVersion TLS 1.2, ALPN h2/http1.1\) from PEM files. certFile and keyFile are required; an OCSP staple is loaded from "\<cert basename\>.ocsp" if present. rootsFile \(optional\) is used as both RootCAs and ClientCAs; caFile \(optional\) overrides ClientCAs. When both are empty the OS roots are used and client certificates cannot be verified. clientauthType is applied as\-is. CA files must contain at least one valid certificate. The returned config has no GetCertificate; pair it with KeypairReloader for rotation.
 
 <a name="UpdateCipherSuites"></a>
 ## func [UpdateCipherSuites](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L63>)
@@ -135,9 +136,9 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 X509KeyPairWithOCSP parses a PEM certificate chain and private key \(PKCS\#1, PKCS\#8 or SEC1; RSA, ECDSA or Ed25519\), verifies the key matches the leaf, and sets Certificate.Leaf. Expired certificates are accepted. If ocspStaple is given and the chain has an issuer, the staple is validated against the leaf: a Revoked status is an error, an expired or unparsable staple is dropped with a warning, and a good staple is set as Certificate.OCSPStaple.
 
 <a name="HTTPTransport"></a>
-## type [HTTPTransport](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L178-L183>)
+## type [HTTPTransport](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L183-L187>)
 
-HTTPTransport is an http.RoundTripper that re\-applies its current TLSClientConfig to the wrapped \*http.Transport on every request so that a reloaded client certificate takes effect. Create it with NewHTTPTransportWithReloader.
+HTTPTransport is an http.RoundTripper that uses the current client certificate for each new TLS handshake. Create it with NewHTTPTransportWithReloader.
 
 ```go
 type HTTPTransport struct {
@@ -146,36 +147,36 @@ type HTTPTransport struct {
 ```
 
 <a name="NewHTTPTransportWithReloader"></a>
-### func [NewHTTPTransportWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L132-L135>)
+### func [NewHTTPTransportWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L137-L140>)
 
 ```go
 func NewHTTPTransportWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration, HTTPUserTransport *http.Transport) (*HTTPTransport, error)
 ```
 
-NewHTTPTransportWithReloader returns an HTTPTransport that installs a fresh TLS client config \(with the reloaded certificate\) on the underlying \*http.Transport whenever the cert file changes, closing idle connections so new dials use it. When HTTPUserTransport is nil a clone of http.DefaultTransport with 100 max idle/per\-host connections is used. The caller must Close the returned transport to stop the reloader.
+NewHTTPTransportWithReloader returns an HTTPTransport with a fixed TLS client config that obtains the current certificate for each handshake. Reloads close idle connections so new dials use the new pair. The supplied transport is cloned before use. When HTTPUserTransport is nil a clone of http.DefaultTransport with 100 max idle/per\-host connections is used. The caller must Close the returned transport to stop the reloader.
 
 <a name="HTTPTransport.Close"></a>
-### func \(\*HTTPTransport\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L203>)
+### func \(\*HTTPTransport\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L201>)
 
 ```go
 func (t *HTTPTransport) Close() error
 ```
 
-Close stops the certificate reloader. It returns an error on a second call. The wrapped \*http.Transport is left open.
+Close stops the certificate reloader and closes idle connections on the wrapped transport. It returns an error on a second call.
 
 <a name="HTTPTransport.RoundTrip"></a>
-### func \(\*HTTPTransport\) [RoundTrip](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L187>)
+### func \(\*HTTPTransport\) [RoundTrip](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L190>)
 
 ```go
 func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error)
 ```
 
-RoundTrip sets the current TLS config on the wrapped transport and forwards the request. Errors are returned with a stack trace attached.
+RoundTrip forwards the request. Errors are returned with a stack trace attached.
 
 <a name="KeypairReloader"></a>
-## type [KeypairReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L31-L45>)
+## type [KeypairReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L35-L50>)
 
-KeypairReloader loads a TLS certificate/key pair from files and reloads it in a background goroutine when either file's modification time changes, or at least once per hour. Obtain the current pair via Keypair, GetKeypairFunc \(server\) or GetClientCertificateFunc \(client\). Close stops the goroutine. Serving an expired certificate panics via the package logger.
+KeypairReloader loads a TLS certificate/key pair from files and reloads it in a background goroutine when either file's modification time changes, or at least once per hour. Obtain the current pair via Keypair, GetKeypairFunc \(server\) or GetClientCertificateFunc \(client\). Close stops the goroutine. Expired certificates are rejected; a failed reload keeps the previous pair.
 
 ```go
 type KeypairReloader struct {
@@ -184,7 +185,7 @@ type KeypairReloader struct {
 ```
 
 <a name="NewClientTLSWithReloader"></a>
-### func [NewClientTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L111>)
+### func [NewClientTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L116>)
 
 ```go
 func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration) (*tls.Config, *KeypairReloader, error)
@@ -193,7 +194,7 @@ func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval
 NewClientTLSWithReloader is NewClientTLSFromFiles plus a KeypairReloader wired as GetClientCertificate, polling every checkInterval. certFile and keyFile are required. The caller must Close the returned reloader.
 
 <a name="NewKeypairReloader"></a>
-### func [NewKeypairReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L51>)
+### func [NewKeypairReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L56>)
 
 ```go
 func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Duration) (*KeypairReloader, error)
@@ -202,7 +203,7 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 NewKeypairReloader loads the pair once \(returning an error on failure\) and starts a goroutine that polls the files every checkInterval. label is used in logs and defaults to the certificate file's base name. The initial load includes a fixed 100ms delay. The caller must call Close.
 
 <a name="KeypairReloader.CertAndKeyFiles"></a>
-### func \(\*KeypairReloader\) [CertAndKeyFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L255>)
+### func \(\*KeypairReloader\) [CertAndKeyFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L302>)
 
 ```go
 func (k *KeypairReloader) CertAndKeyFiles() (string, string)
@@ -211,43 +212,43 @@ func (k *KeypairReloader) CertAndKeyFiles() (string, string)
 CertAndKeyFiles returns the certificate and key file paths being watched.
 
 <a name="KeypairReloader.Close"></a>
-### func \(\*KeypairReloader\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L280>)
+### func \(\*KeypairReloader\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L328>)
 
 ```go
 func (k *KeypairReloader) Close() error
 ```
 
-Close stops the polling goroutine, blocking until it acknowledges. It is nil\-safe and returns an error on a second call.
+Close waits for an active reload, then signals the polling goroutine to stop without waiting for that goroutine to exit. It is nil\-safe and returns an error on a second call.
 
 <a name="KeypairReloader.GetClientCertificateFunc"></a>
-### func \(\*KeypairReloader\) [GetClientCertificateFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L234>)
+### func \(\*KeypairReloader\) [GetClientCertificateFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L280>)
 
 ```go
 func (k *KeypairReloader) GetClientCertificateFunc() func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 ```
 
-GetClientCertificateFunc returns a function suitable for tls.Config.GetClientCertificate that serves the current pair. It panics if the pair has expired.
+GetClientCertificateFunc returns a function suitable for tls.Config.GetClientCertificate that serves the current pair. It returns an error if the pair has expired.
 
 <a name="KeypairReloader.GetKeypairFunc"></a>
-### func \(\*KeypairReloader\) [GetKeypairFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L223>)
+### func \(\*KeypairReloader\) [GetKeypairFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L269>)
 
 ```go
 func (k *KeypairReloader) GetKeypairFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 ```
 
-GetKeypairFunc returns a function suitable for tls.Config.GetCertificate that serves the current pair. It panics if the pair has expired.
+GetKeypairFunc returns a function suitable for tls.Config.GetCertificate that serves the current pair or returns an error if it has expired.
 
 <a name="KeypairReloader.Keypair"></a>
-### func \(\*KeypairReloader\) [Keypair](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L244>)
+### func \(\*KeypairReloader\) [Keypair](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L290>)
 
 ```go
 func (k *KeypairReloader) Keypair() *tls.Certificate
 ```
 
-Keypair returns the current pair, or nil on a nil receiver. It panics if the pair has expired.
+Keypair returns the current pair, or nil on a nil receiver. It returns nil if the pair has expired.
 
 <a name="KeypairReloader.LoadedAt"></a>
-### func \(\*KeypairReloader\) [LoadedAt](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L266>)
+### func \(\*KeypairReloader\) [LoadedAt](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L313>)
 
 ```go
 func (k *KeypairReloader) LoadedAt() time.Time
@@ -256,7 +257,7 @@ func (k *KeypairReloader) LoadedAt() time.Time
 LoadedAt returns the UTC time of the last successful load.
 
 <a name="KeypairReloader.LoadedCount"></a>
-### func \(\*KeypairReloader\) [LoadedCount](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L274>)
+### func \(\*KeypairReloader\) [LoadedCount](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L321>)
 
 ```go
 func (k *KeypairReloader) LoadedCount() uint32
@@ -265,7 +266,7 @@ func (k *KeypairReloader) LoadedCount() uint32
 LoadedCount returns the number of successful loads, including the first.
 
 <a name="KeypairReloader.OnReload"></a>
-### func \(\*KeypairReloader\) [OnReload](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L120>)
+### func \(\*KeypairReloader\) [OnReload](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L127>)
 
 ```go
 func (k *KeypairReloader) OnReload(f OnReloadFunc) *KeypairReloader
@@ -274,16 +275,16 @@ func (k *KeypairReloader) OnReload(f OnReloadFunc) *KeypairReloader
 OnReload registers a handler called after each reload that changed the certificate file's modification time. A nil handler is ignored.
 
 <a name="KeypairReloader.Reload"></a>
-### func \(\*KeypairReloader\) [Reload](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L135>)
+### func \(\*KeypairReloader\) [Reload](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L143>)
 
 ```go
 func (k *KeypairReloader) Reload() error
 ```
 
-Reload synchronously re\-reads the pair from disk, retrying up to three times with a 100ms sleep before each attempt while holding the write lock, and notifies OnReload handlers if the certificate's mtime changed. It is a no\-op returning nil if another Reload is in progress. On failure the previous pair is kept.
+Reload synchronously re\-reads the pair from disk, retrying up to three times with a 100ms sleep before each attempt outside the write lock, and notifies OnReload handlers if the certificate's mtime changed. If another Reload is in progress, it waits for that one and then loads again, so a nil return means the pair was read after the call started. On failure the previous pair is kept. Reload returns an error after Close.
 
 <a name="OnReloadFunc"></a>
-## type [OnReloadFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L24>)
+## type [OnReloadFunc](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/reloader.go#L28>)
 
 OnReloadFunc is invoked, in its own goroutine, with the newly loaded certificate each time the certificate file's modification time changes.
 

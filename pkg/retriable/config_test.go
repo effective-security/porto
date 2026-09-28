@@ -30,7 +30,7 @@ func Test_Factory(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = f.CreateClient("prod")
-	assert.EqualError(t, err, "failed to load TLS config: open /etc/pki/cabundle.pem: no such file or directory")
+	assert.EqualError(t, err, "failed to load TLS config: unable to read CA file /etc/pki/cabundle.pem: open /etc/pki/cabundle.pem: no such file or directory")
 
 	_, err = f.CreateClient("local_https")
 	assert.NoError(t, err)

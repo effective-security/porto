@@ -1,10 +1,13 @@
 package transport
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/effective-security/xpki/certutil"
@@ -98,4 +101,37 @@ func TestServerTLSWithReloader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, cfg, cfg2)
 	tlsInfo.Close()
+}
+
+func TestServerTLSWithReloaderWithoutSNI(t *testing.T) {
+	t.Parallel()
+	info := &TLSInfo{
+		CertFile: serverCertFile,
+		KeyFile:  serverKeyFile,
+	}
+	cfg, err := info.ServerTLSWithReloader()
+	require.NoError(t, err)
+	t.Cleanup(info.Close)
+	require.Empty(t, cfg.Certificates)
+	require.NotNil(t, cfg.GetCertificate)
+
+	var callbackCalls atomic.Int32
+	originalCallback := cfg.GetCertificate
+	serverConfig := cfg.Clone()
+	serverConfig.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		callbackCalls.Add(1)
+		return originalCallback(hello)
+	}
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = serverConn.Close()
+		_ = clientConn.Close()
+	})
+	server := tls.Server(serverConn, serverConfig)
+	client := tls.Client(clientConn, &tls.Config{InsecureSkipVerify: true}) // test certificate
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- server.Handshake() }()
+	require.NoError(t, client.Handshake())
+	require.NoError(t, <-serverDone)
+	assert.Equal(t, int32(1), callbackCalls.Load())
 }

@@ -19,6 +19,10 @@ var makeTicker = func(interval time.Duration) (func(), <-chan time.Time) {
 	return t.Stop, t.C
 }
 
+// errReloaderClosed is returned by Reload after Close. The poll goroutine
+// treats it as a stop signal rather than a failure.
+var errReloaderClosed = errors.New("reloader closed")
+
 // OnReloadFunc is invoked, in its own goroutine, with the newly loaded
 // certificate each time the certificate file's modification time changes.
 type OnReloadFunc func(pair *tls.Certificate)
@@ -27,7 +31,7 @@ type OnReloadFunc func(pair *tls.Certificate)
 // in a background goroutine when either file's modification time changes, or
 // at least once per hour. Obtain the current pair via Keypair, GetKeypairFunc
 // (server) or GetClientCertificateFunc (client). Close stops the goroutine.
-// Serving an expired certificate panics via the package logger.
+// Expired certificates are rejected; a failed reload keeps the previous pair.
 type KeypairReloader struct {
 	label          string
 	lock           sync.RWMutex
@@ -39,6 +43,7 @@ type KeypairReloader struct {
 	keyPath        string
 	keyModifiedAt  time.Time
 	inProgress     bool
+	reloadDone     chan struct{}
 	stopChan       chan<- struct{}
 	closed         bool
 	handlers       []OnReloadFunc
@@ -96,7 +101,9 @@ func NewKeypairReloader(label, certPath, keyPath string, checkInterval time.Dura
 				// reload on modified, or force to reload each hour
 				if modified || loadedAt.Add(1*time.Hour).Before(time.Now().UTC()) {
 					err := result.Reload()
-					if err != nil {
+					// errReloaderClosed means Close is waiting for an active
+					// reload and stopChan closes next; it is not a failure.
+					if err != nil && !errors.Is(err, errReloaderClosed) {
 						logger.KV(xlog.ERROR, "label", result.label, "err", err)
 					}
 				}
@@ -128,33 +135,52 @@ func (k *KeypairReloader) OnReload(f OnReloadFunc) *KeypairReloader {
 }
 
 // Reload synchronously re-reads the pair from disk, retrying up to three
-// times with a 100ms sleep before each attempt while holding the write lock,
-// and notifies OnReload handlers if the certificate's mtime changed. It is a
-// no-op returning nil if another Reload is in progress. On failure the
-// previous pair is kept.
+// times with a 100ms sleep before each attempt outside the write lock,
+// and notifies OnReload handlers if the certificate's mtime changed. If
+// another Reload is in progress, it waits for that one and then loads again,
+// so a nil return means the pair was read after the call started. On failure
+// the previous pair is kept. Reload returns an error after Close.
 func (k *KeypairReloader) Reload() error {
 	k.lock.Lock()
-	if k.inProgress {
+	// Do not skip when a reload is active: it may have read the files before
+	// the caller changed them.
+	for k.inProgress && !k.closed {
+		done := k.reloadDone
 		k.lock.Unlock()
-		return nil
+		<-done
+		k.lock.Lock()
 	}
-
+	if k.closed {
+		k.lock.Unlock()
+		return errors.WithStack(errReloaderClosed)
+	}
 	k.inProgress = true
+	k.reloadDone = make(chan struct{})
+	k.lock.Unlock()
+
 	defer func() {
+		k.lock.Lock()
 		k.inProgress = false
+		close(k.reloadDone)
+		k.reloadDone = nil
 		k.lock.Unlock()
 	}()
 
-	oldModifiedAt := k.certModifiedAt
-
 	var newCert *tls.Certificate
+	var certFileInfo, keyFileInfo os.FileInfo
 	var err error
 
 	for i := 0; i < 3; i++ {
 		// sleep a little as notification occurs right after process starts writing the file,
 		// so it needs to finish writing the file
 		time.Sleep(100 * time.Millisecond)
+		// stat before reading: a write that lands during the load then leaves
+		// a newer mtime on disk, and the next poll reloads it
+		certFileInfo, keyFileInfo = k.statFiles()
 		newCert, err = LoadX509KeyPairWithOCSP(k.certPath, k.keyPath)
+		if err == nil {
+			err = validateCertificate(newCert)
+		}
 		if err == nil {
 			break
 		}
@@ -164,83 +190,103 @@ func (k *KeypairReloader) Reload() error {
 		return errors.WithMessagef(err, "count: %d", atomic.LoadUint32(&k.count))
 	}
 
-	atomic.AddUint32(&k.count, 1)
-	k.loadedAt = time.Now().UTC()
-
-	certFileInfo, err := os.Stat(k.certPath)
-	if err == nil {
+	k.lock.Lock()
+	oldModifiedAt := k.certModifiedAt
+	if certFileInfo != nil {
 		k.certModifiedAt = certFileInfo.ModTime()
-	} else {
-		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.certPath, "err", err.Error())
 	}
-
-	keyFileInfo, err := os.Stat(k.keyPath)
-	if err == nil {
+	if keyFileInfo != nil {
 		k.keyModifiedAt = keyFileInfo.ModTime()
-	} else {
-		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.keyPath, "err", err.Error())
 	}
-
+	k.loadedAt = time.Now().UTC()
 	k.keypair = newCert
-	keypair := k.tlsCert()
+	count := atomic.AddUint32(&k.count, 1)
+	modifiedAt := k.certModifiedAt
+	handlers := append([]OnReloadFunc(nil), k.handlers...)
+	k.lock.Unlock()
 
-	if oldModifiedAt != k.certModifiedAt {
-		logger.KV(xlog.DEBUG, "label", k.label, "count", atomic.LoadUint32(&k.count), "cert", k.certPath, "modifiedAt", k.certModifiedAt.Format(time.RFC3339))
+	if oldModifiedAt != modifiedAt {
+		logger.KV(xlog.DEBUG, "label", k.label, "count", count, "cert", k.certPath, "modifiedAt", modifiedAt.Format(time.RFC3339))
 
 		// execute notifications outside of the lock
-		for _, h := range k.handlers {
-			go h(keypair)
+		for _, h := range handlers {
+			go h(newCert)
 		}
 	}
 
 	return nil
 }
 
-func (k *KeypairReloader) tlsCert() *tls.Certificate {
-	var err error
-	kp := k.keypair
-	if kp.Leaf == nil && len(kp.Certificate) > 0 {
-		kp.Leaf, err = x509.ParseCertificate(kp.Certificate[0])
-		if err != nil {
-			logger.KV(xlog.WARNING, "reason", "ParseCertificate", "label", k.label, "err", err.Error())
-		}
+// statFiles returns the certificate and key file info. A file that cannot be
+// stat'ed is logged and returned as nil, which keeps its previous mtime.
+func (k *KeypairReloader) statFiles() (certInfo, keyInfo os.FileInfo) {
+	certInfo, err := os.Stat(k.certPath)
+	if err != nil {
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.certPath, "err", err.Error())
 	}
+	keyInfo, err = os.Stat(k.keyPath)
+	if err != nil {
+		logger.KV(xlog.WARNING, "reason", "stat", "label", k.label, "file", k.keyPath, "err", err.Error())
+	}
+	return certInfo, keyInfo
+}
 
-	if kp.Leaf != nil {
-		now := time.Now()
-		if kp.Leaf.NotAfter.Before(now) {
-			logger.KV(xlog.ERROR, "label", k.label, "count", atomic.LoadUint32(&k.count), "cert", k.certPath, "expired", kp.Leaf.NotAfter.Format(time.RFC3339))
-			logger.Panic("cert expired")
-		} else if kp.Leaf.NotAfter.Before(now.Add(1 * time.Hour)) {
-			logger.KV(xlog.WARNING, "label", k.label, "count", atomic.LoadUint32(&k.count), "cert", k.certPath, "expires_soon", kp.Leaf.NotAfter.Format(time.RFC3339))
-		}
+func validateCertificate(kp *tls.Certificate) error {
+	if kp == nil || len(kp.Certificate) == 0 {
+		return errors.New("certificate chain is empty")
 	}
-	return kp
+	if kp.Leaf == nil {
+		leaf, err := x509.ParseCertificate(kp.Certificate[0])
+		if err != nil {
+			return errors.WithMessage(err, "unable to parse certificate")
+		}
+		kp.Leaf = leaf
+	}
+	if !time.Now().Before(kp.Leaf.NotAfter) {
+		return errors.New("certificate expired")
+	}
+	return nil
+}
+
+func (k *KeypairReloader) tlsCert() (*tls.Certificate, error) {
+	kp := k.keypair
+	if kp == nil || kp.Leaf == nil {
+		return nil, errors.New("certificate is unavailable")
+	}
+	if !time.Now().Before(kp.Leaf.NotAfter) {
+		err := errors.New("certificate expired")
+		logger.KV(xlog.ERROR, "label", k.label, "count", atomic.LoadUint32(&k.count), "cert", k.certPath, "err", err)
+		return nil, err
+	}
+	if kp.Leaf.NotAfter.Before(time.Now().Add(time.Hour)) {
+		logger.KV(xlog.WARNING, "label", k.label, "count", atomic.LoadUint32(&k.count), "cert", k.certPath, "expires_soon", kp.Leaf.NotAfter.Format(time.RFC3339))
+	}
+	return kp, nil
 }
 
 // GetKeypairFunc returns a function suitable for tls.Config.GetCertificate
-// that serves the current pair. It panics if the pair has expired.
+// that serves the current pair or returns an error if it has expired.
 func (k *KeypairReloader) GetKeypairFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		k.lock.RLock()
 		defer k.lock.RUnlock()
-		return k.tlsCert(), nil
+		return k.tlsCert()
 	}
 }
 
 // GetClientCertificateFunc returns a function suitable for
 // tls.Config.GetClientCertificate that serves the current pair.
-// It panics if the pair has expired.
+// It returns an error if the pair has expired.
 func (k *KeypairReloader) GetClientCertificateFunc() func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 	return func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		k.lock.RLock()
 		defer k.lock.RUnlock()
-		return k.tlsCert(), nil
+		return k.tlsCert()
 	}
 }
 
 // Keypair returns the current pair, or nil on a nil receiver.
-// It panics if the pair has expired.
+// It returns nil if the pair has expired.
 func (k *KeypairReloader) Keypair() *tls.Certificate {
 	if k == nil {
 		return nil
@@ -248,7 +294,8 @@ func (k *KeypairReloader) Keypair() *tls.Certificate {
 	k.lock.RLock()
 	defer k.lock.RUnlock()
 
-	return k.tlsCert()
+	kp, _ := k.tlsCert()
+	return kp
 }
 
 // CertAndKeyFiles returns the certificate and key file paths being watched.
@@ -275,26 +322,26 @@ func (k *KeypairReloader) LoadedCount() uint32 {
 	return atomic.LoadUint32(&k.count)
 }
 
-// Close stops the polling goroutine, blocking until it acknowledges. It is
-// nil-safe and returns an error on a second call.
+// Close waits for an active reload, then signals the polling goroutine to
+// stop without waiting for that goroutine to exit. It is nil-safe and returns
+// an error on a second call.
 func (k *KeypairReloader) Close() error {
 	if k == nil {
 		return nil
 	}
 
-	// Take the write lock so Close waits for an in-flight Reload instead of
-	// blocking it: sending on stopChan while holding a read lock deadlocked
-	// when the poll goroutine was waiting for the write lock in Reload.
 	k.lock.Lock()
 	if k.closed {
 		k.lock.Unlock()
 		return errors.New("already closed")
 	}
 	k.closed = true
+	reloadDone := k.reloadDone
 	k.lock.Unlock()
+	if reloadDone != nil {
+		<-reloadDone
+	}
 
-	// closing (rather than sending) never blocks; the poll goroutine
-	// observes it on its next select.
 	close(k.stopChan)
 
 	return nil

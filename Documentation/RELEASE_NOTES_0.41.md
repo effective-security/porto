@@ -10,6 +10,8 @@
 
 ### Concurrency, deadlocks and panics
 
+- TLS certificate reloads now load files outside the handshake lock. The reloading HTTP transport keeps one TLS config and selects the current client certificate for each handshake; it clones a supplied `http.Transport` and closes idle connections after rotation and on `Close`.
+
 - Synchronize retriable client setters and token refresh; missing or public-only DPoP signing keys now return errors.
 
 - Make discovery registration and lookup safe for concurrent use; nil services now return an error, and iteration callbacks may register services.
@@ -35,6 +37,8 @@
 ## New features and behaviour
 
 ## Breaking changes: what clients must change
+
+- `KeypairReloader` now returns an error for an expired certificate at initial load or reload, and `Reload` returns an error after `Close`. Its TLS callbacks return an error if the current certificate expires; `Keypair` returns nil. `TLSInfo.ServerTLSWithReloader` also routes handshakes without SNI through that callback, so its returned config no longer exposes a static `Certificates` entry. Rotate certificates before expiry and handle reload and handshake errors. TLS constructors also reject CA files with no valid certificate. `NewHTTPTransportWithReloader` now clones a supplied transport; callers should use the returned `HTTPTransport` for requests and close it when done.
 
 - `restserver.StopHTTP` now drains active requests before calling `Service.Close`. Services that must stop accepting work earlier can use a `ServerStoppingEvent` handler. After the shutdown timeout, services still close even if handlers have not finished.
 

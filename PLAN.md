@@ -27,9 +27,21 @@ without case-insensitive duplicates. Deployments that relied on the previous
 implicit wildcard must explicitly enable CORS and configure
 `allowed_origins: ["*"]`.
 
+## Completed B02 decision — TLS reloader and client transport
+
+The reloader rejects an expired certificate at initial load and on reload;
+on reload failure it keeps the previous pair. Once that pair expires, TLS
+callbacks return an error and `Keypair` returns nil. The HTTP wrapper clones
+a supplied `http.Transport`, installs a stable TLS config with a live client
+certificate callback, and closes idle connections after rotation. Invalid CA
+files return errors. Callers must rotate certificates before expiry, handle
+reload and handshake errors, use the returned HTTP wrapper for requests, and
+close it when done. The server wrapper clears static certificates so clients
+without SNI also use the callback; the HTTP wrapper closes idle connections
+on `Close`.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B02 — TLS reloader and client transport    | P1       | `pkg/tlsconfig`: return certificate expiry errors, reload outside the write lock, stop mutating an active `http.Transport`, and reject invalid CA bundles.                                                                                                            | P-037, P-050, P-051, P-070                                                  | Expiry behavior and transport contract                |
 | B05 — Trusted proxy headers                | P2       | `xhttp/identity`, `restserver`, `gserver`: fix the private-only XFF fallback, define trusted-proxy handling for IP and scheme headers, and key the default rate limiter from a trusted address.                                                                       | P-007, P-017, P-018                                                         | Proxy trust configuration and default                 |
 | B06 — Network limits                       | P2       | `gserver`, `restserver`, `xhttp/marshal`, `pkg/transport`, `pkg/appinit`: add bounded cmux/HTTP/TLS handshake timeouts and request bodies; make the Prometheus server closable with a safe bind-error path. Implement the shared defaults in ROADMAP item 2 together. | P-005, P-019, P-026, P-054, P-055                                           | Timeout/body defaults and Prometheus failure behavior |
 | B07 — gserver lifecycle and rate setup     | P2       | `gserver`: close failed serve channels and TLS reloaders reliably; validate enabled rate limits before serving.                                                                                                                                                       | P-003, P-004, P-006                                                         | Rate-limit configuration behavior                     |

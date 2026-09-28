@@ -48,12 +48,6 @@ agree on prefix stripping and glob support; the Redis lock should be
 owner-bound (token + compare-and-delete script) and the rate limiter
 atomic (Lua). Retires P-036, P-043, P-047, P-064.
 
-## 7. `KeypairReloader` without panics or lock-held sleeps
-
-Return errors from `GetCertificate` callbacks when the certificate has
-expired, load new keypairs outside the write lock, and stop mutating
-`Transport.TLSClientConfig` per request. Retires P-037, P-050, P-051.
-
 ## 8. Unenforced `transport.TLSInfo` fields
 
 Either port the etcd SAN/CN checks into the `tlsCheckFunc` chain or delete

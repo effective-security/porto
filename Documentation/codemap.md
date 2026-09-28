@@ -524,14 +524,16 @@ Files: `doc.go`, `tlsconfig.go` (`NewServerTLSFromFiles`, `NewClientTLSFromFiles
 
 Invariants:
 
-- Defaults: MinVersion TLS 1.2, NextProtos h2 + http/1.1; `rootsFile` is used for both `RootCAs` and `ClientCAs` on the server; `AppendCertsFromPEM` results are ignored (P-070).
-- `tlsCert()` panics through the logger when `NotAfter` has passed (P-037); warns when expiry is within one hour.
-- One poll goroutine per reloader (mtime polling plus an hourly forced reload); handlers run in their own goroutines; the goroutine snapshots timestamps under `RLock`; `Close` sets `closed` under the write lock and closes `stopChan` (idempotent, non-blocking).
-- `Reload` holds the write lock while sleeping and loading (P-050). `count` is atomic.
+- Defaults: MinVersion TLS 1.2, NextProtos h2 + http/1.1; `rootsFile` is used for both `RootCAs` and `ClientCAs` on the server; CA files with no valid certificates return an error.
+- Expired certificates fail initial load or reload; a failed reload keeps the previous pair. If the current pair later expires, TLS callbacks return errors and `Keypair` returns nil. Expiry within one hour is logged as a warning.
+- One poll goroutine per reloader (mtime polling plus an hourly forced reload); handlers run in their own goroutines; the goroutine snapshots timestamps under `RLock`; `Close` waits for an active reload, then closes `stopChan`. A second `Close` or `Reload` after `Close` returns an error; the poll goroutine does not log that closed error (`errReloaderClosed`).
+- `Reload` marks itself in progress under the write lock, sleeps and loads outside the lock, then swaps the pair under the lock. A `Reload` that finds another in progress waits on `reloadDone`, then loads again, so a nil return means the files were read after the call started. File mtimes are stat'ed before each load attempt, so a write during the load triggers the next poll; `count` is atomic.
+- `HTTPTransport` clones a supplied `http.Transport`, installs a fixed `TLSClientConfig` with `GetClientCertificate`, and closes idle connections on reload and `Close`. `RoundTrip` never mutates the active TLS config.
+- `pkg/transport.TLSInfo.ServerTLSWithReloader` clears the static `Certificates` slice after installing `GetCertificate` so clients without SNI still receive the current, expiry-checked pair.
 - OCSP staple file: `<certfile-minus-ext>.ocsp`; ignored if expired or unparsable, error if revoked.
 - Test hook: package var `makeTicker`.
 
-Tests: generate certs with `xpki/testca` under `os.TempDir()`; reloader tests rewrite files on a 100ms poll; `tls_test.go` has inline PEM fixtures.
+Tests: generate certs with `xpki/testca`; reloader tests rewrite files on a 100ms poll, and `b02_test.go` covers expiry, lock availability, Close versus Reload, Reload waiting for an active reload, concurrent reloads, no error log for a poll during Close (non-parallel: replaces `makeTicker` and the xlog formatter), stable transport config, and invalid CA bundles; `tls_test.go` has inline PEM fixtures.
 
 ### github.com/effective-security/porto/pkg/transport
 
@@ -545,8 +547,9 @@ Invariants:
 - CRL check only sees `VerifiedChains` (needs ClientAuth ≥ `VerifyClientCertIfGiven`); Revoked → reject; verify error or Unknown → log and allow (fail-open).
 - No handshake deadline (P-054); `Accept` errors on keepalive listeners are stack-wrapped (P-053); keepalive `Accept` panics for non-TCP conns.
 - Reloader interval is 5 minutes; `TLSInfo.Close` stops it.
+- `ServerTLSWithReloader` clears static certificates after installing `GetCertificate`, so handshakes without SNI use the current pair and receive expiry errors.
 
-Tests: `tls_test.go` `init()` builds a CA/intermediate/server chain with `xpki/testca` under `os.TempDir()/test-transport`; listener tests start `restserver` over the listener with a fake verifier.
+Tests: `tls_test.go` `init()` builds a CA/intermediate/server chain with `xpki/testca` under `os.TempDir()/test-transport` and verifies a handshake without SNI uses the callback; listener tests start `restserver` over the listener with a fake verifier.
 
 ### github.com/effective-security/porto/pkg/appinit and pkg/appinit/config
 

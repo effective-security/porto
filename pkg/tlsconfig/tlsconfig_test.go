@@ -22,9 +22,7 @@ func Test_BuildFromFiles(t *testing.T) {
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)
 
-	tmpDir := filepath.Join(os.TempDir(), "tests", "tlsconfig")
-	err = os.MkdirAll(tmpDir, os.ModePerm)
-	require.NoError(t, err)
+	tmpDir := t.TempDir()
 
 	pemFile := filepath.Join(tmpDir, "BuildFromFiles.pem")
 	keyFile := filepath.Join(tmpDir, "BuildFromFiles-key.pem")
@@ -63,8 +61,9 @@ func Test_RoundTripper(t *testing.T) {
 	require.NotNil(t, pemCert)
 	require.NotNil(t, pemKey)
 
-	pemFile := filepath.Join(os.TempDir(), "test-RoundTripper.pem")
-	keyFile := filepath.Join(os.TempDir(), "test-RoundTripper-key.pem")
+	tmpDir := t.TempDir()
+	pemFile := filepath.Join(tmpDir, "test-RoundTripper.pem")
+	keyFile := filepath.Join(tmpDir, "test-RoundTripper-key.pem")
 
 	err = os.WriteFile(pemFile, pemCert, os.ModePerm)
 	require.NoError(t, err)
