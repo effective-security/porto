@@ -189,10 +189,82 @@ providers. Subscribers must treat a message gap as possible and
 re-subscribe after a failed `Subscribe`; `Publish` errors now carry the
 channel name.
 
+## Completed B12 and B13 decision — Redis coordination, secrets and key namespaces
+
+B13 was done with B12: both change `pkg/redisclient` key handling, and the
+cache part shares the Redis fixture and the key helpers.
+
+Lock: `TryLock` returns a random owner token (`crypto/rand.Text`) instead of
+a bool; an empty token means another owner holds the lock for the returned
+remaining time (`PTTL`, read in the same MULTI/EXEC as `SET NX PX`).
+`ReleaseLock(ctx, key, token)` deletes the lock only while it holds the
+token (Lua compare-and-delete) and returns false for an expired or foreign
+lock; an empty token is an error. The signature change is deliberate:
+callers of the old `ReleaseLock(ctx, key)` fail to compile instead of
+silently releasing other owners' locks. Locks written by earlier versions
+hold a timestamp and cannot be released by a token: they expire, except
+those taken with a zero timeout, which never expire and need a manual
+`DEL <prefix>lock:<key>`. Timeouts below 1ms are errors. Under a prefix, a
+lock or rate-limit key whose `..` segments would leave its
+`lock:`/`ratelimit:` sub-namespace (`x/../../data`, `a/../b`) is rejected
+with an error (previously it named a data key); without a prefix keys are
+not cleaned and are used as is.
+
+Rate limiter: the one-execution-per-window contract and the
+`ratelimit:<key>` key stay, but the key is now a string written with
+`SET NX PX`: one call per window wins, denied calls write nothing, the
+check and the write are one command, and the window runs on the server
+clock. The allowed call's window applies until it expires.
+`GetRateLimitRemainingTime` is the key's `PTTL` (0 when none);
+`ratelimit_window:<key>` is no longer written. The key name is kept so that
+mixed versions fail closed during a rolling upgrade: a sorted set left by an
+earlier version denies new callers until it expires, and an earlier
+version's call returns a `WRONGTYPE` error while a new window is active;
+its pipelined `EXPIRE` still resets the window to its own length, so while
+earlier versions keep polling, no caller is allowed. Finish the upgrade
+(or stop the earlier callers) to resume. Windows below 1ms are errors.
+
+Eviction helpers run one Lua script each. A member or field is appended to
+the order list only when it is new, after removing stale entries for it
+(left by `SRem`/`HDel`, an expired collection or an earlier version), so
+re-adds and updates keep their position (FIFO by first insertion, as
+documented) and a stale entry cannot evict a re-added member; eviction
+repeats until the list is within the limit; a wrong-type key fails before
+any write, and errors are returned wrapped. The limit must be positive and
+the two keys must differ. A duplicate written by an earlier version for a
+member that is still in the set can evict it once until it ages out. The server must
+allow Lua scripting.
+
+Close: the root `Close` returns the close error, is idempotent and keeps the
+embedded client, so later commands on the root and its `WithPrefix`
+children fail with `redis.ErrClosed` instead of panicking; children still
+share the connection. Secrets: `NewRedisClient` logs only the address and
+DB, and `redisclient` and `cache.NewRedisProvider` drop the URL from
+`url.Parse` errors.
+
+Key namespaces: keys are neither rejected nor concatenated uncleaned. A key
+is cleaned as a rooted path before it is joined with the prefix
+(`path.Join(prefix, path.Clean("/"+key))`), so `..` cannot climb above the
+prefix while every key whose `..` segments stay below the key's own first
+segment keeps its stored name, including keys with leading, trailing or
+doubled slashes; a key whose `..` climbed above it (such as `../x`, or
+`../app/x` under `/app/`) now resolves inside the prefix. `Key` keeps its signature;
+`WithPrefix` and `NewProxyProvider` clean their prefixes (a proxy prefix
+cannot leave its parent's namespace). `Keys` (all cache providers,
+`redisclient.Keys`/`ScanKeys`) takes a Redis glob relative to the provider,
+cleaned like a key, escapes glob metacharacters in the prefix and returns
+relative keys without a leading slash that round-trip through `Get`:
+cache providers skip names that no key maps to and list the key `""` only
+for an empty pattern. The memory provider ports the Redis matcher (`*` and
+`?` match `/`; ranges compare unsigned bytes, so ranges mixing bytes
+>= 0x80 with ASCII can differ from Redis builds with signed `char`), skips
+expired entries and returns an empty, non-nil slice. Callers that parsed
+prefixed names from memory or proxy `Keys`, or the leading `/` from Redis
+`Keys` under a prefix without a trailing slash, must use the relative keys;
+data written through escaping `..` keys is no longer reachable by them.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B12 — Redis coordination and secrets       | P2       | `pkg/redisclient`: make rate-limit windows atomic and non-starving, make lock release owner-bound, redact connection logging, and fix close and eviction error handling.                                                                                              | P-043, P-045, P-047, P-062, P-063                                           | Rate-limit, lock, and close semantics                 |
-| B13 — Key namespaces                       | P2       | `pkg/redisclient`, `pkg/cache`: prevent `..` from escaping a prefix and align memory/Redis `Keys` prefix and pattern behavior.                                                                                                                                        | P-044, P-064                                                                | Key layout and pattern contract                       |
 | B15 — TLS listener and policy              | P2       | `pkg/transport`: enforce or remove documented `TLSInfo` checks, preserve temporary accept errors, stop caching a half-built server TLS config after an error, and modernize keepalive configuration. Handshake deadlines are in B06.                                  | P-052, P-053, P-074 (transport portion), P-080                              | TLSInfo contract                                      |
 | B16 — HTTP client retry behavior           | P2       | `pkg/retriable`: preserve the default retry limit, make backoff and context cancellation correct, handle 429 and nonce retries, avoid transport type panics/mutation, fix URL parsing, path expansion, and the blocking network wait, and bound error-body reads.     | P-046, P-056, P-057, P-058, P-060, P-061, P-065, P-066 (remaining portions) | Retry and transport behavior                          |
 | B17 — HTTP telemetry and response writer   | P2       | `restserver/telemetry`: use bounded route labels, expose the underlying writer for upgrades/controllers, and guard zero granularity.                                                                                                                                  | P-023, P-024, P-031                                                         | Metric label contract                                 |

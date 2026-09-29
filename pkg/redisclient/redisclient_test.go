@@ -1,12 +1,16 @@
 package redisclient_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/effective-security/porto/pkg/redisclient"
+	"github.com/effective-security/xlog"
 	"github.com/moby/moby/api/types/container"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +56,17 @@ func Test_Redis(t *testing.T) {
 	assert.Equal(t, "/test/test_key", client.Key("test_key"))
 	assert.Equal(t, "/test/test_key", client.Key("/test_key"))
 	assert.Equal(t, "/test/test_key", client.Key("/test_key/"))
+	// ".." cannot leave the prefix (formerly P-044)
+	assert.Equal(t, "/test/other/x", client.Key("../other/x"))
+	assert.Equal(t, "/test/x", client.Key("a/../../x"))
+	assert.Equal(t, "/test", client.Key(".."))
+	assert.Equal(t, "", client.SubKey(client.Key("")))
+	assert.Equal(t, "a/b", client.SubKey(client.Key("/a//b/")))
+	assert.Equal(t, "../x", rootclient.Key("../x"), "no prefix: key unchanged")
+	nested := rootclient.WithPrefix(" /a//b/../c/ ")
+	assert.Equal(t, "/a/c/k", nested.Key("k"))
+	assert.Equal(t, "k", nested.SubKey(nested.Key("k")))
+	assert.Equal(t, "/k", rootclient.WithPrefix("a/..").Key("k"))
 
 	t.Run("string", func(t *testing.T) {
 		ok, err := client.Exists(ctx, "test_key_str")
@@ -325,204 +340,533 @@ func Test_Redis(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("DistributedLock", func(t *testing.T) {
-		// Test TryLock - should acquire lock successfully
-		acquired, remaining, err := client.TryLock(ctx, "test_lock", 5*time.Second)
+	t.Run("SetWithEvictionReAdd", func(t *testing.T) {
+		const set, list = "evict_readd_set", "evict_readd_list"
+		t.Cleanup(func() { cleanup(ctx, t, client, set, list) })
+		// re-adding "a" keeps its position, so "a" is evicted first and the
+		// set keeps the three newest distinct members (formerly P-063)
+		for _, m := range []string{"a", "b", "c", "a", "d"} {
+			require.NoError(t, client.SAddWithEviction(ctx, set, list, 3, m))
+		}
+		members, err := client.SMembers(ctx, set)
 		require.NoError(t, err)
-		assert.True(t, acquired)
+		assert.ElementsMatch(t, []string{"b", "c", "d"}, members)
+		order, err := client.LRange(ctx, list, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"b", "c", "d"}, order)
+
+		// a lower limit evicts down to it in one call
+		require.NoError(t, client.SAddWithEviction(ctx, set, list, 1, "e"))
+		members, err = client.SMembers(ctx, set)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"e"}, members)
+		order, err = client.LRange(ctx, list, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"e"}, order)
+	})
+
+	t.Run("SetWithEvictionStaleEntries", func(t *testing.T) {
+		const set, list = "evict_stale_set", "evict_stale_list"
+		t.Cleanup(func() { cleanup(ctx, t, client, set, list) })
+		for _, m := range []string{"a", "b", "c"} {
+			require.NoError(t, client.SAddWithEviction(ctx, set, list, 3, m))
+		}
+		// "a" removed from the set only, and a duplicate "b" as written by
+		// earlier versions: neither stale entry may evict the re-added member
+		require.NoError(t, client.SRem(ctx, set, "a"))
+		require.NoError(t, client.RPush(ctx, list, "b"))
+		require.NoError(t, client.SRem(ctx, set, "b"))
+
+		require.NoError(t, client.SAddWithEviction(ctx, set, list, 3, "a"))
+		require.NoError(t, client.SAddWithEviction(ctx, set, list, 3, "b"))
+		members, err := client.SMembers(ctx, set)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"a", "b", "c"}, members)
+		order, err := client.LRange(ctx, list, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"c", "a", "b"}, order)
+
+		// the same for a hash whose field was deleted directly
+		const hash, hlist = "evict_stale_hash", "evict_stale_hlist"
+		t.Cleanup(func() { cleanup(ctx, t, client, hash, hlist) })
+		for _, f := range []string{"f1", "f2"} {
+			require.NoError(t, client.HSetWithEviction(ctx, hash, hlist, 2, f, "v"))
+		}
+		require.NoError(t, client.HDel(ctx, hash, "f1"))
+		require.NoError(t, client.HSetWithEviction(ctx, hash, hlist, 2, "f1", "v1"))
+		vals, err := client.HGetAll(ctx, hash)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"f1": "v1", "f2": "v"}, vals)
+		order, err = client.LRange(ctx, hlist, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"f2", "f1"}, order)
+	})
+
+	t.Run("SetWithEvictionErrors", func(t *testing.T) {
+		const set, list, str = "evict_err_set", "evict_err_list", "evict_err_str"
+		t.Cleanup(func() { cleanup(ctx, t, client, set, list, str) })
+
+		err := client.SAddWithEviction(ctx, set, list, 0, "m")
+		require.EqualError(t, err, "eviction limit for evict_err_set must be positive: 0")
+		err = client.SAddWithEviction(ctx, set, "/"+set+"/", 3, "m")
+		require.EqualError(t, err, "eviction list key must differ from evict_err_set")
+
+		// a key of the wrong type fails before anything is written
+		require.NoError(t, client.Set(ctx, str, "x", time.Minute))
+		err = client.SAddWithEviction(ctx, set, str, 3, "m")
+		require.ErrorContains(t, err, "unable to add member to bounded set evict_err_set")
+		require.ErrorContains(t, err, "WRONGTYPE")
+		ok, err := client.Exists(ctx, set)
+		require.NoError(t, err)
+		assert.False(t, ok, "set written before the list type error")
+
+		err = client.SAddWithEviction(ctx, str, list, 3, "m")
+		require.ErrorContains(t, err, "WRONGTYPE")
+		ok, err = client.Exists(ctx, list)
+		require.NoError(t, err)
+		assert.False(t, ok, "list written before the set type error")
+	})
+
+	t.Run("HashWithEvictionUpdate", func(t *testing.T) {
+		const hash, list = "evict_upd_hash", "evict_upd_list"
+		t.Cleanup(func() { cleanup(ctx, t, client, hash, list) })
+		// updating f1 keeps its position, so f1 is evicted first
+		for _, kv := range [][2]string{{"f1", "v1"}, {"f2", "v2"}, {"f1", "v1b"}, {"f3", "v3"}} {
+			require.NoError(t, client.HSetWithEviction(ctx, hash, list, 2, kv[0], kv[1]))
+		}
+		vals, err := client.HGetAll(ctx, hash)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"f2": "v2", "f3": "v3"}, vals)
+		order, err := client.LRange(ctx, list, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"f2", "f3"}, order)
+
+		// values are encoded as by HSet
+		require.NoError(t, client.HSetWithEviction(ctx, hash, list, 2, "f4", 42))
+		val, err := client.HGet(ctx, hash, "f4")
+		require.NoError(t, err)
+		assert.Equal(t, "42", val)
+	})
+
+	t.Run("HashWithEvictionErrors", func(t *testing.T) {
+		const hash, list, str = "evict_err_hash", "evict_err_hlist", "evict_err_hstr"
+		t.Cleanup(func() { cleanup(ctx, t, client, hash, list, str) })
+
+		err := client.HSetWithEviction(ctx, hash, list, -1, "f", "v")
+		require.EqualError(t, err, "eviction limit for evict_err_hash must be positive: -1")
+		err = client.HSetWithEviction(ctx, hash, hash, 3, "f", "v")
+		require.EqualError(t, err, "eviction list key must differ from evict_err_hash")
+
+		require.NoError(t, client.Set(ctx, str, "x", time.Minute))
+		err = client.HSetWithEviction(ctx, hash, str, 3, "f", "v")
+		require.ErrorContains(t, err, "unable to set field f in bounded hash evict_err_hash")
+		require.ErrorContains(t, err, "WRONGTYPE")
+		ok, err := client.Exists(ctx, hash)
+		require.NoError(t, err)
+		assert.False(t, ok, "hash written before the list type error")
+	})
+
+	t.Run("KeyNamespace", func(t *testing.T) {
+		other := rootclient.WithPrefix("other")
+		t.Cleanup(func() { cleanup(ctx, t, client, "other/x") })
+
+		// a ".." key stays under the client prefix (formerly P-044)
+		require.NoError(t, client.Set(ctx, "../other/x", "v", time.Minute))
+		ok, err := other.Exists(ctx, "x")
+		require.NoError(t, err)
+		assert.False(t, ok, "key escaped into the sibling prefix")
+		var val string
+		require.NoError(t, client.Get(ctx, "other/x", &val))
+		assert.Equal(t, "v", val)
+
+		// glob metacharacters in the prefix match literally: "/m*[1]/*"
+		// unescaped would also match the sibling "/mX1/"
+		meta := rootclient.WithPrefix("m*[1]")
+		sibling := rootclient.WithPrefix("mX1")
+		t.Cleanup(func() {
+			cleanup(ctx, t, meta, "k1", "k2")
+			cleanup(ctx, t, sibling, "k3")
+		})
+		require.NoError(t, meta.Set(ctx, "k1", "v", time.Minute))
+		require.NoError(t, meta.Set(ctx, "k2", "v", time.Minute))
+		require.NoError(t, sibling.Set(ctx, "k3", "v", time.Minute))
+
+		keys, err := meta.Keys(ctx, "*")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"k1", "k2"}, keys)
+		keys, err = meta.ScanKeys(ctx, "k*", 0)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"k1", "k2"}, keys)
+		keys, err = meta.Keys(ctx, "../*1")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"k1"}, keys)
+		keys, err = sibling.Keys(ctx, "*")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"k3"}, keys)
+	})
+
+	t.Run("DistributedLock", func(t *testing.T) {
+		token, remaining, err := client.TryLock(ctx, "test_lock", 5*time.Second)
+		require.NoError(t, err)
+		assert.NotEmpty(t, token)
 		assert.Equal(t, time.Duration(0), remaining)
 
-		// Test IsLocked - should return true
 		locked, err := client.IsLocked(ctx, "test_lock")
 		require.NoError(t, err)
 		assert.True(t, locked)
 
-		// Test TryLock again - should fail (lock already exists)
-		acquired2, remaining2, err := client.TryLock(ctx, "test_lock", 5*time.Second)
+		// held: no token, remaining time of the holder
+		token2, remaining2, err := client.TryLock(ctx, "test_lock", 5*time.Second)
 		require.NoError(t, err)
-		assert.False(t, acquired2)
-		assert.True(t, remaining2 > 0)
+		assert.Empty(t, token2)
+		assert.Greater(t, remaining2, time.Duration(0))
+		assert.LessOrEqual(t, remaining2, 5*time.Second)
 
-		// Test ReleaseLock - should release successfully
-		released, err := client.ReleaseLock(ctx, "test_lock")
+		// another owner's token does not release the lock (formerly P-047)
+		released, err := client.ReleaseLock(ctx, "test_lock", "not-the-owner")
+		require.NoError(t, err)
+		assert.False(t, released)
+		locked, err = client.IsLocked(ctx, "test_lock")
+		require.NoError(t, err)
+		assert.True(t, locked)
+
+		released, err = client.ReleaseLock(ctx, "test_lock", token)
 		require.NoError(t, err)
 		assert.True(t, released)
-
-		// Test IsLocked after release - should return false
 		locked, err = client.IsLocked(ctx, "test_lock")
 		require.NoError(t, err)
 		assert.False(t, locked)
 
-		// Test ReleaseLock on non-existent lock - should return false
-		released, err = client.ReleaseLock(ctx, "test_lock")
+		// released already
+		released, err = client.ReleaseLock(ctx, "test_lock", token)
 		require.NoError(t, err)
 		assert.False(t, released)
 
-		// Test lock expiration
-		acquired, remaining, err = client.TryLock(ctx, "expire_lock", 1*time.Second)
+		// a new acquisition gets a new token
+		token3, _, err := client.TryLock(ctx, "test_lock", 5*time.Second)
 		require.NoError(t, err)
-		assert.True(t, acquired)
-		assert.Equal(t, time.Duration(0), remaining)
+		assert.NotEmpty(t, token3)
+		assert.NotEqual(t, token, token3)
+		released, err = client.ReleaseLock(ctx, "test_lock", token3)
+		require.NoError(t, err)
+		assert.True(t, released)
+	})
 
-		// Wait for lock to expire
-		time.Sleep(2 * time.Second)
+	t.Run("LockExpiredOwner", func(t *testing.T) {
+		// the first owner's lock expires and a second owner acquires it;
+		// the first owner's late release leaves it alone (formerly P-047)
+		first, _, err := client.TryLock(ctx, "expire_lock", 100*time.Millisecond)
+		require.NoError(t, err)
+		require.NotEmpty(t, first)
+		require.Eventually(t, func() bool {
+			locked, err := client.IsLocked(ctx, "expire_lock")
+			return err == nil && !locked
+		}, 5*time.Second, 20*time.Millisecond)
 
-		// Lock should have expired
-		locked, err = client.IsLocked(ctx, "expire_lock")
+		second, _, err := client.TryLock(ctx, "expire_lock", 5*time.Second)
+		require.NoError(t, err)
+		require.NotEmpty(t, second)
+
+		released, err := client.ReleaseLock(ctx, "expire_lock", first)
+		require.NoError(t, err)
+		assert.False(t, released)
+		locked, err := client.IsLocked(ctx, "expire_lock")
+		require.NoError(t, err)
+		assert.True(t, locked)
+
+		released, err = client.ReleaseLock(ctx, "expire_lock", second)
+		require.NoError(t, err)
+		assert.True(t, released)
+	})
+
+	t.Run("LockArguments", func(t *testing.T) {
+		for _, timeout := range []time.Duration{0, -time.Second, 500 * time.Microsecond} {
+			token, remaining, err := client.TryLock(ctx, "arg_lock", timeout)
+			require.EqualError(t, err, fmt.Sprintf("lock timeout for key arg_lock must be at least 1ms: %s", timeout))
+			assert.Empty(t, token)
+			assert.Equal(t, time.Duration(0), remaining)
+		}
+		locked, err := client.IsLocked(ctx, "arg_lock")
 		require.NoError(t, err)
 		assert.False(t, locked)
 
-		// Should be able to acquire lock again after expiration
-		acquired, remaining, err = client.TryLock(ctx, "expire_lock", 5*time.Second)
-		require.NoError(t, err)
-		assert.True(t, acquired)
+		released, err := client.ReleaseLock(ctx, "arg_lock", "")
+		require.EqualError(t, err, "empty lock token for key: arg_lock")
+		assert.False(t, released)
+	})
+
+	t.Run("CoordinationKeyNamespace", func(t *testing.T) {
+		// ".." cannot turn a lock or rate-limit key into a data key
+		require.NoError(t, client.Set(ctx, "victim", "v", time.Minute))
+		t.Cleanup(func() { cleanup(ctx, t, client, "victim") })
+		const escaping = "x/../../victim"
+
+		token, _, err := client.TryLock(ctx, escaping, time.Second)
+		require.EqualError(t, err, `invalid key "x/../../victim": leaves the "lock" namespace`)
+		assert.Empty(t, token)
+		locked, err := client.IsLocked(ctx, escaping)
+		require.EqualError(t, err, `invalid key "x/../../victim": leaves the "lock" namespace`)
+		assert.False(t, locked)
+		released, err := client.ReleaseLock(ctx, escaping, "token")
+		require.EqualError(t, err, `invalid key "x/../../victim": leaves the "lock" namespace`)
+		assert.False(t, released)
+
+		allowed, _, err := client.TryAcquireRateLimit(ctx, escaping, time.Second)
+		require.EqualError(t, err, `invalid key "x/../../victim": leaves the "ratelimit" namespace`)
+		assert.False(t, allowed)
+		remaining, err := client.GetRateLimitRemainingTime(ctx, escaping)
+		require.EqualError(t, err, `invalid key "x/../../victim": leaves the "ratelimit" namespace`)
 		assert.Equal(t, time.Duration(0), remaining)
 
-		// Cleanup
-		client.ReleaseLock(ctx, "expire_lock")
+		var val string
+		require.NoError(t, client.Get(ctx, "victim", &val))
+		assert.Equal(t, "v", val)
+
+		// without a prefix the key is not cleaned and cannot leave
+		token, _, err = rootclient.TryLock(ctx, escaping, time.Second)
+		require.NoError(t, err)
+		require.NotEmpty(t, token)
+		exists, err := rootclient.Exists(ctx, "lock:"+escaping)
+		require.NoError(t, err)
+		assert.True(t, exists)
+		released, err = rootclient.ReleaseLock(ctx, escaping, token)
+		require.NoError(t, err)
+		assert.True(t, released)
+
+		// ".." inside the lock namespace is fine
+		token, _, err = client.TryLock(ctx, "a/b/../c", time.Second)
+		require.NoError(t, err)
+		require.NotEmpty(t, token)
+		locked, err = client.IsLocked(ctx, "a/c")
+		require.NoError(t, err)
+		assert.True(t, locked)
+		released, err = client.ReleaseLock(ctx, "a/c", token)
+		require.NoError(t, err)
+		assert.True(t, released)
 	})
 
 	t.Run("RateLimiter", func(t *testing.T) {
-		// Test TryAcquireRateLimit - should acquire rate limit slot successfully
-		allowed, remaining, err := client.TryAcquireRateLimit(ctx, "test_rate_limit", 5*time.Second)
+		const window = time.Second
+		allowed, remaining, err := client.TryAcquireRateLimit(ctx, "test_rate_limit", window)
 		require.NoError(t, err)
 		assert.True(t, allowed)
 		assert.Equal(t, time.Duration(0), remaining)
 
-		// Test TryAcquireRateLimit again immediately - should fail (rate limit exceeded)
-		allowed2, remaining2, err := client.TryAcquireRateLimit(ctx, "test_rate_limit", 5*time.Second)
+		allowed, remaining, err = client.TryAcquireRateLimit(ctx, "test_rate_limit", window)
 		require.NoError(t, err)
-		assert.False(t, allowed2)
-		assert.True(t, remaining2 > 0)
-		assert.True(t, remaining2 <= 5*time.Second)
+		assert.False(t, allowed)
+		assert.Greater(t, remaining, time.Duration(0))
+		assert.LessOrEqual(t, remaining, window)
 
-		// Test GetRateLimitRemainingTime - should return remaining time
-		remaining3, err := client.GetRateLimitRemainingTime(ctx, "test_rate_limit")
+		remaining, err = client.GetRateLimitRemainingTime(ctx, "test_rate_limit")
 		require.NoError(t, err)
-		assert.True(t, remaining3 > 0)
-		assert.True(t, remaining3 <= 5*time.Second)
+		assert.Greater(t, remaining, time.Duration(0))
+		assert.LessOrEqual(t, remaining, window)
 
-		// Wait for rate limit to expire
-		time.Sleep(6 * time.Second)
-
-		// Should be able to acquire rate limit slot again after expiration
-		allowed3, remaining4, err := client.TryAcquireRateLimit(ctx, "test_rate_limit", 5*time.Second)
+		// the window ends on the server
+		require.Eventually(t, func() bool {
+			remaining, err := client.GetRateLimitRemainingTime(ctx, "test_rate_limit")
+			return err == nil && remaining == 0
+		}, 5*time.Second, 20*time.Millisecond)
+		allowed, remaining, err = client.TryAcquireRateLimit(ctx, "test_rate_limit", window)
 		require.NoError(t, err)
-		assert.True(t, allowed3)
-		assert.Equal(t, time.Duration(0), remaining4)
+		assert.True(t, allowed)
+		assert.Equal(t, time.Duration(0), remaining)
 
-		// Test GetRateLimitRemainingTime on non-existent rate limit - should return 0
 		remaining, err = client.GetRateLimitRemainingTime(ctx, "non_existent_rate_limit")
 		require.NoError(t, err)
 		assert.Equal(t, time.Duration(0), remaining)
+
+		for _, w := range []time.Duration{0, -time.Second, time.Microsecond} {
+			allowed, remaining, err = client.TryAcquireRateLimit(ctx, "arg_rate_limit", w)
+			require.EqualError(t, err, fmt.Sprintf("rate limit window for key arg_rate_limit must be at least 1ms: %s", w))
+			assert.False(t, allowed)
+			assert.Equal(t, time.Duration(0), remaining)
+		}
+	})
+
+	t.Run("RateLimiterPolling", func(t *testing.T) {
+		// callers polling faster than the window, from several goroutines,
+		// are allowed once per window: denied polls do not extend the window
+		// and two callers never win the same window (formerly P-043)
+		const (
+			window  = 200 * time.Millisecond
+			pollers = 4
+			polling = 1100 * time.Millisecond
+		)
+		// call is the client-clock span of an allowed call; the server
+		// started its window somewhere inside it
+		type call struct{ start, end time.Time }
+		var (
+			mu      sync.Mutex
+			allowed []call
+			errs    = make(chan error, pollers)
+			wg      sync.WaitGroup
+		)
+		deadline := time.Now().Add(polling)
+		for range pollers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for time.Now().Before(deadline) {
+					start := time.Now()
+					ok, _, err := client.TryAcquireRateLimit(ctx, "polling_rate_limit", window)
+					if err != nil {
+						errs <- err
+						return
+					}
+					if ok {
+						mu.Lock()
+						allowed = append(allowed, call{start: start, end: time.Now()})
+						mu.Unlock()
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
+
+		slices.SortFunc(allowed, func(a, b call) int { return a.start.Compare(b.start) })
+		// about polling/window windows start; before the fix only the first did
+		assert.GreaterOrEqual(t, len(allowed), 3)
+		for i := 1; i < len(allowed); i++ {
+			// windows start at least window apart on the server and each
+			// start lies inside its call's span; the calls may have been
+			// served in either order
+			prev, cur := allowed[i-1], allowed[i]
+			assert.GreaterOrEqual(t, max(cur.end.Sub(prev.start), prev.end.Sub(cur.start)), window,
+				"two calls allowed within one window")
+		}
+	})
+
+	t.Run("RateLimiterLegacyWindow", func(t *testing.T) {
+		// a window written by an earlier version (a sorted set) is honored
+		key := client.Key("ratelimit:legacy_rate_limit")
+		require.NoError(t, client.Client.ZAdd(ctx, key, redis.Z{Score: 1, Member: 1}).Err())
+		require.NoError(t, client.Client.Expire(ctx, key, 5*time.Second).Err())
+		t.Cleanup(func() { cleanup(ctx, t, client, "ratelimit:legacy_rate_limit") })
+
+		allowed, remaining, err := client.TryAcquireRateLimit(ctx, "legacy_rate_limit", time.Second)
+		require.NoError(t, err)
+		assert.False(t, allowed)
+		assert.Greater(t, remaining, time.Second)
+		assert.LessOrEqual(t, remaining, 5*time.Second)
 	})
 
 	t.Run("ConcurrentLocking", func(t *testing.T) {
-		// Test concurrent lock acquisition
 		const numGoroutines = 10
-		results := make(chan bool, numGoroutines)
-
-		for i := 0; i < numGoroutines; i++ {
+		type result struct {
+			token string
+			err   error
+		}
+		results := make(chan result, numGoroutines)
+		for range numGoroutines {
 			go func() {
-				acquired, _, err := client.TryLock(ctx, "concurrent_lock", 5*time.Second)
-				require.NoError(t, err)
-				results <- acquired
+				token, _, err := client.TryLock(ctx, "concurrent_lock", 5*time.Second)
+				results <- result{token: token, err: err}
 			}()
 		}
 
-		// Collect results
-		acquiredCount := 0
-		for i := 0; i < numGoroutines; i++ {
-			if <-results {
-				acquiredCount++
+		var tokens []string
+		for range numGoroutines {
+			r := <-results
+			require.NoError(t, r.err)
+			if r.token != "" {
+				tokens = append(tokens, r.token)
 			}
 		}
+		// only one acquired the lock
+		require.Len(t, tokens, 1)
 
-		// Only one should have acquired the lock
-		assert.Equal(t, 1, acquiredCount)
-
-		// Cleanup
-		client.ReleaseLock(ctx, "concurrent_lock")
+		released, err := client.ReleaseLock(ctx, "concurrent_lock", tokens[0])
+		require.NoError(t, err)
+		assert.True(t, released)
 	})
 
 	t.Run("ConcurrentRateLimiting", func(t *testing.T) {
-		// Test concurrent rate limit acquisition
 		const numGoroutines = 10
-		results := make(chan bool, numGoroutines)
-
-		for i := 0; i < numGoroutines; i++ {
+		type result struct {
+			allowed bool
+			err     error
+		}
+		results := make(chan result, numGoroutines)
+		for range numGoroutines {
 			go func() {
 				allowed, _, err := client.TryAcquireRateLimit(ctx, "concurrent_rate_limit", 5*time.Second)
-				require.NoError(t, err)
-				results <- allowed
+				results <- result{allowed: allowed, err: err}
 			}()
 		}
 
-		// Collect results
 		allowedCount := 0
-		for i := 0; i < numGoroutines; i++ {
-			if <-results {
+		for range numGoroutines {
+			r := <-results
+			require.NoError(t, r.err)
+			if r.allowed {
 				allowedCount++
 			}
 		}
-
-		// Only one should be allowed
+		// only one is allowed
 		assert.Equal(t, 1, allowedCount)
 	})
 
 	t.Run("KeyPrefixing", func(t *testing.T) {
-		// Test that keys are properly prefixed
-		acquired, remaining, err := client.TryLock(ctx, "prefix_test", 5*time.Second)
+		token, _, err := client.TryLock(ctx, "prefix_test", 5*time.Second)
 		require.NoError(t, err)
-		assert.True(t, acquired)
-		assert.Equal(t, time.Duration(0), remaining)
+		require.NotEmpty(t, token)
 
-		// Check that the key exists with prefix
+		// the lock key is prefixed
 		exists, err := client.Exists(ctx, "lock:prefix_test")
 		require.NoError(t, err)
 		assert.True(t, exists)
+		exists, err = rootclient.Exists(ctx, "/test/lock:prefix_test")
+		require.NoError(t, err)
+		assert.True(t, exists)
 
-		// Test rate limiting with prefix
-		allowed, remaining, err := client.TryAcquireRateLimit(ctx, "prefix_rate_test", 5*time.Second)
+		allowed, _, err := client.TryAcquireRateLimit(ctx, "prefix_rate_test", 5*time.Second)
 		require.NoError(t, err)
 		assert.True(t, allowed)
-		assert.Equal(t, time.Duration(0), remaining)
 
-		// Check that the rate limit key exists with prefix
+		// the rate limit key is prefixed
 		exists, err = client.Exists(ctx, "ratelimit:prefix_rate_test")
 		require.NoError(t, err)
 		assert.True(t, exists)
 
-		// Cleanup
-		client.ReleaseLock(ctx, "prefix_test")
+		released, err := client.ReleaseLock(ctx, "prefix_test", token)
+		require.NoError(t, err)
+		assert.True(t, released)
 	})
 
 	t.Run("DifferentKeys", func(t *testing.T) {
-		// Test that different keys don't interfere with each other
-
-		// Acquire locks on different keys
-		acquired1, remaining1, err := client.TryLock(ctx, "key1", 5*time.Second)
+		token1, remaining1, err := client.TryLock(ctx, "key1", 5*time.Second)
 		require.NoError(t, err)
-		assert.True(t, acquired1)
+		assert.NotEmpty(t, token1)
 		assert.Equal(t, time.Duration(0), remaining1)
 
-		acquired2, remaining2, err := client.TryLock(ctx, "key2", 5*time.Second)
+		token2, remaining2, err := client.TryLock(ctx, "key2", 5*time.Second)
 		require.NoError(t, err)
-		assert.True(t, acquired2)
+		assert.NotEmpty(t, token2)
 		assert.Equal(t, time.Duration(0), remaining2)
 
-		// Try to acquire the same keys again - should fail
-		acquired1Again, remaining1Again, err := client.TryLock(ctx, "key1", 5*time.Second)
+		// the same keys are held
+		again, remaining, err := client.TryLock(ctx, "key1", 5*time.Second)
 		require.NoError(t, err)
-		assert.False(t, acquired1Again)
-		assert.True(t, remaining1Again > 0)
+		assert.Empty(t, again)
+		assert.Greater(t, remaining, time.Duration(0))
 
-		acquired2Again, remaining2Again, err := client.TryLock(ctx, "key2", 5*time.Second)
+		again, remaining, err = client.TryLock(ctx, "key2", 5*time.Second)
 		require.NoError(t, err)
-		assert.False(t, acquired2Again)
-		assert.True(t, remaining2Again > 0)
+		assert.Empty(t, again)
+		assert.Greater(t, remaining, time.Duration(0))
 
-		// Test rate limiting on different keys
+		// a token releases only its own key
+		released, err := client.ReleaseLock(ctx, "key2", token1)
+		require.NoError(t, err)
+		assert.False(t, released)
+
 		allowed1, remaining1, err := client.TryAcquireRateLimit(ctx, "rate_key1", 5*time.Second)
 		require.NoError(t, err)
 		assert.True(t, allowed1)
@@ -533,19 +877,94 @@ func Test_Redis(t *testing.T) {
 		assert.True(t, allowed2)
 		assert.Equal(t, time.Duration(0), remaining2)
 
-		// Try to acquire the same rate limits again - should fail
-		allowed1Again, remaining1Again, err := client.TryAcquireRateLimit(ctx, "rate_key1", 5*time.Second)
+		allowed1, remaining1, err = client.TryAcquireRateLimit(ctx, "rate_key1", 5*time.Second)
 		require.NoError(t, err)
-		assert.False(t, allowed1Again)
-		assert.True(t, remaining1Again > 0)
+		assert.False(t, allowed1)
+		assert.Greater(t, remaining1, time.Duration(0))
 
-		allowed2Again, remaining2Again, err := client.TryAcquireRateLimit(ctx, "rate_key2", 5*time.Second)
+		allowed2, remaining2, err = client.TryAcquireRateLimit(ctx, "rate_key2", 5*time.Second)
 		require.NoError(t, err)
-		assert.False(t, allowed2Again)
-		assert.True(t, remaining2Again > 0)
+		assert.False(t, allowed2)
+		assert.Greater(t, remaining2, time.Duration(0))
 
-		// Cleanup
-		client.ReleaseLock(ctx, "key1")
-		client.ReleaseLock(ctx, "key2")
+		released, err = client.ReleaseLock(ctx, "key1", token1)
+		require.NoError(t, err)
+		assert.True(t, released)
+		released, err = client.ReleaseLock(ctx, "key2", token2)
+		require.NoError(t, err)
+		assert.True(t, released)
 	})
+}
+
+// cleanup deletes keys created by a subtest.
+func cleanup(ctx context.Context, t *testing.T, c *redisclient.RedisClient, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		assert.NoError(t, c.Del(ctx, key))
+	}
+}
+
+// unreachableServer is a Redis URL nothing listens on; clients connect
+// lazily, so tests that never send a command need no server.
+const unreachableServer = "redis://127.0.0.1:1/0"
+
+func TestClose(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	root, err := redisclient.New(&redisclient.Config{Server: unreachableServer})
+	require.NoError(t, err)
+	child := root.WithPrefix("child")
+
+	assert.NoError(t, child.Close(), "a child does not own the connection")
+	require.NoError(t, root.Close())
+	// Close is idempotent and keeps the client, so later calls on the root
+	// and its children fail instead of panicking (formerly P-062)
+	assert.NoError(t, root.Close())
+	assert.NotNil(t, root.RawClient())
+
+	var val string
+	err = root.Get(ctx, "k", &val)
+	assert.ErrorIs(t, err, redis.ErrClosed)
+	err = child.Get(ctx, "k", &val)
+	assert.ErrorIs(t, err, redis.ErrClosed)
+
+	// a client from NewWithClient leaves the connection to its owner
+	raw, err := redisclient.NewRedisClient(&redisclient.Config{Server: unreachableServer})
+	require.NoError(t, err)
+	wrapped, err := redisclient.NewWithClient(raw)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Close())
+	require.NoError(t, raw.Close(), "the owner's close is the first")
+}
+
+func TestConfigSecrets(t *testing.T) {
+	// not parallel: installs a log formatter
+	const password = "s3cret-pass"
+
+	var logs bytes.Buffer
+	removeFormatter := xlog.InstallFormatter(xlog.NewStringFormatter(&logs))
+	t.Cleanup(removeFormatter)
+
+	// only the address is logged (formerly P-045)
+	rc, err := redisclient.New(&redisclient.Config{
+		Server: "redis://user:" + password + "@127.0.0.1:1/2",
+	})
+	require.NoError(t, err)
+	require.NoError(t, rc.Close())
+
+	// a malformed URL is reported without the URL
+	_, err = redisclient.New(&redisclient.Config{
+		Server: "redis://user:" + password + "@127.0.0.1:bad/0",
+	})
+	require.Error(t, err)
+	assert.Equal(t, `invalid redis address: invalid port ":bad" after host`, err.Error())
+
+	_, err = redisclient.New(&redisclient.Config{Server: "http://127.0.0.1"})
+	require.EqualError(t, err, "invalid redis address: redis: invalid URL scheme: http")
+
+	// removal waits for in-flight log calls, so logs is safe to read after it
+	removeFormatter()
+	assert.Contains(t, logs.String(), "127.0.0.1:1")
+	assert.NotContains(t, logs.String(), password)
 }

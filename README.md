@@ -292,7 +292,14 @@ var u User
 if err := c.Get(ctx, "user:1", &u); redisclient.IsNotFoundError(err) {
 	// miss
 }
-ok, ttl, err := c.TryLock(ctx, "job", 30*time.Second)
+token, remaining, err := c.TryLock(ctx, "job", 30*time.Second)
+if err != nil {
+	return err
+}
+if token == "" {
+	return fmt.Errorf("job is locked for %s", remaining)
+}
+defer c.ReleaseLock(ctx, "job", token) // releases only while this token holds the lock
 ```
 
 ```go

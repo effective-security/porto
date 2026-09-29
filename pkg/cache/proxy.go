@@ -3,28 +3,33 @@ package cache
 import (
 	"context"
 	"path"
+	"strings"
 	"time"
 )
 
 type proxyProv struct {
-	prefix string
-	prov   Provider
+	ns   namespace
+	prov Provider
 }
 
-// NewProxyProvider returns a Provider that prefixes every key with prefix
-// and delegates to prov. Its Close is a no-op (the parent owns the
-// connection) and Publish/Subscribe pass channels through unprefixed.
+// NewProxyProvider returns a Provider that stores every key under prefix in
+// prov, which cleans the combined key again; like a key, prefix cannot
+// leave prov's namespace. Keys strips prefix again. Its Close is a no-op
+// (the parent owns the connection) and Publish/Subscribe pass channels
+// through unprefixed.
 func NewProxyProvider(prefix string, prov Provider) Provider {
 	p := &proxyProv{
-		prefix: prefix,
-		prov:   prov,
+		// prov lists its keys without a leading slash, so the proxy
+		// prefix is kept in that form: "/a/" and "../a" become "a"
+		ns:   newNamespace(strings.TrimPrefix(path.Clean("/"+prefix), "/")),
+		prov: prov,
 	}
 
 	return p
 }
 
 func (p *proxyProv) keyName(key string) string {
-	return path.Join(p.prefix, key)
+	return p.ns.key(key)
 }
 
 // Close closes the client, releasing any open resources.
@@ -66,10 +71,18 @@ func (p *proxyProv) CleanExpired(ctx context.Context) {
 	p.prov.CleanExpired(ctx)
 }
 
-// Keys returns list of keys.
+// Keys returns the keys, relative to the proxy, that match the Redis glob
+// pattern in prov.
 // This method should be used mostly for testing, as in prod many keys maybe returned
 func (p *proxyProv) Keys(ctx context.Context, pattern string) ([]string, error) {
-	return p.prov.Keys(ctx, p.keyName(pattern))
+	list, err := p.prov.Keys(ctx, p.ns.pattern(pattern))
+	if err != nil {
+		return nil, err
+	}
+	for i, key := range list {
+		list[i] = p.ns.rel(key)
+	}
+	return list, nil
 }
 
 // Subscribe subscribes to channel

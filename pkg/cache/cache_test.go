@@ -205,6 +205,182 @@ func TestProvider(t *testing.T) {
 		assert.True(t, pr.IsLocal())
 		provTest(t, pr, root)
 	})
+
+	t.Run("keys parity", func(t *testing.T) {
+		// glob metacharacters in the prefix must match literally: unescaped,
+		// the pattern for "ns*[1]?" would also list the sibling "nsX1Y"
+		prefix := root + "/ns*[1]?"
+		r, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   host,
+			Password: "redis",
+		}, prefix)
+		require.NoError(t, err)
+		sibling, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   host,
+			Password: "redis",
+		}, root+"/nsX1Y")
+		require.NoError(t, err)
+		defer func() {
+			assert.NoError(t, sibling.Delete(ctx, "a"))
+			assert.NoError(t, r.Close())
+			assert.NoError(t, sibling.Close())
+		}()
+		require.NoError(t, sibling.Set(ctx, "a", "v", time.Minute))
+
+		keysParity(t, r, cache.NewMemoryProvider(prefix))
+		keysParity(t, cache.NewProxyProvider("/p[x]/", r), cache.NewProxyProvider("p[x]", cache.NewMemoryProvider(prefix)))
+	})
+
+	t.Run("redis namespace", func(t *testing.T) {
+		newProv := func(prefix string) cache.Provider {
+			p, err := cache.NewRedisProvider(cache.RedisConfig{
+				Server:   host,
+				Password: "redis",
+			}, root+prefix)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				assert.NoError(t, p.Close())
+			})
+			return p
+		}
+		namespaceTest(t, newProv("/tenant-a"), newProv("/tenant-b"))
+	})
+
+	t.Run("redis dot prefix", func(t *testing.T) {
+		// a prefix that cleans to "." stores relative names; its Keys must
+		// not list the names of the root provider, which it cannot read
+		newProv := func(prefix string) cache.Provider {
+			p, err := cache.NewRedisProvider(cache.RedisConfig{
+				Server:   host,
+				Password: "redis",
+			}, prefix)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				assert.NoError(t, p.Close())
+			})
+			return p
+		}
+		dot, slash := newProv("."), newProv("")
+		rel, abs := root+"-dot", root+"-slash"
+		require.NoError(t, dot.Set(ctx, rel, "v", time.Minute))
+		require.NoError(t, slash.Set(ctx, abs, "v", time.Minute))
+		t.Cleanup(func() {
+			assert.NoError(t, dot.Delete(ctx, rel))
+			assert.NoError(t, slash.Delete(ctx, abs))
+		})
+
+		// "*" also matches "/<abs>" in Redis; other subtests' relative
+		// names may be listed too
+		keys, err := dot.Keys(ctx, "*")
+		require.NoError(t, err)
+		assert.Contains(t, keys, rel)
+		for _, key := range keys {
+			assert.False(t, strings.HasPrefix(key, "/"), "listed %q, which Get cannot read", key)
+		}
+		keys, err = slash.Keys(ctx, root+"-*")
+		require.NoError(t, err)
+		assert.Equal(t, []string{abs}, keys)
+	})
+
+	t.Run("memory namespace", func(t *testing.T) {
+		m := cache.NewMemoryProvider(root)
+		namespaceTest(t, cache.NewProxyProvider("tenant-a", m), cache.NewProxyProvider("tenant-b", m))
+	})
+}
+
+// keysParity stores the same keys in a Redis-backed and a memory-backed
+// provider and checks that Keys returns the same relative keys for each
+// pattern, so the memory glob matches Redis KEYS.
+func keysParity(t *testing.T, r, m cache.Provider) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	keys := []string{
+		"", "a", "ab", "abc", "a/b", "a/b/c", "b[1]", "b*", "b?x", `x\y`, "é",
+		"user:1:profile", "user:22:profile", "user:1:settings",
+		"hello", "hallo", "hllo", "heeello", "Z", "-", "]", "^",
+	}
+	for _, p := range []cache.Provider{r, m} {
+		for _, key := range keys {
+			require.NoError(t, p.Set(ctx, key, "v", time.Minute))
+		}
+	}
+	defer func() {
+		assert.NoError(t, r.Delete(ctx, keys...))
+	}()
+
+	patterns := []string{
+		"", "*", "**", "?", "??", "???", "a*", "a?", "a/*", "*/*", "*b*", "*/c",
+		"[ab]*", "[^a]*", "[a-b]*", "[b-a]*", "[A-Z]", "[a-z]", "[-]", `[\]]`, "[]]",
+		"[^]]", "[", "a[", "[ab", "[^", `\`, `a\`, `b\[*`, `b\*`, `b\?x`, `x\\y`,
+		"h[ae]llo", "h[^e]llo", "h*llo", "h?llo", "*o", "*?*", "user:*:profile",
+		"*:profile", "u*1*", "é", "../*", "a/../*", "/a/", ".", "..",
+	}
+	for _, pattern := range patterns {
+		rkeys, err := r.Keys(ctx, pattern)
+		require.NoError(t, err)
+		mkeys, err := m.Keys(ctx, pattern)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, rkeys, mkeys, "pattern %q", pattern)
+	}
+
+	// the relative keys round-trip through Get
+	all, err := r.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys[1:], all)
+	root, err := r.Keys(ctx, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{""}, root)
+	for _, key := range all {
+		var v string
+		require.NoError(t, r.Get(ctx, key, &v), key)
+		require.NoError(t, m.Get(ctx, key, &v), key)
+	}
+}
+
+// namespaceTest checks that keys with ".." segments and proxy prefixes stay
+// inside their provider's namespace (formerly P-044): a and b are siblings
+// "tenant-a" and "tenant-b" sharing one backend.
+func namespaceTest(t *testing.T, a, b cache.Provider) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var v string
+	require.NoError(t, a.Set(ctx, "../tenant-b/x", "from-a", time.Minute))
+	require.True(t, cache.IsNotFoundError(b.Get(ctx, "x", &v)), "key escaped into the sibling")
+	require.NoError(t, a.Get(ctx, "tenant-b/x", &v))
+	assert.Equal(t, "from-a", v)
+
+	escape := cache.NewProxyProvider("../tenant-b", a)
+	require.NoError(t, escape.Set(ctx, "y", "via-proxy", time.Minute))
+	require.True(t, cache.IsNotFoundError(b.Get(ctx, "y", &v)), "proxy prefix escaped into the sibling")
+	require.NoError(t, a.Get(ctx, "tenant-b/y", &v))
+	assert.Equal(t, "via-proxy", v)
+
+	// the proxy is "tenant-a/tenant-b", which also holds the first key
+	keys, err := escape.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"x", "y"}, keys)
+	keys, err = a.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"tenant-b/x", "tenant-b/y"}, keys)
+	keys, err = b.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+	assert.NotNil(t, keys)
+
+	require.NoError(t, a.Delete(ctx, "tenant-b/x", "../tenant-b/y"))
+	keys, err = a.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
+func TestRedisProviderConfigSecrets(t *testing.T) {
+	t.Parallel()
+	_, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server: "redis://user:s3cret-pass@127.0.0.1:bad/0",
+	}, "")
+	require.EqualError(t, err, `invalid redis address: invalid port ":bad" after host`)
 }
 
 func provTest(t *testing.T, p cache.Provider, root string) {
@@ -316,7 +492,15 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 
 	keys, err := p.Keys(ctx, "*")
 	require.NoError(t, err)
-	assert.Len(t, keys, len(tcases))
+	names := make([]string, 0, len(tcases))
+	for _, tc := range tcases {
+		names = append(names, tc.name)
+	}
+	// keys are listed relative to the provider, as passed to Set
+	assert.ElementsMatch(t, names, keys)
+	keys, err = p.Keys(ctx, "strin?*")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"string", "strings"}, keys)
 
 	p.CleanExpired(ctx)
 

@@ -1,13 +1,13 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
-	"path"
+	"net/url"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +22,7 @@ import (
 const subscribeTimeout = 10 * time.Second
 
 type redisProv struct {
-	prefix string
+	ns     namespace
 	cfg    RedisConfig
 	client *redis.Client
 
@@ -36,14 +36,20 @@ type redisProv struct {
 }
 
 // NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed
-// with redis.ParseURL; cfg.ClientTLS files (if set) configure TLS and
+// with redis.ParseURL, and a malformed URL is reported without the URL,
+// which may embed a password; cfg.ClientTLS files (if set) configure TLS and
 // cfg.Password overrides the URL credentials. An empty prefix becomes "/";
 // a zero cfg.TTL becomes 1h. Maintenance notifications are disabled.
 // The connection is established lazily, so a bad address only fails later.
 func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 	options, err := redis.ParseURL(cfg.Server)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "invalid redis address")
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			// url.Error repeats the URL
+			err = uerr.Err
+		}
+		return nil, errors.WithMessage(err, "invalid redis address")
 	}
 
 	if cfg.ClientTLS != nil {
@@ -69,11 +75,8 @@ func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 	if cfg.TTL == 0 {
 		cfg.TTL = time.Hour
 	}
-	if prefix == "" {
-		prefix = "/"
-	}
 	prov := &redisProv{
-		prefix: prefix,
+		ns:     newNamespace(cmp.Or(prefix, "/")),
 		cfg:    cfg,
 		client: redis.NewClient(options),
 		subs:   make(map[*rsub]struct{}),
@@ -157,7 +160,7 @@ func (p *redisProv) Set(ctx context.Context, key string, v any, ttl time.Duratio
 		value = string(b)
 	}
 
-	k := path.Join(p.prefix, key)
+	k := p.ns.key(key)
 	err := p.client.Set(ctx, k, value, ttl).Err()
 	if err != nil {
 		return errors.Wrapf(err, "failed to set key: %s", k)
@@ -172,7 +175,7 @@ func (p *redisProv) Get(ctx context.Context, key string, v any) error {
 		return &json.InvalidUnmarshalError{Type: reflect.TypeOf(v)}
 	}
 
-	k := path.Join(p.prefix, key)
+	k := p.ns.key(key)
 	val := p.client.Get(ctx, k)
 	err := val.Err()
 	if err != nil {
@@ -212,7 +215,7 @@ func (p *redisProv) Delete(ctx context.Context, keys ...string) error {
 	}
 	pkeys := make([]string, 0, len(keys))
 	for _, key := range keys {
-		pkeys = append(pkeys, path.Join(p.prefix, key))
+		pkeys = append(pkeys, p.ns.key(key))
 	}
 	err := p.client.Del(ctx, pkeys...).Err()
 	if err != nil {
@@ -226,19 +229,21 @@ func (p *redisProv) CleanExpired(_ context.Context) {
 	// redis exires keys
 }
 
-// Keys returns list of keys.
+// Keys returns the keys, relative to the provider, that Redis KEYS matches
+// with the Redis glob pattern.
 // This method should be used mostly for testing, as in prod many keys maybe returned
 func (p *redisProv) Keys(ctx context.Context, pattern string) ([]string, error) {
-	k := path.Join(p.prefix, pattern)
-	res := p.client.Keys(ctx, k)
-	if res.Err() != nil {
-		return nil, res.Err()
+	list, err := p.client.Keys(ctx, p.ns.pattern(pattern)).Result()
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list keys: %s", pattern)
 	}
-	list := res.Val()
-	for i, key := range list {
-		list[i] = strings.TrimPrefix(key, p.prefix)
+	keys := make([]string, 0, len(list))
+	for _, name := range list {
+		if rel, ok := p.ns.listed(pattern, name); ok {
+			keys = append(keys, rel)
+		}
 	}
-	return list, nil
+	return keys, nil
 }
 
 // Publish publishes message to channel. Redis never waits for subscribers.

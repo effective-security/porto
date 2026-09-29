@@ -2,15 +2,14 @@ package redisclient
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
-	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"reflect"
 	"strings"
 	"time"
-
-	"cmp"
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver"
@@ -22,27 +21,49 @@ import (
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "redisclient")
 
-// DistributedLock provides distributed locking functionality
+const (
+	// lockKeyPrefix names the key of a distributed lock: "lock:<key>".
+	lockKeyPrefix = "lock:"
+	// rateLimitKeyPrefix names the key of a rate-limit window: "ratelimit:<key>".
+	rateLimitKeyPrefix = "ratelimit:"
+	// minExpiry is the Redis expiry resolution; shorter lock timeouts and
+	// rate-limit windows are rejected.
+	minExpiry = time.Millisecond
+	// scanBatch is the SCAN COUNT hint of ScanKeys, and defaultScanLimit
+	// its limit when none is given.
+	scanBatch        = 100
+	defaultScanLimit = 1000
+)
+
+// DistributedLock provides an owner-bound lock that expires on its own.
 type DistributedLock interface {
-	// TryLock attempts to acquire a lock with the given key and timeout
-	// Returns true if lock was acquired, false otherwise, and remaining time if lock exists
-	TryLock(ctx context.Context, key string, timeout time.Duration) (bool, time.Duration, error)
+	// TryLock attempts to acquire the lock for key, expiring after timeout
+	// (at least 1ms). It returns the owner token when the lock was
+	// acquired; otherwise the token is empty and the remaining time is how
+	// long the current holder keeps the lock.
+	TryLock(ctx context.Context, key string, timeout time.Duration) (token string, remaining time.Duration, err error)
 
-	// ReleaseLock releases the lock for the given key
-	// Returns true if lock was released, false if lock didn't exist or was already released
-	ReleaseLock(ctx context.Context, key string) (bool, error)
+	// ReleaseLock releases the lock for key only while it is still held
+	// with token, the value returned by TryLock. It returns false when the
+	// lock expired or is held by another owner.
+	ReleaseLock(ctx context.Context, key, token string) (bool, error)
 
-	// IsLocked checks if a lock exists for the given key
+	// IsLocked reports whether anyone holds the lock for key.
 	IsLocked(ctx context.Context, key string) (bool, error)
 }
 
-// RateLimiter provides rate limiting functionality
+// RateLimiter allows one execution per window for a key, across every
+// client of the Redis server.
 type RateLimiter interface {
-	// TryAcquireRateLimit attempts to acquire a rate limit slot for the given key
-	// Returns true if rate limit allows the operation, false if rate limit exceeded, and remaining time if exceeded
+	// TryAcquireRateLimit starts a window of the given length (at least
+	// 1ms) for key and returns true when no window is active; otherwise it
+	// returns false and the time until the active window ends. A denied
+	// call does not extend the active window.
 	TryAcquireRateLimit(ctx context.Context, key string, window time.Duration) (bool, time.Duration, error)
 
-	// GetRateLimitRemainingTime returns the remaining time until the rate limit window resets
+	// GetRateLimitRemainingTime returns the time until the active window
+	// for key ends (at least 1ms while it is active), or 0 when none is
+	// active.
 	GetRateLimitRemainingTime(ctx context.Context, key string) (time.Duration, error)
 }
 
@@ -145,8 +166,11 @@ func IsNotFoundError(err error) bool {
 type RedisClient struct {
 	*redis.Client
 
-	prefix  string
-	noclose bool
+	// prefix is "/<name>/" or empty; globPrefix is prefix with its glob
+	// metacharacters escaped, for KEYS and SCAN patterns.
+	prefix     string
+	globPrefix string
+	noclose    bool
 }
 
 // ensure RedisClient implements Provider interface
@@ -154,15 +178,16 @@ var _ Provider = (*RedisClient)(nil)
 
 // NewRedisClient builds a raw *redis.Client from cfg: the URL is parsed,
 // TLS is configured from ClientTLS files, Password/User override the URL
-// credentials, and maintenance notifications are disabled.
+// credentials, and maintenance notifications are disabled. Only the server
+// address and database are logged, and a malformed URL is reported without
+// the URL, which may embed a password.
 // The connection is established lazily.
 func NewRedisClient(cfg *Config) (*redis.Client, error) {
-	logger.KV(xlog.INFO, "redis", cfg.Server)
-
-	options, err := redis.ParseURL(cfg.Server)
+	options, err := parseURL(cfg.Server)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "invalid redis address")
+		return nil, err
 	}
+	logger.KV(xlog.INFO, "redis", options.Addr, "db", options.DB)
 
 	if cfg.ClientTLS != nil {
 		tlscfg, err := tlsconfig.NewClientTLSFromFiles(
@@ -187,6 +212,21 @@ func NewRedisClient(cfg *Config) (*redis.Client, error) {
 	}
 
 	return redis.NewClient(options), nil
+}
+
+// parseURL parses a redis://, rediss:// or unix:// URL. A malformed URL is
+// reported with the url.Parse reason but not the URL itself, which may
+// embed a password.
+func parseURL(server string) (*redis.Options, error) {
+	options, err := redis.ParseURL(server)
+	if err != nil {
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return nil, errors.WithMessage(err, "invalid redis address")
+	}
+	return options, nil
 }
 
 // New creates a root RedisClient (no prefix) from cfg. The returned client
@@ -222,54 +262,91 @@ func (c *RedisClient) RawClient() *redis.Client {
 
 // WithPrefix returns a child client sharing the connection whose keys are
 // namespaced under "/<prefix>/" (surrounding spaces and slashes are
-// trimmed). The child's Close is a no-op. Prefixes do not nest: the parent
-// prefix is ignored.
+// trimmed and the prefix is cleaned as a path, so "a//b" is "/a/b/"). The
+// child's Close is a no-op. Prefixes do not nest: the parent prefix is
+// ignored.
 func (c *RedisClient) WithPrefix(prefix string) *RedisClient {
 	prefix = strings.TrimSpace(prefix)
 	prefix = strings.Trim(prefix, "/")
 	if prefix != "" {
-		prefix = "/" + prefix + "/"
+		// keys are joined with path.Join, which cleans the prefix too
+		prefix = strings.TrimSuffix(path.Clean("/"+prefix), "/") + "/"
 	}
 
-	// TODO: parent prefix?
 	return &RedisClient{
-		Client:  c.Client,
-		prefix:  prefix,
-		noclose: true,
+		Client:     c.Client,
+		prefix:     prefix,
+		globPrefix: escapeGlob(prefix),
+		noclose:    true,
 	}
 }
 
 // Close closes the underlying connection when this client owns it (created
-// by New); for clients from NewWithClient or WithPrefix it is a no-op.
-// Close errors are logged, never returned; the client must not be used afterwards.
+// by New) and returns the close error; for clients from NewWithClient or
+// WithPrefix it is a no-op. It is idempotent. Children from WithPrefix
+// share the connection: after the root is closed, their commands, like the
+// root's, fail with redis.ErrClosed.
 func (c *RedisClient) Close() error {
-	if c.Client != nil && !c.noclose {
-		// close the client only if no prefix is set
-		// otherwise, it is a shared client
-		if err := c.Client.Close(); err != nil {
-			logger.KV(xlog.ERROR, "reason", "redis_close", "err", err.Error())
-		}
-		c.Client = nil
+	if c.noclose || c.Client == nil {
+		return nil
+	}
+	err := c.Client.Close()
+	if err != nil && !errors.Is(err, redis.ErrClosed) {
+		return errors.WithMessage(err, "failed to close redis client")
 	}
 	return nil
 }
 
-// Key returns the full Redis key for key: the prefix joined with key using
-// path.Join (so "a//b" and "../x" are cleaned), or key itself when there is no prefix.
+// Key returns the full Redis key for key, or key itself when there is no
+// prefix. key is cleaned as a rooted path and then joined with the prefix,
+// so "a//b", "/a/" and "a" name the same key and ".." cannot leave the
+// prefix: "../x" names "<prefix>x".
 func (c *RedisClient) Key(key string) string {
 	if c.prefix == "" {
 		return key
 	}
-	return path.Join(c.prefix, key)
+	return path.Join(c.prefix, path.Clean("/"+key))
 }
 
-// SubKey strips the client prefix from a full Redis key, inverting Key.
+// SubKey strips the client prefix from a full Redis key, inverting Key for
+// cleaned keys; the prefix itself, Key(""), maps to "".
 func (c *RedisClient) SubKey(key string) string {
 	if c.prefix == "" {
 		return key
 	}
+	if key == c.prefix[:len(c.prefix)-1] {
+		return ""
+	}
 	return strings.TrimPrefix(key, c.prefix)
 }
+
+// pattern returns the KEYS or SCAN pattern for pattern relative to the
+// prefix: pattern is cleaned like a key and the prefix matches literally.
+func (c *RedisClient) pattern(pattern string) string {
+	if c.prefix == "" {
+		return pattern
+	}
+	return path.Join(c.globPrefix, path.Clean("/"+pattern))
+}
+
+// escapeGlob escapes the Redis glob metacharacters in s, so that a pattern
+// starting with the result matches s literally. pkg/cache has a copy.
+func escapeGlob(s string) string {
+	if !strings.ContainsAny(s, globMeta) {
+		return s
+	}
+	var b strings.Builder
+	for i := range len(s) {
+		if strings.IndexByte(globMeta, s[i]) >= 0 {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// globMeta lists the bytes that are special in a Redis glob pattern.
+const globMeta = `*?[]\`
 
 // Get loads the value stored under key into v, which must be a non-nil
 // pointer (see UnmarshalStringCmd). It returns ErrNotFound for a missing key.
@@ -426,25 +503,25 @@ func (c *RedisClient) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Keys returns list of keys.
+// Keys returns the keys, relative to the prefix, that match the Redis glob
+// pattern, which is cleaned like a key; the prefix matches literally.
 // This method should be used mostly for testing, as in prod many keys maybe returned.
 // It blocks and scans the entire Redis keyspace — not safe for large production datasets.
 func (c *RedisClient) Keys(ctx context.Context, pattern string) ([]string, error) {
-	res := c.Client.Keys(ctx, c.Key(pattern))
-	if res.Err() != nil {
-		return nil, res.Err()
+	list, err := c.Client.Keys(ctx, c.pattern(pattern)).Result()
+	if err != nil {
+		return nil, errors.WithMessagef(err, "unable to list keys %s", pattern)
 	}
-	list := res.Val()
 	for i, key := range list {
 		list[i] = c.SubKey(key)
 	}
 	return list, nil
 }
 
-// ScanKeys returns keys matching pattern (relative to the prefix) using
-// SCAN in batches of 100, stopping once at least limit keys were collected
-// (limit <= 0 means 1000) or the scan completes. It may return up to 99 keys
-// more than limit.
+// ScanKeys returns keys matching pattern (relative to the prefix, see Keys) using
+// SCAN with a COUNT hint of 100, stopping once at least limit keys were
+// collected (limit <= 0 means 1000) or the scan completes. The last batch
+// may take the result past limit.
 func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) ([]string, error) {
 	var (
 		cursor uint64
@@ -453,10 +530,13 @@ func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) (
 		batch  []string
 	)
 
-	limit = cmp.Or(limit, 1000)
+	if limit <= 0 {
+		limit = defaultScanLimit
+	}
+	match := c.pattern(pattern)
 
 	for {
-		batch, cursor, err = c.Client.Scan(ctx, cursor, c.Key(pattern), 100).Result()
+		batch, cursor, err = c.Client.Scan(ctx, cursor, match, scanBatch).Result()
 		if err != nil {
 			return nil, errors.WithMessagef(err, "unable to scan keys")
 		}
@@ -518,29 +598,54 @@ func (c *RedisClient) SCard(ctx context.Context, key string) (int64, error) {
 	return val, nil
 }
 
-// SAddWithEviction adds member to the set at key and records the insertion
-// order in the list at listKey; when the list grows beyond limit the oldest
-// member is removed from both. The steps are separate commands (not
-// atomic) and errors from the eviction step are ignored.
+// SAddWithEviction adds member to the set at key and appends it to the
+// insertion-order list at listKey when it was not a member yet (removing
+// stale list entries for it first); re-adding a member keeps its position.
+// While the list holds more than limit entries
+// (limit >= 1), its oldest entry is removed from the list and the set. The
+// update runs as one Lua script, so it is atomic, and key and listKey must
+// differ. A key of the wrong type fails the call before anything is written.
+// Adding a new member scans the list (LREM), so its cost grows with limit.
 func (c *RedisClient) SAddWithEviction(ctx context.Context, key string, listKey string, limit int64, member string) error {
-	// Add to Set
-	err := c.SAdd(ctx, key, member)
+	keys := []string{c.Key(key), c.Key(listKey)}
+	if err := checkEviction(key, keys, limit); err != nil {
+		return err
+	}
+	err := boundedSetScript.Run(ctx, c.Client, keys, limit, member).Err()
 	if err != nil {
-		return err
+		return errors.WithMessagef(err, "unable to add member to bounded set %s", key)
 	}
+	return nil
+}
 
-	// Track in List
-	if err := c.RPush(ctx, listKey, member); err != nil {
-		return err
+// boundedSetScript implements SAddWithEviction: KEYS[1] is the set,
+// KEYS[2] the insertion-order list, ARGV[1] the limit and ARGV[2] the
+// member. LLEN and SADD fail on a key of the wrong type before any write.
+// A new member's stale list entries (left by SRem, an expired set or an
+// earlier version) are removed first, so they cannot evict it later.
+var boundedSetScript = redis.NewScript(`
+local n = redis.call('LLEN', KEYS[2])
+if redis.call('SADD', KEYS[1], ARGV[2]) == 1 then
+	redis.call('LREM', KEYS[2], 0, ARGV[2])
+	n = redis.call('RPUSH', KEYS[2], ARGV[2])
+end
+local limit = tonumber(ARGV[1])
+while n > limit do
+	redis.call('SREM', KEYS[1], redis.call('LPOP', KEYS[2]))
+	n = n - 1
+end
+return n
+`)
+
+// checkEviction validates the arguments of the bounded set and hash
+// helpers: keys holds the full collection and list keys.
+func checkEviction(key string, keys []string, limit int64) error {
+	if limit < 1 {
+		return errors.Errorf("eviction limit for %s must be positive: %d", key, limit)
 	}
-
-	// Enforce cap
-	length, _ := c.LLen(ctx, listKey)
-	if length > limit {
-		oldest, _ := c.LPop(ctx, listKey)
-		_ = c.SRem(ctx, key, oldest)
+	if keys[0] == keys[1] {
+		return errors.Errorf("eviction list key must differ from %s", key)
 	}
-
 	return nil
 }
 
@@ -630,31 +735,43 @@ func (c *RedisClient) HVals(ctx context.Context, key string) ([]string, error) {
 	return val, nil
 }
 
-// HSetWithEviction sets field in the hash at hashKey and records the
-// insertion order in the list at orderListKey; when the list grows beyond
-// maxFields the oldest field is deleted from the hash. The steps are
-// separate commands (not atomic) and errors from the eviction step are ignored.
+// HSetWithEviction sets field in the hash at hashKey and appends it to the
+// insertion-order list at orderListKey when the field is new (removing
+// stale list entries for it first); updating a field keeps its position. While the list holds more than maxFields
+// entries (maxFields >= 1), its oldest entry is removed from the list and
+// the hash. The update runs as one Lua script, so it is atomic, and hashKey
+// and orderListKey must differ. value is encoded as by HSet. A key of the
+// wrong type fails the call before anything is written. Adding a new field
+// scans the list (LREM), so its cost grows with maxFields.
 func (c *RedisClient) HSetWithEviction(ctx context.Context, hashKey, orderListKey string, maxFields int64, field string, value any) error {
-	// Set the hash field
-	err := c.Client.HSet(ctx, c.Key(hashKey), field, value).Err()
+	keys := []string{c.Key(hashKey), c.Key(orderListKey)}
+	if err := checkEviction(hashKey, keys, maxFields); err != nil {
+		return err
+	}
+	err := boundedHashScript.Run(ctx, c.Client, keys, maxFields, field, value).Err()
 	if err != nil {
-		return err
+		return errors.WithMessagef(err, "unable to set field %s in bounded hash %s", field, hashKey)
 	}
-
-	// Track field order in a list
-	if err := c.Client.RPush(ctx, c.Key(orderListKey), field).Err(); err != nil {
-		return err
-	}
-
-	// Trim if over limit
-	length, _ := c.Client.LLen(ctx, c.Key(orderListKey)).Result()
-	if length > maxFields {
-		oldestField, _ := c.Client.LPop(ctx, c.Key(orderListKey)).Result()
-		c.Client.HDel(ctx, c.Key(hashKey), oldestField)
-	}
-
 	return nil
 }
+
+// boundedHashScript implements HSetWithEviction: KEYS[1] is the hash,
+// KEYS[2] the insertion-order list, ARGV[1] the limit, ARGV[2] the field
+// and ARGV[3] the value. LLEN and HSET fail on a key of the wrong type
+// before any write. A new field's stale list entries are removed first.
+var boundedHashScript = redis.NewScript(`
+local n = redis.call('LLEN', KEYS[2])
+if redis.call('HSET', KEYS[1], ARGV[2], ARGV[3]) == 1 then
+	redis.call('LREM', KEYS[2], 0, ARGV[2])
+	n = redis.call('RPUSH', KEYS[2], ARGV[2])
+end
+local limit = tonumber(ARGV[1])
+while n > limit do
+	redis.call('HDEL', KEYS[1], redis.call('LPOP', KEYS[2]))
+	n = n - 1
+end
+return n
+`)
 
 // Sorted Set (ZSet) operations
 
@@ -714,158 +831,161 @@ func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, st
 
 // Distributed Lock implementations
 
-// TryLock attempts to acquire the lock "lock:<key>" with SET NX EX, expiring
-// after timeout. It returns (true, 0, nil) when acquired, otherwise
-// (false, remaining TTL, nil). The lock is not owner-bound: any caller can
-// release it with ReleaseLock.
-func (c *RedisClient) TryLock(ctx context.Context, key string, timeout time.Duration) (bool, time.Duration, error) {
-	lockKey := "lock:" + key
-	lockValue := time.Now().UnixNano() // Use timestamp as lock value for uniqueness
-
-	// Use SET with NX (only if not exists) and EX (expiration) to atomically acquire lock
-	result, err := c.Client.SetNX(ctx, c.Key(lockKey), lockValue, timeout).Result()
+// TryLock attempts to acquire the lock "lock:<key>" with SET NX PX,
+// expiring after timeout, which must be at least 1ms. It returns
+// (token, 0, nil) when acquired, where token is a random value that
+// ReleaseLock requires, otherwise ("", remaining TTL, nil); the remaining
+// TTL is 0 for a lock written without expiry. The acquisition and the TTL
+// read run in one MULTI/EXEC transaction. Under a prefix, a key whose ".."
+// segments would leave the "lock:" namespace is an error, here and in
+// ReleaseLock and IsLocked.
+func (c *RedisClient) TryLock(ctx context.Context, key string, timeout time.Duration) (string, time.Duration, error) {
+	if timeout < minExpiry {
+		return "", 0, errors.Errorf("lock timeout for key %s must be at least %s: %s", key, minExpiry, timeout)
+	}
+	k, err := c.coordKey(lockKeyPrefix, key)
 	if err != nil {
-		return false, 0, errors.WithMessagef(err, "failed to acquire lock for key: %s", key)
+		return "", 0, err
 	}
-
-	if result {
-		// Lock was acquired successfully
-		return true, 0, nil
-	}
-
-	// Lock was not acquired, get remaining time
-	ttl, err := c.Client.TTL(ctx, c.Key(lockKey)).Result()
+	token := rand.Text()
+	acquired, remaining, err := c.setNX(ctx, k, token, timeout)
 	if err != nil {
-		return false, 0, errors.WithMessagef(err, "failed to get lock TTL for key: %s", key)
+		return "", 0, errors.WithMessagef(err, "failed to acquire lock for key: %s", key)
 	}
-
-	return false, ttl, nil
+	if !acquired {
+		return "", remaining, nil
+	}
+	return token, 0, nil
 }
 
-// ReleaseLock releases a distributed lock by deleting the lock key
-// Note: This is a simple implementation. For production use, you might want to verify
-// that the lock belongs to the current process before releasing it
-func (c *RedisClient) ReleaseLock(ctx context.Context, key string) (bool, error) {
-	lockKey := "lock:" + key
-
-	// Check if lock exists before attempting to delete
-	exists, err := c.Exists(ctx, lockKey)
+// ReleaseLock deletes the lock "lock:<key>" only while it holds token, in
+// one Lua script (compare-and-delete). It returns true when the lock was
+// released and false when it expired or another owner holds it; an empty
+// token is an error.
+func (c *RedisClient) ReleaseLock(ctx context.Context, key, token string) (bool, error) {
+	if token == "" {
+		return false, errors.Errorf("empty lock token for key: %s", key)
+	}
+	k, err := c.coordKey(lockKeyPrefix, key)
 	if err != nil {
-		return false, errors.WithMessagef(err, "failed to check lock existence for key: %s", key)
+		return false, err
 	}
-
-	if !exists {
-		return false, nil // Lock doesn't exist
-	}
-
-	// Delete the lock
-	deleted, err := c.Client.Del(ctx, c.Key(lockKey)).Result()
+	n, err := releaseLockScript.Run(ctx, c.Client, []string{k}, token).Int64()
 	if err != nil {
 		return false, errors.WithMessagef(err, "failed to release lock for key: %s", key)
 	}
-
-	return deleted > 0, nil
+	return n > 0, nil
 }
 
-// IsLocked checks if a lock exists for the given key
+// releaseLockScript deletes KEYS[1] only while it holds the token ARGV[1].
+var releaseLockScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
+
+// IsLocked reports whether anyone holds the lock "lock:<key>".
 func (c *RedisClient) IsLocked(ctx context.Context, key string) (bool, error) {
-	lockKey := "lock:" + key
-	return c.Exists(ctx, lockKey)
+	k, err := c.coordKey(lockKeyPrefix, key)
+	if err != nil {
+		return false, err
+	}
+	n, err := c.Client.Exists(ctx, k).Result()
+	if err != nil {
+		return false, errors.WithMessagef(err, "failed to check lock for key: %s", key)
+	}
+	return n > 0, nil
+}
+
+// coordKey returns the full key of key in the sub-namespace kind ("lock:"
+// or "ratelimit:"). Under a prefix, Key cleans the combined name, so a key
+// whose ".." segments would leave the sub-namespace, such as
+// "x/../../data", is rejected instead of naming another key; without a
+// prefix the name is used as is and cannot leave it.
+func (c *RedisClient) coordKey(kind, key string) (string, error) {
+	name := kind + key
+	if c.prefix != "" && !strings.HasPrefix(path.Clean("/"+name), "/"+kind) {
+		return "", errors.Errorf("invalid key %q: leaves the %q namespace", key, strings.TrimSuffix(kind, ":"))
+	}
+	return c.Key(name), nil
+}
+
+// setNX sets the full key k to value with SET NX and expiry ttl and reads
+// its remaining TTL in the same MULTI/EXEC transaction. It reports whether
+// the key was set and, when it was not, the remaining TTL of the existing
+// key (see remainingTTL), or 0 when that key has no expiry.
+func (c *RedisClient) setNX(ctx context.Context, k string, value any, ttl time.Duration) (bool, time.Duration, error) {
+	var (
+		setCmd *redis.BoolCmd
+		ttlCmd *redis.DurationCmd
+	)
+	_, err := c.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		setCmd = pipe.SetNX(ctx, k, value, ttl)
+		ttlCmd = pipe.PTTL(ctx, k)
+		return nil
+	})
+	if err != nil {
+		return false, 0, err
+	}
+	if setCmd.Val() {
+		return true, 0, nil
+	}
+	return false, remainingTTL(ttlCmd.Val()), nil
+}
+
+// remainingTTL converts a PTTL reply into a remaining time. PTTL counts
+// whole milliseconds and reports 0 for a key that expires within the
+// current millisecond but still exists, so that is minExpiry: 0 then means
+// the key is gone (PTTL -2) or has no expiry (-1).
+func remainingTTL(ttl time.Duration) time.Duration {
+	switch {
+	case ttl < 0:
+		return 0
+	case ttl == 0:
+		return minExpiry
+	default:
+		return ttl
+	}
 }
 
 // Rate Limiter implementations
 
-// TryAcquireRateLimit implements a sliding-window limiter that allows one
-// execution per window for key, using the sorted set "ratelimit:<key>" and
-// the "ratelimit_window:<key>" value. Every call, allowed or not, records
-// its timestamp, so continuous denied attempts keep the window busy.
-// It returns (true, 0, nil) when allowed, otherwise (false, time until the
-// window resets, nil). The commands are pipelined but not transactional.
+// TryAcquireRateLimit allows one execution per window for key: it starts a
+// window by creating "ratelimit:<key>" with SET NX PX and returns
+// (true, 0, nil), or returns (false, time until the active window ends,
+// nil) when the key exists. A denied call writes nothing, so polling does
+// not extend the window, and the check and the write are one atomic
+// command. The window, which must be at least 1ms, is measured by the Redis
+// server's clock, and the allowed call's window applies until it ends.
+// Under a prefix, a key whose ".." segments would leave the "ratelimit:"
+// namespace is an error, here and in GetRateLimitRemainingTime.
 func (c *RedisClient) TryAcquireRateLimit(ctx context.Context, key string, window time.Duration) (bool, time.Duration, error) {
-	rateLimitKey := "ratelimit:" + key
-	windowKey := "ratelimit_window:" + key
-	now := time.Now()
-	windowStart := now.Add(-window)
-
-	// Use Redis pipeline for atomic operations
-	pipe := c.Pipeline()
-
-	// Remove expired entries (older than window)
-	pipe.ZRemRangeByScore(ctx, c.Key(rateLimitKey), "0", fmt.Sprintf("%d", windowStart.UnixNano()))
-
-	// Count current entries before adding new one
-	countCmd := pipe.ZCard(ctx, c.Key(rateLimitKey))
-
-	// Add current timestamp
-	pipe.ZAdd(ctx, c.Key(rateLimitKey), redis.Z{
-		Score:  float64(now.UnixNano()),
-		Member: now.UnixNano(),
-	})
-
-	// Store the window duration for GetRemainingTime
-	pipe.Set(ctx, c.Key(windowKey), window.Nanoseconds(), window)
-
-	// Set expiration on the key to prevent memory leaks
-	pipe.Expire(ctx, c.Key(rateLimitKey), window)
-
-	// Execute pipeline
-	_, err := pipe.Exec(ctx)
+	if window < minExpiry {
+		return false, 0, errors.Errorf("rate limit window for key %s must be at least %s: %s", key, minExpiry, window)
+	}
+	k, err := c.coordKey(rateLimitKeyPrefix, key)
 	if err != nil {
-		return false, 0, errors.WithMessagef(err, "failed to execute rate limit operations for key: %s", key)
+		return false, 0, err
 	}
-
-	// Check if we had any entries before adding the current one
-	count := countCmd.Val()
-
-	if count == 0 {
-		// Allow if no previous executions in the window
-		return true, 0, nil
-	}
-
-	// Rate limit exceeded, get remaining time
-	remaining, err := c.GetRateLimitRemainingTime(ctx, key)
+	allowed, remaining, err := c.setNX(ctx, k, window.String(), window)
 	if err != nil {
-		return false, 0, errors.WithMessagef(err, "failed to get remaining time for key: %s", key)
+		return false, 0, errors.WithMessagef(err, "failed to acquire rate limit for key: %s", key)
 	}
-
-	return false, remaining, nil
+	return allowed, remaining, nil
 }
 
-// GetRateLimitRemainingTime returns the remaining time until the rate limit window resets
+// GetRateLimitRemainingTime returns the time until the active window of
+// "ratelimit:<key>" ends, at least 1ms while it is active, or 0 when no
+// window is active (or the key has no expiry).
 func (c *RedisClient) GetRateLimitRemainingTime(ctx context.Context, key string) (time.Duration, error) {
-	rateLimitKey := "ratelimit:" + key
-	windowKey := "ratelimit_window:" + key
-
-	// Get the oldest entry in the sorted set
-	entries, err := c.Client.ZRangeWithScores(ctx, c.Key(rateLimitKey), 0, 0).Result()
+	k, err := c.coordKey(rateLimitKeyPrefix, key)
 	if err != nil {
-		return 0, errors.WithMessagef(err, "failed to get rate limit entries for key: %s", key)
+		return 0, err
 	}
-
-	if len(entries) == 0 {
-		return 0, nil // No rate limit active
-	}
-
-	// Get the stored window duration
-	var windowDurationNs int64
-	err = c.Get(ctx, windowKey, &windowDurationNs)
+	ttl, err := c.Client.PTTL(ctx, k).Result()
 	if err != nil {
-		// If we can't get the window duration, assume 5 seconds (for backward compatibility)
-		windowDurationNs = 5 * time.Second.Nanoseconds()
+		return 0, errors.WithMessagef(err, "failed to get rate limit TTL for key: %s", key)
 	}
-	windowDuration := time.Duration(windowDurationNs)
-
-	// Get the timestamp of the oldest entry
-	oldestTimestamp := int64(entries[0].Score)
-	oldestTime := time.Unix(0, oldestTimestamp)
-
-	// Calculate when the window will reset (oldest entry + window duration)
-	windowReset := oldestTime.Add(windowDuration)
-
-	remaining := time.Until(windowReset)
-	if remaining < 0 {
-		return 0, nil
-	}
-
-	return remaining, nil
+	return remainingTTL(ttl), nil
 }

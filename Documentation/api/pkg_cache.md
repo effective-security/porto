@@ -8,7 +8,9 @@ import "github.com/effective-security/porto/pkg/cache"
 
 Package cache provides a small key/value cache abstraction \(Provider\) with a TTL per entry, a pattern\-based key listing and a minimal publish/subscribe channel, backed either by process memory or by Redis.
 
-Values are JSON encoded on Set and decoded into the pointer passed to Get, so both backends behave the same. A missing or expired entry is reported as ErrNotFound \(test with IsNotFoundError\). Keys are joined with the provider prefix using path.Join.
+Values are JSON encoded on Set and decoded into the pointer passed to Get, so both backends behave the same. A missing or expired entry is reported as ErrNotFound \(test with IsNotFoundError\).
+
+Keys: a key is cleaned as a rooted path and joined with the provider prefix, so "x", "/x" and "x/" name the same entry and ".." cannot leave the prefix \("../x" is "\<prefix\>/x"\); a proxy prefix is cleaned the same way. Keys takes a Redis glob pattern relative to the provider \('\*' and '?' also match '/', "\[...\]" sets, '\\' escapes\), matches the prefix literally and returns the matching unexpired keys relative to the provider, in the form Get accepts \(the key "" only for an empty pattern\); the memory provider implements the Redis matcher, so both backends list the same keys.
 
 ```
 var p cache.Provider
@@ -90,7 +92,7 @@ var NowFunc = time.Now
 ```
 
 <a name="GetOrSet"></a>
-## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L134>)
+## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L141>)
 
 ```go
 func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error
@@ -99,7 +101,7 @@ func GetOrSet(ctx context.Context, p Provider, key string, value any, getter fun
 GetOrSet decodes the cached value for key into value \(a non\-nil pointer\). On a miss it calls getter, which must return a pointer, and copies the pointed\-to result into value. A successful result is also stored with the provider's default TTL \(Set with ttl 0\). A cache write failure is returned without changing value. Interface destinations are unsupported on a miss because providers cannot reliably restore the getter's concrete type. Concurrent misses may call getter more than once. Errors other than a miss are returned as\-is.
 
 <a name="IsNotFoundError"></a>
-## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L214>)
+## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L221>)
 
 ```go
 func IsNotFoundError(err error) bool
@@ -122,9 +124,9 @@ type Config struct {
 ```
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L80-L124>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L82-L131>)
 
-Provider is the cache interface implemented by the memory, Redis and proxy providers. Implementations are safe for concurrent use.
+Provider is the cache interface implemented by the memory, Redis and proxy providers. Implementations are safe for concurrent use. A key is cleaned as a rooted path and stored under the provider prefix, so ".." cannot leave the prefix.
 
 ```go
 type Provider interface {
@@ -146,8 +148,13 @@ type Provider interface {
     // failed subscription that reports ErrClosed.
     // It is rare to Close a Client, as the Client is meant to be long-lived and shared between many goroutines.
     Close() error
-    // Keys returns the keys matching pattern (glob for Redis, prefix match
-    // for memory). It scans the whole keyspace and is meant for tests.
+    // Keys returns the unexpired keys, relative to the provider, that
+    // match the Redis glob pattern ('*' and '?' also match '/'), which is
+    // relative to the provider and cleaned like a key; the prefix matches
+    // literally. Only keys that Get can read are listed, and the key ""
+    // only for an empty pattern. The memory provider matches as Redis KEYS
+    // does (ranges with bytes >= 0x80 compare unsigned).
+    // It scans the whole keyspace and is meant for tests.
     Keys(ctx context.Context, pattern string) ([]string, error)
 
     // IsLocal returns true when the cache lives in this process only.
@@ -175,31 +182,31 @@ type Provider interface {
 ```
 
 <a name="NewMemoryProvider"></a>
-### func [NewMemoryProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/memory.go#L38>)
+### func [NewMemoryProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/memory.go#L43>)
 
 ```go
 func NewMemoryProvider(prefix string) Provider
 ```
 
-NewMemoryProvider returns an in\-process Provider whose keys are joined with prefix. Values are kept JSON encoded; the store is unbounded and expired entries are only dropped on Get or CleanExpired.
+NewMemoryProvider returns an in\-process Provider whose keys are stored under prefix like the Redis provider's \(an empty prefix becomes "/"\). Values are kept JSON encoded; the store is unbounded and expired entries are only dropped on Get or CleanExpired.
 
 <a name="NewProxyProvider"></a>
-### func [NewProxyProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/proxy.go#L17>)
+### func [NewProxyProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/proxy.go#L20>)
 
 ```go
 func NewProxyProvider(prefix string, prov Provider) Provider
 ```
 
-NewProxyProvider returns a Provider that prefixes every key with prefix and delegates to prov. Its Close is a no\-op \(the parent owns the connection\) and Publish/Subscribe pass channels through unprefixed.
+NewProxyProvider returns a Provider that stores every key under prefix in prov, which cleans the combined key again; like a key, prefix cannot leave prov's namespace. Keys strips prefix again. Its Close is a no\-op \(the parent owns the connection\) and Publish/Subscribe pass channels through unprefixed.
 
 <a name="NewRedisProvider"></a>
-### func [NewRedisProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/redis.go#L43>)
+### func [NewRedisProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/redis.go#L44>)
 
 ```go
 func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error)
 ```
 
-NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed with redis.ParseURL; cfg.ClientTLS files \(if set\) configure TLS and cfg.Password overrides the URL credentials. An empty prefix becomes "/"; a zero cfg.TTL becomes 1h. Maintenance notifications are disabled. The connection is established lazily, so a bad address only fails later.
+NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed with redis.ParseURL, and a malformed URL is reported without the URL, which may embed a password; cfg.ClientTLS files \(if set\) configure TLS and cfg.Password overrides the URL credentials. An empty prefix becomes "/"; a zero cfg.TTL becomes 1h. Maintenance notifications are disabled. The connection is established lazily, so a bad address only fails later.
 
 <a name="RedisConfig"></a>
 ## type [RedisConfig](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L37-L48>)
