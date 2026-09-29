@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -111,6 +112,38 @@ func TestStorageEmptyFolderUsesWorkingDirectory(t *testing.T) {
 	assert.Equal(t, key.KeyID+".jwk", keyPath)
 	_, _, err = storage.LoadKey(key.KeyID)
 	require.NoError(t, err)
+}
+
+func TestNewStorageExpandsHome(t *testing.T) {
+	// not parallel: t.Setenv
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tcases := []struct {
+		folder   string
+		expected string
+	}{
+		{folder: "~", expected: home},
+		{folder: "~/", expected: home},
+		{folder: "~/creds/host", expected: filepath.Join(home, "creds", "host")},
+		{folder: "~user/creds", expected: "~user/creds"},
+		{folder: "creds/~", expected: "creds/~"},
+		{folder: "/var/~/creds", expected: "/var/~/creds"},
+		{folder: "$HOME/creds", expected: "$HOME/creds"},
+		{folder: "", expected: ""},
+	}
+	for _, tc := range tcases {
+		assert.Equal(t, tc.expected, NewStorage(tc.folder).Folder(), tc.folder)
+	}
+
+	// without $HOME the user database provides the home directory
+	t.Setenv("HOME", "")
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		assert.Equal(t, filepath.Join(u.HomeDir, "creds"), NewStorage("~/creds").Folder())
+	} else {
+		// without any home directory the folder is used as is
+		assert.Equal(t, "~/creds", NewStorage("~/creds").Folder())
+	}
 }
 
 func TestStorageReplacesCredentialSymlinks(t *testing.T) {

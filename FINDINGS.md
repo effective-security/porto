@@ -52,19 +52,12 @@ byte-exact test.
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-046 | pkg/retriable                           | `retriable.go` `New`                                                     | `request:` block without `retry_limit` silently disables retries                                                                             | correctness | MEDIUM   | Needs Approval |
-| P-056 | pkg/retriable                           | `retriable.go` `Do`                                                      | Backoff sleep ignores the request context; drained bodies are not closed                                                                     | correctness | LOW      | Open           |
-| P-057 | pkg/retriable                           | `retriable.go` `executeRequest`                                          | `RequestTimeout` cancel func discarded; timers live until the deadline                                                                       | performance | LOW      | Open           |
-| P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
-| P-060 | pkg/retriable                           | `nonce.go` `pushNonce`, `Nonce`                                          | Cache trim drops the newest nonce; `Nonce()` ignores context                                                                                 | bug         | LOW      | Open           |
-| P-061 | pkg/retriable                           | `retriable.go` `WithTLS`, `WithDNSServer`                                | Unchecked `*http.Transport` assertion; mutates a caller-supplied transport in place                                                          | bug         | LOW      | Needs Approval |
-| P-065 | pkg/retriable                           | `retriable.go` `RequestURL`                                              | Byte-offset slicing breaks URLs with userinfo                                                                                                | bug         | LOW      | Open           |
-| P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                                               | correctness | LOW      | Open           |
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
 | P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
 | P-074 | pkg/tlsconfig                           | `cipher_suites.go`                                                       | Modernization: derive cipher names from `tls.CipherSuites()` and reject insecure ones                                                        | correctness | LOW      | Needs Approval |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
+| P-083 | pkg/retriable                           | `retriable.go` `New`                                                     | `WithTransport` in options silently drops `ClientConfig.TLS`                                                                                 | security    | LOW      | Needs Approval |
 
 ## Details
 
@@ -152,21 +145,6 @@ byte-exact test.
 - Evidence: B06 verification (2026-09-28), `go test -coverpkg=./... -coverprofile=<file> ./...` followed by `go tool cover -func=<file>`, measured 83.5% total; CI `MIN_TESTCOV` is 90. This remains queued in B24.
 - Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
 
-### P-046 `request:` without `retry_limit`
-
-- Evidence: `pol.TotalRetryLimit = cfg.Request.RetryLimit` overwrites the default 5 with 0 whenever the block is present.
-- Fix: `cmp.Or(cfg.Request.RetryLimit, pol.TotalRetryLimit)` or a pointer field.
-
-### P-056 to P-066 retriable LOW items
-
-- P-056: `time.Sleep(sleepDuration)` ignores `ctx.Done()`; `consumeResponseBody` only drains.
-- P-057: `ctx, _ = c.ensureContext(...)` drops the cancel func.
-- P-058: `ShouldRetry` returns `LimitExceeded` for 429 before consulting `p.Retries`.
-- P-060: `c.nonces = c.nonces[nonceCacheLimit/2 : count-1]` drops the freshest nonce; `Nonce()` uses `context.Background()`.
-- P-061: `c.httpClient.Transport.(*http.Transport)` unchecked; `http.DefaultTransport` mutated when passed in.
-- P-065: `path := rawURL[len(host):]` with `host := u.Scheme + "://" + u.Host`.
-- P-066: `go-homedir` vs `resolve.ExpandPath`; `netutil.WaitForNetwork(time.Second)` in a constructor; `bodyCopy` of error responses unbounded.
-
 ### P-067 to P-074 remaining LOW items
 
 - P-067: `ctx: context.Background()` and `c.ctx.Done()` in `Close` cancels nothing.
@@ -180,9 +158,15 @@ byte-exact test.
 - Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
 - Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
+### P-083 `WithTransport` option drops `ClientConfig.TLS`
+
+- Evidence: found by the B16 review (2026-09-29). `New` applies `cfg.TLS` as a `WithTLS` option before the caller's options, so `New(ClientConfig{TLS: ...}, WithTransport(t))` returns no error and a client whose transport has none of the configured TLS settings: the configured trusted CA silently becomes the system roots and the client certificate is not sent. The B16 fail-closed rule covers only `WithTLS`/`WithDNSServer` applied to a non-`*http.Transport`.
+- Impact: a caller that combines a TLS config file with a custom transport trusts more CAs than configured, without an error.
+- Fix (needs a decision): apply `cfg.TLS` to the final transport after the options unless an option called `WithTLS` (failing closed on a non-`*http.Transport`), or return an error when an option replaces the transport of a config with `TLS`.
+
 ## Notes on items needing approval
 
 - P-013: changes observable auth behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
-- P-046, P-058, P-061: currently silent or panicking paths become errors or warnings.
 - P-073, P-074: public type behavior or config surface.
+- P-083: changes which TLS configuration wins, or rejects a combination that is accepted today.

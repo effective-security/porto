@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,7 +23,6 @@ import (
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	jose "github.com/go-jose/go-jose/v4"
-	"github.com/mitchellh/go-homedir"
 )
 
 const (
@@ -38,18 +38,40 @@ type Storage struct {
 	folder string
 }
 
-// NewStorage returns a Storage rooted at baseFolder; a leading "~" is
-// expanded to the home directory. An empty folder uses the working directory.
+// NewStorage returns a Storage rooted at baseFolder; a leading "~" (alone
+// or followed by a path separator) is expanded to the home directory
+// ($HOME, else the current user's home from the user database), and the
+// folder is used as is when neither is known.
+// "~user" and environment variables are not expanded.
+// An empty folder uses the working directory.
 // A missing folder is created lazily on write with mode 0700; the mode of an
 // existing folder is not changed.
 func NewStorage(baseFolder string) *Storage {
-	folder, err := homedir.Expand(baseFolder)
+	folder, err := expandHome(baseFolder)
 	if err != nil {
 		logger.KV(xlog.ERROR, "baseFolder", baseFolder, "err", err.Error())
 		// fallback
 		folder = baseFolder
 	}
 	return &Storage{folder: folder}
+}
+
+// expandHome replaces a leading "~" (alone or followed by a path
+// separator) with the home directory.
+func expandHome(folder string) (string, error) {
+	if folder != "~" && !strings.HasPrefix(folder, "~/") &&
+		!strings.HasPrefix(folder, "~"+string(os.PathSeparator)) {
+		return folder, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		u, uerr := user.Current()
+		if uerr != nil || u.HomeDir == "" {
+			return "", errors.WithMessage(err, "unable to expand home folder")
+		}
+		home = u.HomeDir
+	}
+	return filepath.Join(home, folder[1:]), nil
 }
 
 // Clean removes the whole storage folder, including tokens and keys.

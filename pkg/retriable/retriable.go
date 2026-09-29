@@ -2,17 +2,20 @@ package retriable
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,7 +40,9 @@ const (
 	Success = "success"
 	// NotFound is returned when the request returned 404.
 	NotFound = "not-found"
-	// LimitExceeded is returned when TotalRetryLimit was reached, or on 429.
+	// LimitExceeded is returned when TotalRetryLimit was reached, on 429
+	// without a Retries entry, and by RetryAfterShouldRetryFactory when the
+	// server asks to wait longer than its maxWait.
 	LimitExceeded = "limit-exceeded"
 	// DeadlineExceeded is returned when the request context deadline passed.
 	DeadlineExceeded = "deadline"
@@ -45,6 +50,22 @@ const (
 	Cancelled = "cancelled"
 	// NonRetriableError is returned for errors and statuses that are never retried.
 	NonRetriableError = "non-retriable"
+)
+
+const (
+	// maxErrorBodySize bounds how much of an error response body
+	// DecodeResponse reads, and how much of a retried response body Do
+	// drains so that its connection can be reused.
+	maxErrorBodySize = 64 << 10
+
+	// defaultTransportPoolSize is the per-host and total connection limit
+	// of the transport installed by WithTLS and WithDNSServer when none is
+	// set.
+	defaultTransportPoolSize = 100
+
+	// defaultMaxRetryAfter is the longest Retry-After wait DefaultPolicy
+	// honors for 429; a longer one stops the retries.
+	defaultMaxRetryAfter = 30 * time.Second
 )
 
 // contextValueName is a custom type to be used as a key in context values map
@@ -167,9 +188,9 @@ type HTTPClientWithNonce interface {
 // call). It returns whether to retry, how long to sleep before the next
 // attempt, and a short reason string used for logging (see the Success,
 // LimitExceeded, ... constants). If ShouldRetry returns false, the Client
-// stops retrying and returns the response to the caller. The Client drains
-// the response body when retrying, but when it stops it is up to the caller
-// of Do to close the returned response body.
+// stops retrying and returns the response to the caller. When retrying, the
+// Client drains (up to 64 KiB) and closes the response body; when it stops
+// it is up to the caller of Do to close the returned response body.
 type ShouldRetry func(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string)
 
 // BeforeSendRequest is a hook invoked once per request (before retries)
@@ -186,6 +207,7 @@ type Policy struct {
 
 	// TotalRetryLimit is the maximum number of retries across all status codes;
 	// once reached ShouldRetry returns LimitExceeded regardless of Retries.
+	// Zero or a negative value disables retries.
 	TotalRetryLimit int
 
 	// RequestTimeout, when > 0, bounds each call made through Request and the
@@ -211,7 +233,7 @@ func (f optionFunc) applyOption(opts *Client) { f(opts) }
 
 // WithName is a ClientOption that specifies client's name for logging purposes.
 //
-//	retriable.New(retriable.WithName("tlsclient"))
+//	retriable.New(cfg, retriable.WithName("tlsclient"))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -223,7 +245,7 @@ func WithName(name string) ClientOption {
 
 // WithPolicy is a ClientOption that specifies retriable policy.
 //
-//	retriable.New(retriable.WithPolicy(p))
+//	retriable.New(cfg, retriable.WithPolicy(p))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -233,9 +255,11 @@ func WithPolicy(policy Policy) ClientOption {
 	})
 }
 
-// WithTLS is a ClientOption that specifies TLS configuration.
+// WithTLS is a ClientOption that specifies TLS configuration;
+// see Client.WithTLS. New returns an error when the transport is not an
+// *http.Transport.
 //
-//	retriable.New(retriable.WithTLS(t))
+//	retriable.New(cfg, retriable.WithTLS(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -247,7 +271,7 @@ func WithTLS(tlsConfig *tls.Config) ClientOption {
 
 // WithTransport is a ClientOption that specifies HTTP Transport configuration.
 //
-//	retriable.New(retriable.WithTransport(t))
+//	retriable.New(cfg, retriable.WithTransport(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -259,7 +283,7 @@ func WithTransport(transport http.RoundTripper) ClientOption {
 
 // WithTimeout is a ClientOption that specifies HTTP client timeout.
 //
-//	retriable.New(retriable.WithTimeout(t))
+//	retriable.New(cfg, retriable.WithTimeout(t))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
@@ -271,17 +295,18 @@ func WithTimeout(timeout time.Duration) ClientOption {
 
 // WithDNSServer is a ClientOption that allows to use custom
 // dns server for resolution
-// dns server must be specified in <host>:<port> format
+// dns server must be specified in <host>:<port> format;
+// see Client.WithDNSServer. New returns an error when the transport is not
+// an *http.Transport.
 //
-//	retriable.New(retriable.WithDNSServer(dns))
+//	retriable.New(cfg, retriable.WithDNSServer(dns))
 //
 // This option cannot be provided for constructors which produce result
 // objects.
-// Note that WithDNSServer applies changes to http client Transport object
-// and hence if used in conjuction with WithTransport method,
-// WithDNSServer should be called after WithTransport is called.
+// WithTransport replaces the transport, including the DNS setting, so when
+// both are used, WithDNSServer must come after WithTransport:
 //
-// retriable.New(retriable.WithTransport(t).WithDNSServer(dns))
+//	retriable.New(cfg, retriable.WithTransport(t), retriable.WithDNSServer(dns))
 func WithDNSServer(dns string) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithDNSServer(dns)
@@ -290,7 +315,7 @@ func WithDNSServer(dns string) ClientOption {
 
 // WithHost is a ClientOption that allows to set the host list.
 //
-//	retriable.New(retriable.WithHost(host))
+//	retriable.New(cfg, retriable.WithHost(host))
 func WithHost(host string) ClientOption {
 	return optionFunc(func(c *Client) {
 		c.WithHost(host)
@@ -345,6 +370,15 @@ type Client struct {
 
 	token          credentials.Token
 	callerIdentity credentials.CallerIdentity
+
+	// configErr is set when WithTLS or WithDNSServer could not change the
+	// transport; New and Do return it until WithTransport replaces the
+	// transport.
+	configErr error
+	// ownTransport reports that httpClient.Transport was created by WithTLS
+	// or WithDNSServer, so its idle connections are closed when it is
+	// replaced; a transport passed to WithTransport belongs to the caller.
+	ownTransport bool
 }
 
 type callerTokenRefresh struct {
@@ -360,13 +394,17 @@ func Default(host string) (*Client, error) {
 
 // New creates a Client from cfg and applies opts on top of it.
 // cfg.TLS (if set) is loaded from files and cfg.Request (if set) overrides
-// the RequestTimeout and TotalRetryLimit of DefaultPolicy.
-// It returns an error only when the TLS files cannot be loaded.
+// the RequestTimeout and TotalRetryLimit of DefaultPolicy with its non-zero
+// values (see RequestPolicy).
+// It returns an error when the TLS files cannot be loaded, or when WithTLS
+// or WithDNSServer cannot change the transport: one set by WithTransport,
+// or http.DefaultTransport when none is set, that is not an *http.Transport.
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	dopts := []ClientOption{
 		WithHost(cfg.Host),
 	}
 
+	// FINDINGS P-083: a WithTransport in opts replaces this TLS config
 	if cfg.TLS != nil {
 		tlscfg, err := tlsconfig.NewClientTLSFromFiles(
 			cfg.TLS.CertFile,
@@ -381,8 +419,8 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 
 	if cfg.Request != nil {
 		pol := DefaultPolicy()
-		pol.RequestTimeout = cfg.Request.Timeout
-		pol.TotalRetryLimit = cfg.Request.RetryLimit
+		pol.RequestTimeout = cmp.Or(cfg.Request.Timeout, pol.RequestTimeout)
+		pol.TotalRetryLimit = cmp.Or(cfg.Request.RetryLimit, pol.TotalRetryLimit)
 		dopts = append(dopts, WithPolicy(pol))
 	}
 
@@ -400,11 +438,15 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	for _, opt := range dopts {
 		opt.applyOption(c)
 	}
+	if c.configErr != nil {
+		return nil, c.configErr
+	}
 	return c, nil
 }
 
 // HTTPClient returns the underlying *http.Client, for callers that need
-// to tweak the transport directly.
+// to tweak it directly. Such changes are not synchronized with requests in
+// flight; make them before the client is shared.
 func (c *Client) HTTPClient() *http.Client {
 	return c.httpClient
 }
@@ -508,37 +550,77 @@ func (c *Client) WithCallerIdentity(ci credentials.CallerIdentity) *Client {
 	return c
 }
 
-// WithTLS sets the TLS configuration of the transport. When no transport
-// has been set yet, a clone of http.DefaultTransport with 100 max
-// (idle) connections per host is installed; otherwise the existing
-// transport is modified in place and must be an *http.Transport.
+// WithTLS sets the TLS configuration of the transport. It installs a clone
+// of the current *http.Transport with TLSClientConfig replaced, so a
+// transport supplied with WithTransport (or http.DefaultTransport) is never
+// modified; when no transport is set, the clone is made from
+// http.DefaultTransport with 100 max (idle) connections per host.
+// When the transport is another http.RoundTripper, the configuration cannot
+// be applied: New returns an error, and every request fails with that error
+// until WithTransport replaces the transport.
 func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if c.httpClient.Transport == nil {
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.MaxIdleConnsPerHost = 100
-		tr.MaxConnsPerHost = 100
-		tr.MaxIdleConns = 100
-		tr.TLSClientConfig = tlsConfig
-
-		c.httpClient.Transport = tr
-
-		logger.KV(xlog.DEBUG, "reason", "new_transport")
-	} else {
-		c.httpClient.Transport.(*http.Transport).TLSClientConfig = tlsConfig
-		logger.KV(xlog.DEBUG, "reason", "update_transport")
+	tr, err := c.transportClone("TLS configuration")
+	if err != nil {
+		c.configErr = err
+		return c
 	}
+	tr.TLSClientConfig = tlsConfig
+	c.replaceTransport(tr, true)
 	return c
 }
 
-// WithTransport replaces the HTTP transport. Call it before WithTLS or
-// WithDNSServer, which modify the transport in place.
+// replaceTransport installs tr, closing the idle connections of the
+// replaced transport when the client created it. In-flight requests keep
+// using the replaced transport: an HTTP/1.1 connection in use closes when
+// it becomes idle, unless a later request on that transport reopens its
+// pool; others close after the transport's IdleConnTimeout, if any.
+// It must be called with c.lock held.
+func (c *Client) replaceTransport(tr http.RoundTripper, own bool) {
+	if prev, ok := c.httpClient.Transport.(*http.Transport); ok && c.ownTransport && prev != tr {
+		prev.CloseIdleConnections()
+	}
+	c.httpClient.Transport = tr
+	c.ownTransport = own
+}
+
+// transportClone returns a copy of the client's *http.Transport to change,
+// or a new one when none is set. It must be called with c.lock held.
+func (c *Client) transportClone(setting string) (*http.Transport, error) {
+	if c.httpClient.Transport == nil {
+		dt, ok := http.DefaultTransport.(*http.Transport)
+		if !ok {
+			return nil, errors.Errorf("unable to apply %s: http.DefaultTransport is %T, not *http.Transport; set a transport with WithTransport",
+				setting, http.DefaultTransport)
+		}
+		tr := dt.Clone()
+		tr.MaxIdleConnsPerHost = defaultTransportPoolSize
+		tr.MaxConnsPerHost = defaultTransportPoolSize
+		tr.MaxIdleConns = defaultTransportPoolSize
+		logger.KV(xlog.DEBUG, "reason", "new_transport")
+		return tr, nil
+	}
+	tr, ok := c.httpClient.Transport.(*http.Transport)
+	if !ok {
+		return nil, errors.Errorf("unable to apply %s: transport is %T, not *http.Transport",
+			setting, c.httpClient.Transport)
+	}
+	logger.KV(xlog.DEBUG, "reason", "update_transport")
+	return tr.Clone(), nil
+}
+
+// WithTransport replaces the HTTP transport, including any TLS or DNS
+// setting made before, and clears an error left by WithTLS or WithDNSServer.
+// Call it before WithTLS or WithDNSServer, which install modified copies of
+// an *http.Transport. The idle connections of a transport that WithTLS or
+// WithDNSServer created are closed; the caller's transport is left as is.
 func (c *Client) WithTransport(transport http.RoundTripper) *Client {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	c.httpClient.Transport = transport
+	c.replaceTransport(transport, false)
+	c.configErr = nil
 	return c
 }
 
@@ -551,38 +633,42 @@ func (c *Client) WithTimeout(timeout time.Duration) *Client {
 	return c
 }
 
+// localIP resolves the X-CLIENT-IP value; tests replace it.
+var localIP = netutil.GetLocalIP
+
 // WithUserAgent adds the User-Agent, X-CLIENT-HOSTNAME and X-CLIENT-IP
-// headers to every request. It may block up to one second while waiting
-// for a network interface to resolve the local IP.
+// headers to every request. The host name and the first non-loopback IPv4
+// address are read once, without waiting for the network; a value that
+// cannot be resolved is not sent.
 func (c *Client) WithUserAgent(name string) *Client {
-	ipaddr, _ := netutil.WaitForNetwork(time.Second)
-	hostname, _ := os.Hostname()
-	c.AddHeader(header.UserAgent, name)
-	c.AddHeader("X-CLIENT-HOSTNAME", hostname)
-	c.AddHeader("X-CLIENT-IP", ipaddr)
-	return c
+	headers := map[string]string{
+		header.UserAgent: name,
+	}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		headers[header.XClientHostname] = hostname
+	}
+	if ipaddr, err := localIP(); err == nil && ipaddr != "" {
+		headers[header.XClientIP] = ipaddr
+	}
+	return c.WithHeaders(headers)
 }
 
 // WithDNSServer makes the transport resolve names through the given DNS
 // server, which must be specified in <host>:<port> format.
-// When no transport has been set yet, a clone of http.DefaultTransport is
-// installed; otherwise the existing transport must be an *http.Transport
-// and its DialContext is replaced in place.
+// Like WithTLS, it installs a clone of the current *http.Transport (of
+// http.DefaultTransport when none is set) with DialContext replaced, and
+// records an error returned by New and every request when the transport is
+// another http.RoundTripper.
 func (c *Client) WithDNSServer(dns string) *Client {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	if c.httpClient.Transport == nil {
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-		tr.MaxIdleConnsPerHost = 100
-		tr.MaxConnsPerHost = 100
-		tr.MaxIdleConns = 100
-
-		c.httpClient.Transport = tr
-	} else {
-		logger.KV(xlog.DEBUG, "reason", "update_transport")
+	tr, err := c.transportClone("DNS server")
+	if err != nil {
+		c.configErr = err
+		return c
 	}
-	c.httpClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		d := net.Dialer{}
 		d.Resolver = &net.Resolver{
 			PreferGo: true,
@@ -593,6 +679,7 @@ func (c *Client) WithDNSServer(dns string) *Client {
 		}
 		return d.DialContext(ctx, network, addr)
 	}
+	c.replaceTransport(tr, true)
 	return c
 }
 
@@ -624,19 +711,21 @@ func (c *Client) WithNonce(path, headerName string) {
 	c.nonceProvider = NewNonceProvider(c, path, headerName)
 }
 
-// DefaultPolicy returns the policy used by New: connection errors are
-// retried up to 3 times with a 2s wait, 502 and 503 up to 5 times with a 1s
-// wait, TotalRetryLimit is 5, no RequestTimeout, and
+// DefaultPolicy returns the policy used by New: TotalRetryLimit is 5;
+// connection errors are retried up to 4 times with a 2s wait
+// (DefaultShouldRetryFactory(3, ...) allows retries while the retry count
+// is <= 3); 502 and 503 up to 5 times with a 1s wait; 429 up to 3 times,
+// waiting for the Retry-After of the response, or 1s without one, and not
+// at all when Retry-After asks for more than 30s
+// (see RetryAfterShouldRetryFactory). There is no RequestTimeout, and
 // DefaultNonRetriableErrors are never retried.
-// Note that 429 is registered but never reached, because ShouldRetry
-// returns LimitExceeded for 429 before consulting Retries.
 func DefaultPolicy() Policy {
 	return Policy{
 		Retries: map[int]ShouldRetry{
 			// 0 is connection related
 			0: DefaultShouldRetryFactory(3, time.Second*2, "connection"),
 			// TooManyRequests (429) is returned when rate limit is exceeded
-			http.StatusTooManyRequests: DefaultShouldRetryFactory(2, time.Second, "rate-limit"),
+			http.StatusTooManyRequests: RetryAfterShouldRetryFactory(2, time.Second, defaultMaxRetryAfter, "rate-limit"),
 			// Unavailble (503) is returned when is not ready yet
 			http.StatusServiceUnavailable: DefaultShouldRetryFactory(5, time.Second, "unavailable"),
 			// Bad Gateway (502)
@@ -649,14 +738,31 @@ func DefaultPolicy() Policy {
 }
 
 // RequestURL is similar to Request but takes a raw URL; the host
-// (scheme://host[:port]) and the remaining path are derived from it.
+// (scheme://host[:port]) and the request URI (escaped path, query and
+// fragment) are derived from the parsed URL. A URL without a scheme, an
+// opaque URL (scheme:opaque) or one with user info (credentials) is an
+// error; set credentials with SetAuthorization, WithCallerIdentity or
+// headers instead.
 func (c *Client) RequestURL(ctx context.Context, method, rawURL string, requestBody any, responseBody any) (http.Header, int, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, 0, errors.WithStack(err)
 	}
-	host := u.Scheme + "://" + u.Host
-	path := rawURL[len(host):]
+	if u.Scheme == "" {
+		return nil, 0, errors.New("invalid URL: missing scheme")
+	}
+	if u.Opaque != "" {
+		return nil, 0, errors.New("invalid URL: opaque URLs are not supported")
+	}
+	if u.User != nil {
+		return nil, 0, errors.New("invalid URL: user info is not supported")
+	}
+	// re-escape the host, e.g. the "%" of an IPv6 zone
+	host := u.Scheme + "://" + strings.TrimPrefix((&url.URL{Host: u.Host}).String(), "//")
+	path := u.RequestURI()
+	if u.Fragment != "" {
+		path += "#" + u.EscapedFragment()
+	}
 	return c.Request(ctx, method, host, path, requestBody, responseBody)
 }
 
@@ -729,44 +835,52 @@ func (c *Client) ensureContext(ctx context.Context, httpMethod, path string) (co
 	return ctx, noop
 }
 
+// cancelOnClose releases the RequestTimeout context of a response when its
+// body is closed; the context must outlive the call so the body can be read.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+// Close closes the body and releases the request context.
+func (b *cancelOnClose) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
+}
+
+// executeRequest sends the request with RequestTimeout applied; the returned
+// body releases the timeout context when closed.
 func (c *Client) executeRequest(ctx context.Context, httpMethod string, host string, path string, body io.ReadSeeker) (*http.Response, error) {
 	if len(host) == 0 {
 		return nil, errors.Errorf("invalid parameter: host")
 	}
 
-	var err error
-	var resp *http.Response
-
-	// NOTE: do not `defer cancel()` context as it will cause error
-	// when reading the body
-	ctx, _ = c.ensureContext(ctx, httpMethod, path)
+	ctx, cancel := c.ensureContext(ctx, httpMethod, path)
 	ctx = correlation.WithID(ctx)
 
-	resp, err = c.doHTTP(ctx, httpMethod, host, path, body)
+	resp, err := c.doHTTP(ctx, httpMethod, host, path, body)
 	c.lock.RLock()
 	name := c.Name
 	c.lock.RUnlock()
 	if err != nil {
+		cancel()
 		logger.ContextKV(ctx, xlog.DEBUG,
 			"client", name,
 			"method", httpMethod,
 			"host", host,
 			"path", path,
 			"err", err)
-	} else {
-		logger.ContextKV(ctx, xlog.DEBUG,
-			"client", name,
-			"method", httpMethod,
-			"host", host,
-			"path", path,
-			"status", resp.StatusCode)
-	}
-
-	// either success or error
-	if err != nil {
 		return nil, err
 	}
 
+	logger.ContextKV(ctx, xlog.DEBUG,
+		"client", name,
+		"method", httpMethod,
+		"host", host,
+		"path", path,
+		"status", resp.StatusCode)
+	resp.Body = &cancelOnClose{ReadCloser: resp.Body, cancel: cancel}
 	return resp, nil
 }
 
@@ -946,29 +1060,45 @@ func callerTokenValid(token credentials.Token) bool {
 // the DPoP proof is signed for each attempt. The body is buffered so it can
 // be rewound for each retry.
 // Do does not apply Policy.RequestTimeout: bound r's context yourself.
+// The wait between attempts ends early when r's context is done, and Do
+// then returns an error wrapping the context error. While the context is
+// live, a retry that could not start before its deadline is not attempted,
+// and the last response (or transport error) is returned instead.
 // When retries are exhausted the last response (or transport error) is
 // returned; a non-2xx status is not converted to an error here.
+// Do returns the error recorded by WithTLS or WithDNSServer when they could
+// not change the transport, and closes r.Body.
 func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 	var retries int
 
+	c.lock.RLock()
+	policy := c.Policy
+	name := c.Name
+	// copy the client so that transport setters do not race with this request
+	httpClient := *c.httpClient
+	configErr := c.configErr
+	c.lock.RUnlock()
+	if configErr != nil {
+		if r.Body != nil {
+			_ = r.Body.Close()
+		}
+		return nil, errors.WithStack(configErr)
+	}
+
 	req, signer, err := c.convertRequest(r)
 	if err != nil {
 		return nil, err
 	}
-	c.lock.RLock()
-	policy := c.Policy
-	name := c.Name
-	httpClient := c.httpClient
-	c.lock.RUnlock()
+	ctx := req.Context()
 
 	for retries = 0; ; retries++ {
 		// Always rewind the request body when non-nil.
 		if req.body != nil {
 			body, err := req.body()
 			if err != nil {
-				return resp, err
+				return nil, errors.WithStack(err)
 			}
 			if c, ok := body.(io.ReadCloser); ok {
 				req.Body = c
@@ -989,7 +1119,7 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 		resp, err = httpClient.Do(req.Request)
 		elapsed := time.Since(started)
 		if err != nil {
-			logger.ContextKV(r.Context(), xlog.WARNING,
+			logger.ContextKV(ctx, xlog.WARNING,
 				"client", name,
 				"retries", retries,
 				"host", req.Host,
@@ -1002,23 +1132,34 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 			break
 		}
 
-		desc := fmt.Sprintf("%s %s", req.Method, req.URL)
-		if resp != nil {
-			if resp.Status != "" {
-				desc += " "
-				desc += resp.Status
-			}
-			c.consumeResponseBody(resp)
+		desc := fmt.Sprintf("%s %s", req.Method, req.URL.Redacted())
+		if resp != nil && resp.Status != "" {
+			desc += " " + resp.Status
 		}
 
-		logger.ContextKV(r.Context(), xlog.WARNING,
+		// a retry that cannot start before the deadline returns this response
+		if deadline, ok := ctx.Deadline(); ok && ctx.Err() == nil && time.Until(deadline) < sleepDuration {
+			logger.ContextKV(ctx, xlog.WARNING,
+				"client", name,
+				"retries", retries,
+				"description", desc,
+				"reason", DeadlineExceeded,
+				"sleep", sleepDuration)
+			break
+		}
+
+		drainResponseBody(resp)
+
+		logger.ContextKV(ctx, xlog.WARNING,
 			"client", name,
 			"retries", retries,
 			"description", desc,
 			"reason", reason,
 			"sleep", sleepDuration)
 
-		time.Sleep(sleepDuration)
+		if err := waitRetry(ctx, sleepDuration); err != nil {
+			return nil, errors.WithMessagef(err, "%s %s: waiting to retry", req.Method, req.URL.Redacted())
+		}
 	}
 
 	debugRequest(req.Request)
@@ -1026,10 +1167,31 @@ func (c *Client) Do(r *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-// consumeResponseBody is a helper to safely consume the remaining response body
-func (c *Client) consumeResponseBody(r *http.Response) {
+// drainResponseBody reads up to maxErrorBodySize of the body of a response
+// that is retried, so that its connection can be reused, and closes it.
+func drainResponseBody(r *http.Response) {
 	if r != nil && r.Body != nil {
-		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = io.CopyN(io.Discard, r.Body, maxErrorBodySize)
+		_ = r.Body.Close()
+	}
+}
+
+// waitRetry waits d, or until ctx is done, in which case it returns the
+// context error.
+func waitRetry(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return errors.WithStack(err)
+	}
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return errors.WithStack(ctx.Err())
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -1044,40 +1206,46 @@ func debugRequest(r *http.Request) {
 	}
 }
 
-func debugResponse(w *http.Response, body bool) {
+// debugResponse dumps the response headers and the given (already read)
+// body at DEBUG level.
+func debugResponse(w *http.Response, body []byte) {
 	if logger.LevelAt(xlog.DEBUG) {
-		b, err := httputil.DumpResponse(w, body)
+		b, err := httputil.DumpResponse(w, false)
 		if err != nil {
 			logger.KV(xlog.ERROR, "err", err.Error())
 		} else {
-			logger.Debug(string(b))
+			logger.Debug(string(append(b, body...)))
 		}
 	}
 }
 
 // DecodeResponse maps an HTTP response to either the body parameter or an
 // error, and returns the response headers and status code in both cases.
-// 204 returns immediately; a status >= 300 is decoded as an *httperror.Error
-// when the body is a JSON error document with a "code", otherwise the raw
-// body text becomes the error message. For other statuses the body is
+// 204 returns immediately; for a status >= 300 at most 64 KiB of the body
+// is read, and it is decoded as an *httperror.Error when it is a JSON error
+// document with a "code", otherwise the (possibly truncated) body text
+// becomes the error message. For other statuses the body is
 // copied into body when it is an io.Writer, or JSON-decoded into it
 // (numbers are decoded as json.Number). It does not close resp.Body.
 func (c *Client) DecodeResponse(resp *http.Response, body any) (http.Header, int, error) {
-	debugResponse(resp, resp.StatusCode >= 300)
 	if resp.StatusCode == http.StatusNoContent {
+		debugResponse(resp, nil)
 		return resp.Header, resp.StatusCode, nil
 	} else if resp.StatusCode >= http.StatusMultipleChoices { // 300
+		errBody, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
+		debugResponse(resp, errBody)
+		if err != nil {
+			return resp.Header, resp.StatusCode, errors.WithMessagef(err, "unable to read response body, status %d", resp.StatusCode)
+		}
 		e := new(httperror.Error)
 		e.HTTPStatus = resp.StatusCode
-		bodyCopy := bytes.Buffer{}
-		bodyTee := io.TeeReader(resp.Body, &bodyCopy)
-		if err := json.NewDecoder(bodyTee).Decode(e); err != nil || e.Code == "" {
-			_, _ = io.Copy(io.Discard, bodyTee) // ensure all of body is read
+		if err := json.NewDecoder(bytes.NewReader(errBody)).Decode(e); err != nil || e.Code == "" {
 			// Unable to parse as Error, then return body as error
-			return resp.Header, resp.StatusCode, errors.New(bodyCopy.String())
+			return resp.Header, resp.StatusCode, errors.New(string(errBody))
 		}
 		return resp.Header, resp.StatusCode, e
 	}
+	debugResponse(resp, nil)
 
 	switch typ := body.(type) {
 	case io.Writer:
@@ -1104,6 +1272,55 @@ func DefaultShouldRetryFactory(limit int, wait time.Duration, reason string) Sho
 	}
 }
 
+// RetryAfterShouldRetryFactory returns a ShouldRetry that, like
+// DefaultShouldRetryFactory, retries while the retry count is <= limit,
+// but waits for the Retry-After of the response (delay-seconds or an HTTP
+// date; a past date means no wait) and uses wait only when the response
+// has no valid Retry-After. When Retry-After asks for more than maxWait,
+// it does not retry and reports LimitExceeded; a maxWait <= 0 sets no
+// bound. Register it for 429 or 503.
+func RetryAfterShouldRetryFactory(limit int, wait, maxWait time.Duration, reason string) ShouldRetry {
+	return func(_ *http.Request, resp *http.Response, _ error, retries int) (bool, time.Duration, string) {
+		if limit < retries {
+			return false, wait, reason
+		}
+		if resp == nil {
+			return true, wait, reason
+		}
+		delay, ok := parseRetryAfter(resp.Header.Get(header.RetryAfter), time.Now())
+		if !ok {
+			return true, wait, reason
+		}
+		if maxWait > 0 && delay > maxWait {
+			return false, delay, LimitExceeded
+		}
+		return true, delay, reason
+	}
+}
+
+// parseRetryAfter parses a Retry-After value (RFC 9110, section 10.2.3):
+// delay-seconds, or an HTTP date relative to now. A date in the past is a
+// zero delay, and delay-seconds too large for a time.Duration saturate.
+func parseRetryAfter(value string, now time.Time) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		if seconds > uint64(math.MaxInt64/int64(time.Second)) {
+			return time.Duration(math.MaxInt64), true
+		}
+		return time.Duration(seconds) * time.Second, true
+	} else if errors.Is(err, strconv.ErrRange) {
+		return time.Duration(math.MaxInt64), true
+	}
+	date, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	return max(date.Sub(now), 0), true
+}
+
 // DefaultNonRetriableErrors lists substrings of transport error messages
 // (DNS, TLS and certificate failures) that the default policy never retries.
 var DefaultNonRetriableErrors = []string{
@@ -1123,7 +1340,8 @@ var DefaultNonRetriableErrors = []string{
 // wait first. Order of evaluation: a cancelled or expired request context
 // is never retried; TotalRetryLimit is enforced; transport errors matching
 // NonRetriableErrors are not retried, others are delegated to Retries[0];
-// statuses < 400 succeed; 404 and 429 are not retried; other 4xx are
+// statuses < 400 succeed; 404 is not retried; 429 is delegated to
+// Retries[429] if present and otherwise reports LimitExceeded; other 4xx are
 // non-retriable; 5xx are delegated to Retries[status] if present.
 func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, retries int) (bool, time.Duration, string) {
 	ctx := r.Context()
@@ -1191,11 +1409,14 @@ func (p *Policy) ShouldRetry(r *http.Request, resp *http.Response, err error, re
 		return false, 0, LimitExceeded
 	}
 
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == http.StatusNotFound {
 		return false, 0, NotFound
 	}
 
-	if resp.StatusCode == 429 {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if fn, ok := p.Retries[http.StatusTooManyRequests]; ok {
+			return fn(r, resp, err, retries)
+		}
 		return false, 0, LimitExceeded
 	}
 

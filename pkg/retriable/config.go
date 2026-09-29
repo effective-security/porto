@@ -110,12 +110,15 @@ func (c *ClientConfig) LoadAuthToken() error {
 }
 
 // RequestPolicy is the configurable subset of Policy.
-// When present in ClientConfig, its values replace TotalRetryLimit and
-// RequestTimeout of DefaultPolicy, even when zero.
+// When present in ClientConfig, its non-zero values replace TotalRetryLimit
+// and RequestTimeout of DefaultPolicy; zero (or an omitted field) keeps the
+// default.
 type RequestPolicy struct {
-	// RetryLimit sets Policy.TotalRetryLimit.
+	// RetryLimit sets Policy.TotalRetryLimit. Zero keeps the default (5);
+	// a negative value disables retries.
 	RetryLimit int `json:"retry_limit,omitempty" yaml:"retry_limit,omitempty"`
-	// Timeout sets Policy.RequestTimeout (e.g. "2s").
+	// Timeout sets Policy.RequestTimeout (e.g. "2s"). Zero keeps the
+	// default (none); a negative value also means no timeout.
 	Timeout time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 

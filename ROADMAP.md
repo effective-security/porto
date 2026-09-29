@@ -51,7 +51,7 @@ There are two DPoP follow-ups if those behaviors matter to your deployment:
 
 HTTP proof verification (gserver/roles/roles.go:293) assumes an https origin when the request URL has no scheme. Plain HTTP or a different public origin needs an explicit trusted external URL.
 
-Proof verification (gserver/roles/roles.go:518) and client proof signing (pkg/retriable/retriable.go:983) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
+Proof verification (gserver/roles/roles.go:518) and client proof signing (pkg/retriable/retriable.go:1111) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
 
 The stricter JWT time, algorithm, and key checks may reject previously accepted tokens; Porto parses tokens supplied by callers and does not issue them here.
 

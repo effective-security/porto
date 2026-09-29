@@ -143,7 +143,11 @@ func TestRateLimit(t *testing.T) {
 	assert.Equal(t, "TestRateLimit", srv.Name())
 	assert.True(t, srv.IsReady())
 
-	client, err := retriable.Default(cfg.ListenURLs[0])
+	// the default policy retries a 429 after 1s, when the limiter admits it
+	// again; this test checks the limiter's own response
+	pol := retriable.DefaultPolicy()
+	delete(pol.Retries, http.StatusTooManyRequests)
+	client, err := retriable.New(retriable.ClientConfig{Host: cfg.ListenURLs[0]}, retriable.WithPolicy(pol))
 	require.NoError(t, err)
 
 	ctx := context.Background()

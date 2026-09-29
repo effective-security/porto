@@ -144,11 +144,13 @@ func TestDefaultPolicy(t *testing.T) {
 		statusCode int
 		err        error
 	}{
-		// 429 is rate limit exceeded
-		{false, retriable.LimitExceeded, 0, 429, nil},
-		{false, retriable.LimitExceeded, 1, 429, nil},
-		{false, retriable.LimitExceeded, 3, 429, nil},
-		{false, retriable.LimitExceeded, 4, 429, nil},
+		// 429 is rate limit exceeded: retried up to 3 times without Retry-After
+		{true, "rate-limit", 0, 429, nil},
+		{true, "rate-limit", 1, 429, nil},
+		{true, "rate-limit", 2, 429, nil},
+		{false, "rate-limit", 3, 429, nil},
+		{false, "rate-limit", 4, 429, nil},
+		{false, retriable.LimitExceeded, 5, 429, nil},
 		// 503 is service unavailable, which is returned during leader elections
 		{true, "unavailable", 0, 503, nil},
 		{true, "unavailable", 1, 503, nil},

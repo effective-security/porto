@@ -55,6 +55,9 @@ const (
 	Origin = "Origin"
 	// ReplayNonce is HTTP header for "Replay-Nonce"
 	ReplayNonce = "Replay-Nonce"
+	// RetryAfter is sent with 429 and 503 responses to tell the client how
+	// long to wait before retrying, as delay-seconds or an HTTP date.
+	RetryAfter = "Retry-After"
 	// TextPlain is HTTP header value for "text/plain"
 	TextPlain = "text/plain"
 	// UserAgent is HTTP header value for "User-Agent"
@@ -63,6 +66,13 @@ const (
 	Vary = "Vary"
 	// XHostname contains the name of the HTTP header to indicate which host requested the signature
 	XHostname = "X-HostName"
+	// XClientHostname carries the host name of the calling machine,
+	// set by the retriable client's WithUserAgent.
+	XClientHostname = "X-CLIENT-HOSTNAME"
+	// XClientIP carries a local IP address of the calling machine,
+	// set by the retriable client's WithUserAgent. It is informational and
+	// not a trusted client address.
+	XClientIP = "X-CLIENT-IP"
 	// XCorrelationID is HTTP header for "X-Correlation-ID"
 	XCorrelationID = "X-Correlation-ID"
 	// XDeviceID is HTTP header for "X-Device-ID"
