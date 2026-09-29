@@ -317,14 +317,87 @@ Connections without keepalive support (non-TCP) are returned unchanged
 instead of panicking, and a failure to set the options is logged at DEBUG
 and does not fail `Accept`. The `pkg/tlsconfig` part of P-074 stays in B23.
 
+## Completed B16 decision — HTTP client retries and transport
+
+`RequestPolicy` values replace the `DefaultPolicy` values only when
+non-zero (`cmp.Or`), so a `request:` block with only `timeout` keeps the 5
+retries; a negative `retry_limit` disables retries (the zero/negative
+convention of B06). Configs that wrote `retry_limit: 0` to disable retries
+must write `-1`.
+
+`ShouldRetry` delegates 429 to `Retries[429]` like a 5xx status; without an
+entry it still stops with `LimitExceeded`. `DefaultPolicy` registers the new
+`RetryAfterShouldRetryFactory(2, 1s, 30s, "rate-limit")`: up to 3 retries,
+each after the response's `Retry-After` (delay-seconds or an HTTP date; a
+past date means no wait; an overflowing value saturates), or 1s without a
+valid one. A `Retry-After` above 30s stops at once with `LimitExceeded`, so
+callers are not held for minutes. The factory is exported for custom
+policies (for example 503). The `gserver` rate limiter (tollbooth) sends no
+`Retry-After`, so a default client now retries its 429 after 1s, when the
+limiter usually admits it; `gserver` `TestRateLimit`, which checks the
+limiter's 429, now uses a policy without the 429 entry. `DefaultShouldRetryFactory(limit, ...)` keeps
+its `retries <= limit` semantics (limit+1 retries); the docs that called the
+default connection entry "3x" now say 4.
+
+`Do` waits between attempts on a timer and `ctx.Done()`: a cancelled or
+expired context ends the wait with an error wrapping the context error
+(`<METHOD> <URL>: waiting to retry: ...`, password redacted); while the
+context is live, a retry whose wait would pass its deadline is not
+attempted, and the last response is returned unread (once the deadline has
+passed, the body could not be read, so the context error is returned). Retried bodies are drained up to 64 KiB and
+closed; retry warnings redact URL passwords. `executeRequest` releases the
+`RequestTimeout` context when the returned body is closed (as `Request` and
+`HeadTo` do), or at once on error.
+
+The nonce cache drops its oldest half when full (previously it dropped the
+newest cached nonce). `NonceProvider` gains `NonceContext(ctx)`; `Nonce()`,
+the `jose.NonceSource` method, fetches with a 30s timeout. External
+`NonceProvider` implementations must add the method (there are none in the
+sibling modules).
+
+`WithTLS` and `WithDNSServer` install a modified clone of the current
+`*http.Transport` and never change a supplied one, including
+`http.DefaultTransport` (the DNS tests passed it and rewired DNS for the
+whole test process). On any other `http.RoundTripper`, or when
+`http.DefaultTransport` itself is not an `*http.Transport`, they fail
+closed: `New` returns the error, and after `New` every request returns it
+until `WithTransport` replaces the transport. `Do` copies the `*http.Client`
+under the client lock, so transport setters are safe while requests are in
+flight. A clone holds a copy of the TLS config (`tls.Config.Clone`), so a
+`*tls.Config` passed to `WithTLS` is copied by a later `WithTLS` or
+`WithDNSServer` call, and changes to it after that call are not seen. When
+a transport the client created is replaced (by `WithTLS`, `WithDNSServer`
+or `WithTransport`), its idle connections are closed; a transport passed to
+`WithTransport` is never closed. `Do` closes the request body when it
+returns the recorded error. The review found that a `WithTransport` option
+also drops `ClientConfig.TLS` without an error; that predates B16 and is
+recorded as P-083 (B27).
+
+`RequestURL` builds the request from the parsed URL (`RequestURI()` plus the
+fragment, and the host re-escaped so IPv6 zones work) instead of byte
+offsets into the raw string, and rejects URLs without a scheme, opaque URLs
+(`https:host/path`) and URLs with user info: user info never worked (the
+path was sliced at the wrong offset) and would put credentials into logged
+URLs.
+
+`NewStorage` expands `~` with `os.UserHomeDir`, falling back to
+`user.Current().HomeDir` when `HOME` is unset (go-homedir also had a
+fallback); go-homedir is now only an indirect dependency (through
+`x/fileutil/resolve`). `NewStorage` still does not expand `~user` or
+`$VAR`, and keeps the literal folder when no home directory is known. `WithUserAgent` no longer waits up to 1s for a network interface and
+omits `X-CLIENT-HOSTNAME`/`X-CLIENT-IP` when they cannot be resolved
+(previously sent empty). `DecodeResponse` reads at most 64 KiB of an error
+body (the error text is truncated there) and returns a read error instead
+of the partial text; DEBUG dumps log the headers and that bounded body.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B16 — HTTP client retry behavior           | P2       | `pkg/retriable`: preserve the default retry limit, make backoff and context cancellation correct, handle 429 and nonce retries, avoid transport type panics/mutation, fix URL parsing, path expansion, and the blocking network wait, and bound error-body reads.     | P-046, P-056, P-057, P-058, P-060, P-061, P-065, P-066 (remaining portions) | Retry and transport behavior                          |
 | B17 — HTTP telemetry and response writer   | P2       | `restserver/telemetry`: use bounded route labels, expose the underlying writer for upgrades/controllers, and guard zero granularity.                                                                                                                                  | P-023, P-024, P-031                                                         | Metric label contract                                 |
 | B19 — Caller credentials and role handling | P3       | `gserver/credentials`, `gserver/roles`: synchronize credential refresh, repair `NewWithMode`, remove CSRF values from logs, add bounded negative STS caching, and enforce cookie CSRF consistently.                                                                   | P-009, P-010, P-013, P-014, P-015                                           | Cookie/CSRF contract                                  |
 | B21 — App initialization                   | P3       | `pkg/appinit`, `pkg/appinit/config`: cancel the CloudWatch runner, handle CPU profile start/close errors, and resolve unused CloudWatch config fields and help text.                                                                                                  | P-067, P-068, P-073                                                         | Config-field behavior                                 |
 | B23 — TLS cipher names                     | P3       | `pkg/tlsconfig`: derive supported cipher names from Go's TLS API and reject insecure suites.                                                                                                                                                                          | P-074 (tlsconfig portion)                                                   | Cipher/config compatibility                           |
 | B24 — Coverage gate                        | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until total coverage exceeds the 90% CI gate.                                                                                                                                   | P-035                                                                       | None                                                  |
+| B27 — Retriable TLS config precedence      | P3       | `pkg/retriable`: keep `ClientConfig.TLS` when an option replaces the transport in `New`, or reject the combination.                                                                                                                                                   | P-083                                                                       | TLS/transport precedence                              |
 
 ## Execution rules
 

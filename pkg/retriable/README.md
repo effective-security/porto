@@ -78,8 +78,23 @@ response, which the caller must close.
 `Policy.Retries` maps an HTTP status (0 for transport errors) to a
 `ShouldRetry` callback; `TotalRetryLimit` caps retries across all codes and
 `RequestTimeout` bounds each `Request`/`Get`/... call (not `Do`).
-`DefaultPolicy()` retries connection errors (3x, 2s), 502 and 503 (5x, 1s),
-never retries DNS/TLS errors, 4xx or 404, and returns `LimitExceeded` for 429.
+`DefaultPolicy()` allows 5 retries in total: connection errors up to 4 times
+(2s wait), 502 and 503 up to 5 times (1s), and 429 up to 3 times after the
+response's `Retry-After` (1s without one). A 429 whose `Retry-After` asks for
+more than 30s is returned at once with reason `LimitExceeded`, as is a 429
+under a policy without a 429 entry. DNS/TLS errors, 404 and other 4xx are
+never retried. `RetryAfterShouldRetryFactory(limit, wait, maxWait, reason)`
+builds the same `Retry-After` handling for custom policies (for example 503).
+
+The wait between attempts ends when the request context is done, and `Do`
+returns the context error; while the context is live, a retry that could
+not start before its deadline is skipped and the last response is returned. A retried response
+body is drained (up to 64 KiB) and closed; an error response body is read up
+to 64 KiB into the returned error.
+
+In a `ClientConfig`, `request.retry_limit` and `request.timeout` replace the
+`DefaultPolicy` values only when non-zero; a negative `retry_limit` disables
+retries.
 
 ```go
 client.WithPolicy(retriable.Policy{
@@ -96,7 +111,26 @@ client.WithPolicy(retriable.Policy{
 - `WithHeaders(ctx, map)` / `PropagateHeadersFromRequest(ctx, r, names...)`
   attach headers to a context; the client sets them on outgoing requests.
 - `X-Correlation-ID` is added from the context (`xhttp/correlation`) when absent.
-- `WithUserAgent(name)` adds `User-Agent`, `X-CLIENT-HOSTNAME`, `X-CLIENT-IP`.
+- `WithUserAgent(name)` adds `User-Agent`, `X-CLIENT-HOSTNAME`, `X-CLIENT-IP`
+  without waiting for the network; a host name or IP that cannot be resolved
+  is not sent.
+
+## Transport
+
+`WithTLS(cfg)` and `WithDNSServer(addr)` install a modified clone of the
+current `*http.Transport` (of `http.DefaultTransport` when none is set), so a
+transport passed to `WithTransport` is never changed. Call them after
+`WithTransport`, which replaces the transport with all its settings. On any
+other `http.RoundTripper` they cannot apply their setting: `New` returns the
+error, and after `New` every request fails with it until `WithTransport`
+replaces the transport. When a transport the client created is replaced, its
+idle connections are closed; a transport passed to `WithTransport` is never
+closed by the client. Note that a `WithTransport` option passed to `New`
+replaces the transport built from `ClientConfig.TLS` (FINDINGS P-083).
+
+`RequestURL` derives the host and request URI from the parsed URL and
+rejects URLs without a scheme, opaque URLs (`https:host/path`) and URLs with
+user info (credentials).
 
 ## Authorization and storage
 
@@ -116,4 +150,7 @@ DPoP proofs are signed separately for each retry attempt.
 
 `client.WithNonce("/nonce", retriable.DefaultReplayNonceHeader)` installs a
 `NonceProvider` that caches nonces from response headers and fetches new
-ones with HEAD requests; it satisfies `jose.NonceSource`.
+ones with HEAD requests; it satisfies `jose.NonceSource`. `NonceContext(ctx)`
+bounds a fetch by `ctx`; `Nonce()` (which has no context) bounds it by 30s.
+The cache keeps the newest nonces: when its 64 entries are full, the oldest
+half is dropped.

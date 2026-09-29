@@ -2,11 +2,37 @@ package retriable
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"net/http"
 	"testing"
 
+	"github.com/effective-security/porto/xhttp/header"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWithUserAgentOmitsUnresolvedIP(t *testing.T) {
+	// not parallel: replaces the localIP seam while no parallel test runs
+	prev := localIP
+	t.Cleanup(func() { localIP = prev })
+	calls := 0
+	localIP = func() (string, error) {
+		calls++
+		return "", errors.New("no network")
+	}
+
+	c, err := New(ClientConfig{}, WithUserAgent("agent"))
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls)
+
+	c.lock.RLock()
+	headers := maps.Clone(c.headers)
+	c.lock.RUnlock()
+	assert.Equal(t, "agent", headers[header.UserAgent])
+	_, ok := headers[header.XClientIP]
+	assert.False(t, ok)
+}
 
 func Test_WithDNSServer_UsingOptions_OK(t *testing.T) {
 	client, err := New(ClientConfig{}, WithTransport(http.DefaultTransport), WithDNSServer("8.8.8.8:53"))

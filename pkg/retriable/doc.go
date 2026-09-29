@@ -46,11 +46,20 @@
 // (0 for transport errors) to a ShouldRetry callback, TotalRetryLimit caps
 // the number of retries across all codes, and RequestTimeout bounds each
 // call made through Request/Get/Post/etc. DefaultPolicy retries connection
-// errors, 502 and 503. All exported functions return errors rather than
-// panic; unrecoverable misuse (e.g. calling WithDNSServer on a non-*http.Transport
-// RoundTripper) panics.
+// errors, 502 and 503, and 429 after the server's Retry-After
+// (see RetryAfterShouldRetryFactory). The wait between attempts ends when
+// the request context is done. In a ClientConfig, a zero retry_limit or
+// timeout keeps the DefaultPolicy value and a negative retry_limit disables
+// retries.
 //
-// Concurrency: the With*/Add*/Set* configuration methods are intended for
-// the construction phase and are not synchronized with in-flight requests;
-// configure a Client fully before sharing it between goroutines.
+// All exported functions return errors rather than panic. WithTLS and
+// WithDNSServer install modified copies of an *http.Transport; on any other
+// http.RoundTripper they cannot apply their setting, so New and every
+// request return an error until WithTransport replaces the transport.
+//
+// Concurrency: the With*/Add*/Set* methods are synchronized, and a request
+// uses the configuration current when it starts. Direct changes to the
+// exported Name, Policy and Config fields, or to the *http.Client returned
+// by HTTPClient, are not synchronized; make them before sharing the Client
+// between goroutines.
 package retriable
