@@ -53,9 +53,6 @@ byte-exact test.
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
 | P-046 | pkg/retriable                           | `retriable.go` `New`                                                     | `request:` block without `retry_limit` silently disables retries                                                                             | correctness | MEDIUM   | Needs Approval |
-| P-052 | pkg/transport                           | `tls.go` `TLSInfo`                                                       | `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`, `SkipClientSANVerify` are never enforced                      | security    | MEDIUM   | Needs Approval |
-| P-053 | pkg/transport                           | `keepalive_listener.go` `Accept`                                         | `errors.WithStack` on accept errors defeats `Temporary()` retry in net/http and grpc                                                         | bug         | MEDIUM   | Open           |
-| P-080 | pkg/transport                           | `tls.go` `TLSInfo.ServerTLSWithReloader`                                 | A failed first call caches a half-built `tls.Config`; later calls return it without error or reloader                                        | correctness | LOW      | Open           |
 | P-056 | pkg/retriable                           | `retriable.go` `Do`                                                      | Backoff sleep ignores the request context; drained bodies are not closed                                                                     | correctness | LOW      | Open           |
 | P-057 | pkg/retriable                           | `retriable.go` `executeRequest`                                          | `RequestTimeout` cancel func discarded; timers live until the deadline                                                                       | performance | LOW      | Open           |
 | P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
@@ -66,7 +63,7 @@ byte-exact test.
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
 | P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
-| P-074 | pkg/transport, pkg/tlsconfig            | `keepalive_listener.go`, `cipher_suites.go`                              | Modernization: `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones                                  | correctness | LOW      | Needs Approval |
+| P-074 | pkg/tlsconfig                           | `cipher_suites.go`                                                       | Modernization: derive cipher names from `tls.CipherSuites()` and reject insecure ones                                                        | correctness | LOW      | Needs Approval |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
 
 ## Details
@@ -160,17 +157,6 @@ byte-exact test.
 - Evidence: `pol.TotalRetryLimit = cfg.Request.RetryLimit` overwrites the default 5 with 0 whenever the block is present.
 - Fix: `cmp.Or(cfg.Request.RetryLimit, pol.TotalRetryLimit)` or a pointer field.
 
-### P-052 Unenforced `TLSInfo` fields
-
-- Evidence: the six fields are declared and documented but never read; the SAN check in `listener_tls.go` is commented out.
-- Fix: implement the checks in the `tlsCheckFunc` chain or remove the fields.
-
-### P-053 Wrapped accept errors
-
-- Evidence: `return nil, errors.WithStack(err)`; `net/http` and grpc use a plain type assertion for `Temporary()`.
-- Impact: a transient `EMFILE` stops the server instead of backing off.
-- Fix: return `err` unwrapped.
-
 ### P-056 to P-066 retriable LOW items
 
 - P-056: `time.Sleep(sleepDuration)` ignores `ctx.Done()`; `consumeResponseBody` only drains.
@@ -186,7 +172,7 @@ byte-exact test.
 - P-067: `ctx: context.Background()` and `c.ctx.Done()` in `Close` cancels nothing.
 - P-068: `_ = pprof.StartCPUProfile(cpuf)`; closer keeps the file name, not the handle.
 - P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
-- P-074: `SetKeepAlive`+`SetKeepAlivePeriod`; hand-maintained cipher map including RC4/3DES.
+- P-074: hand-maintained cipher map including RC4/3DES (the `pkg/transport` keepalive portion was fixed in B15).
 
 ### P-076 gRPC-Web gzip ignores quality values
 
@@ -194,15 +180,9 @@ byte-exact test.
 - Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
 - Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
-### P-080 `ServerTLSWithReloader` caches a half-built config after an error
-
-- Evidence: `info.tlsCfg` is assigned by `tlsconfig.NewServerTLSFromFiles` before the expiry check, `UpdateCipherSuites` and `NewKeypairReloader`. When one of those fails the method returns an error but leaves `tlsCfg` set, so the next call takes the `info.tlsCfg != nil` shortcut and returns a config with static `Certificates`, no `GetCertificate` and no reloader, without an error. `Config()` also returns it.
-- Impact: a caller that retries `ServerTLSWithReloader` or `NewTLSListener` after an expired certificate or an invalid cipher list serves with the rejected configuration and never reloads. `gserver` is not affected: `configureListeners` fails on the first call and closes the `TLSInfo`.
-- Fix: build into a local and assign `info.tlsCfg` only after every step succeeded, or reset `info.tlsCfg = nil` on each error return.
-
 ## Notes on items needing approval
 
 - P-013: changes observable auth behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
 - P-046, P-058, P-061: currently silent or panicking paths become errors or warnings.
-- P-052, P-073, P-074: public type behavior or config surface.
+- P-073, P-074: public type behavior or config surface.

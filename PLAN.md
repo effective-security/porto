@@ -263,9 +263,62 @@ prefixed names from memory or proxy `Keys`, or the leading `/` from Redis
 `Keys` under a prefix without a trailing slash, must use the relative keys;
 data written through escaping `..` keys is no longer reachable by them.
 
+## Completed B15 decision — TLS listener and policy
+
+The six `transport.TLSInfo` fields that were never enforced (`AllowedCN`,
+`AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`,
+`SkipClientSANVerify`) are removed rather than implemented: `ServerName`,
+`InsecureSkipVerify` and `EmptyCN` describe a client's own config in etcd,
+where they came from, and its SAN check did a reverse DNS lookup per
+connection. Nothing in this module or the sibling modules set them. A
+caller that did now fails to compile instead of assuming a check that never
+ran; other client-certificate policy is set with `VerifyConnection` on the
+config returned by `ServerTLSWithReloader` before `NewTLSListener` serves.
+This retires ROADMAP 8.
+
+`ServerTLSWithReloader` caches its config and reloader only after every
+step succeeded, so a failed call (expired certificate, bad cipher list,
+reloader error) leaves nothing behind and a retry loads the files again.
+`NewTLSListener` still closes `l` only for a nil or empty `TLSInfo`; when
+`ServerTLSWithReloader` fails, `l` stays open and belongs to the caller
+(now documented, so a retry can reuse it).
+
+Accept errors are returned unwrapped by both listener types, so net/http,
+grpc and cmux can type-assert `net.Error` and retry temporary errors such
+as `EMFILE`. The TLS listener no longer stops its accept loop on the first
+error: it hands each error of the wrapped listener to one `Accept` call and
+keeps accepting, and stops only when the wrapped listener returns
+`net.ErrClosed` or `Close` is called; `Accept` then returns an error
+wrapping `net.ErrClosed` (the caller, not the listener, decides whether an
+error is temporary, and the loop waits for each `Accept` call, so the
+caller's backoff paces it). A wrapped listener that reports its closure
+with another error (cmux) keeps the loop running until `Close`; net/http
+and grpc close their listener when such an error stops them. The caller
+recovers from an error storm up to one of its backoff periods later than
+on a raw listener, because the loop holds the next error until the next
+`Accept`; tracking waiting callers to avoid that was judged not worth the
+complexity. Previously one `EMFILE` made the gserver cmux loop and every
+TLS listener stop serving for good.
+
+cmux retries temporary errors at once, so unwrapped errors alone would make
+gserver spin on one core per address during descriptor exhaustion
+(recorded during the batch as P-082, B26; fixed here). `gserver` wraps every
+root listener (TCP and Unix) in `backoffListener`, which waits 5ms doubling
+to 1s after each failed `Accept` (the net/http schedule, reset by a
+successful accept, cut short by `Close`) and logs each failure as a
+warning; the error itself is returned unchanged, so cmux still stops on
+non-temporary errors, and `net.ErrClosed` is returned without waiting.
+
+Keepalive listeners use `SetKeepAliveConfig` with idle 30s, interval 15s
+and 9 probes. These are the values Go 1.27 produced before (its accept
+default of 15s/15s/9 with the idle time raised to 30s), now set explicitly
+so they no longer depend on how the wrapped listener was created.
+Connections without keepalive support (non-TCP) are returned unchanged
+instead of panicking, and a failure to set the options is logged at DEBUG
+and does not fail `Accept`. The `pkg/tlsconfig` part of P-074 stays in B23.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B15 — TLS listener and policy              | P2       | `pkg/transport`: enforce or remove documented `TLSInfo` checks, preserve temporary accept errors, stop caching a half-built server TLS config after an error, and modernize keepalive configuration. Handshake deadlines are in B06.                                  | P-052, P-053, P-074 (transport portion), P-080                              | TLSInfo contract                                      |
 | B16 — HTTP client retry behavior           | P2       | `pkg/retriable`: preserve the default retry limit, make backoff and context cancellation correct, handle 429 and nonce retries, avoid transport type panics/mutation, fix URL parsing, path expansion, and the blocking network wait, and bound error-body reads.     | P-046, P-056, P-057, P-058, P-060, P-061, P-065, P-066 (remaining portions) | Retry and transport behavior                          |
 | B17 — HTTP telemetry and response writer   | P2       | `restserver/telemetry`: use bounded route labels, expose the underlying writer for upgrades/controllers, and guard zero granularity.                                                                                                                                  | P-023, P-024, P-031                                                         | Metric label contract                                 |
 | B19 — Caller credentials and role handling | P3       | `gserver/credentials`, `gserver/roles`: synchronize credential refresh, repair `NewWithMode`, remove CSRF values from logs, add bounded negative STS caching, and enforce cookie CSRF consistently.                                                                   | P-009, P-010, P-013, P-014, P-015                                           | Cookie/CSRF contract                                  |

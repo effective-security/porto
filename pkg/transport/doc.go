@@ -4,10 +4,11 @@
 //
 // TLSInfo holds the file-based TLS settings for a server and builds a
 // tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader
-// (polling every 5 minutes). Only CertFile, KeyFile, TrustedCAFile,
-// ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier and
-// HandshakeFailure are used by this package; the remaining fields are
-// retained for configuration compatibility and are not enforced.
+// (polling every 5 minutes). A failed build caches nothing, so it can be
+// retried. Client certificates are checked only by ClientAuthType and the
+// optional CRLVerifier; for any other policy, set VerifyConnection on the
+// config returned by ServerTLSWithReloader before serving (again after
+// Close, which drops the config).
 //
 // Usage:
 //
@@ -26,12 +27,20 @@
 //
 //	tlsLn, err := transport.NewTLSListener(ln, info) // handshakes in the background
 //	if err != nil {
+//		_ = ln.Close() // left open when the TLS config fails to load
 //		return err
 //	}
 //	srv := &http.Server{Handler: h, TLSConfig: info.Config()}
 //	return srv.Serve(tlsLn)
 //
-// NewKeepAliveListener wraps a listener so accepted TCP connections get a
-// 30s keepalive; with scheme "https" it also wraps connections with
-// tls.Server (lazy handshake) using the supplied tls.Config.
+// NewKeepAliveListener wraps a listener so accepted TCP connections get
+// keepalive probes after 30s idle, 15s apart, up to 9; with scheme "https"
+// it also wraps connections with tls.Server (lazy handshake) using the
+// supplied tls.Config.
+//
+// Both listeners return Accept errors of the wrapped listener to the caller
+// unchanged, so servers such as net/http, grpc and cmux retry temporary
+// errors (for example EMFILE). The TLS listener keeps accepting after an
+// error and stops when the wrapped listener returns net.ErrClosed or when
+// it is closed itself; always Close it.
 package transport

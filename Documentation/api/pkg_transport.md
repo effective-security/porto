@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/pkg/transport"
 
 Package transport provides net.Listener wrappers for servers: a TLS listener that performs the handshake eagerly with optional CRL checking, and keepalive listeners that enable TCP keepalive on accepted connections.
 
-TLSInfo holds the file\-based TLS settings for a server and builds a tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader \(polling every 5 minutes\). Only CertFile, KeyFile, TrustedCAFile, ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier and HandshakeFailure are used by this package; the remaining fields are retained for configuration compatibility and are not enforced.
+TLSInfo holds the file\-based TLS settings for a server and builds a tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader \(polling every 5 minutes\). A failed build caches nothing, so it can be retried. Client certificates are checked only by ClientAuthType and the optional CRLVerifier; for any other policy, set VerifyConnection on the config returned by ServerTLSWithReloader before serving \(again after Close, which drops the config\).
 
 Usage:
 
@@ -28,13 +28,16 @@ defer info.Close()
 
 tlsLn, err := transport.NewTLSListener(ln, info) // handshakes in the background
 if err != nil {
+	_ = ln.Close() // left open when the TLS config fails to load
 	return err
 }
 srv := &http.Server{Handler: h, TLSConfig: info.Config()}
 return srv.Serve(tlsLn)
 ```
 
-NewKeepAliveListener wraps a listener so accepted TCP connections get a 30s keepalive; with scheme "https" it also wraps connections with tls.Server \(lazy handshake\) using the supplied tls.Config.
+NewKeepAliveListener wraps a listener so accepted TCP connections get keepalive probes after 30s idle, 15s apart, up to 9; with scheme "https" it also wraps connections with tls.Server \(lazy handshake\) using the supplied tls.Config.
+
+Both listeners return Accept errors of the wrapped listener to the caller unchanged, so servers such as net/http, grpc and cmux retry temporary errors \(for example EMFILE\). The TLS listener keeps accepting after an error and stops when the wrapped listener returns net.ErrClosed or when it is closed itself; always Close it.
 
 ## Index
 
@@ -49,29 +52,31 @@ NewKeepAliveListener wraps a listener so accepted TCP connections get a 30s keep
 
 
 <a name="NewKeepAliveListener"></a>
-## func [NewKeepAliveListener](<https://github.com/effective-security/porto/blob/main/pkg/transport/keepalive_listener.go#L38>)
+## func [NewKeepAliveListener](<https://github.com/effective-security/porto/blob/main/pkg/transport/keepalive_listener.go#L52>)
 
 ```go
 func NewKeepAliveListener(l net.Listener, scheme string, tlscfg *tls.Config) (net.Listener, error)
 ```
 
-NewKeepAliveListener wraps l so that accepted connections get TCP keepalive enabled with a 30s period. With scheme "https" the connection is also wrapped with tls.Server\(tlscfg\) \(handshake happens lazily on first I/O\) and tlscfg must be non\-nil, otherwise an error is returned. Accepted connections must implement SetKeepAlive/SetKeepAlivePeriod \(e.g. \*net.TCPConn\) or Accept panics. Be careful when wrapping the returned listener with another listener: packages like net/http expect Accept to return \*tls.Conn. See http://tldp.org/HOWTO/TCP-Keepalive-HOWTO/overview.html
+NewKeepAliveListener wraps l so that accepted connections get TCP keepalive: 30s idle, then up to 9 probes 15s apart. With scheme "https" the connection is also wrapped with tls.Server\(tlscfg\) \(handshake happens lazily on first I/O\) and tlscfg must be non\-nil, otherwise an error is returned. Connections without SetKeepAliveConfig \(\*net.TCPConn has it; Unix sockets do not\) are returned without keepalive; a failure to set the socket options is logged and the connection is still returned, as net.TCPListener does for its default keepalive. Accept errors of l are returned unchanged, so callers such as net/http, grpc and cmux can still retry temporary errors. Be careful when wrapping the returned listener with another listener: packages like net/http expect Accept to return \*tls.Conn.
 
 <a name="NewTLSListener"></a>
-## func [NewTLSListener](<https://github.com/effective-security/porto/blob/main/pkg/transport/listener_tls.go#L55>)
+## func [NewTLSListener](<https://github.com/effective-security/porto/blob/main/pkg/transport/listener_tls.go#L72>)
 
 ```go
 func NewTLSListener(l net.Listener, tlsinfo *TLSInfo) (net.Listener, error)
 ```
 
-NewTLSListener wraps l so that every accepted connection is TLS\-handshaked in its own goroutine before Accept returns it; connections that fail the handshake or the CRL check \(when tlsinfo.CRLVerifier is set\) are closed and reported to tlsinfo.HandshakeFailure. It calls tlsinfo.ServerTLSWithReloader, so the tls.Config is available afterwards via tlsinfo.Config\(\). If tlsinfo is nil or Empty, l is closed and an error returned. The caller must Close the returned listener; Close blocks until the accept loop and pending handshakes finish. HandshakeTimeout defaults to 10s; a negative value disables it. The deadline is cleared before a successful connection is returned.
+NewTLSListener wraps l so that every accepted connection is TLS\-handshaked in its own goroutine before Accept returns it; connections that fail the handshake or the CRL check \(when tlsinfo.CRLVerifier is set\) are closed and reported to tlsinfo.HandshakeFailure. It calls tlsinfo.ServerTLSWithReloader, so the tls.Config is available afterwards via tlsinfo.Config\(\). If tlsinfo is nil or Empty, l is closed and an error returned; if ServerTLSWithReloader fails, its error is returned and l is left open. The caller must Close the returned listener; Close blocks until the accept loop and pending handshakes finish. HandshakeTimeout defaults to 10s; a negative value disables it. The deadline is cleared before a successful connection is returned.
+
+An Accept error of l other than net.ErrClosed does not stop the listener: it is returned unchanged by the next Accept call, so the caller decides whether to retry \(net/http and grpc back off on temporary errors such as EMFILE\), and accepting continues after it. A wrapped listener that reports its closure with another error, such as a cmux listener, keeps the accept loop running until Close; net/http and grpc close the listener when such an error stops them.
 
 <a name="TLSInfo"></a>
-## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L22-L74>)
+## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L25-L57>)
 
 TLSInfo is the file\-based TLS configuration of a server listener. ServerTLSWithReloader builds and caches the tls.Config; Close releases the reloader. It is not safe for concurrent use while being initialized.
 
-Fields that are read by this package: CertFile, KeyFile, TrustedCAFile, ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier, HandshakeFailure, HandshakeTimeout. InsecureSkipVerify, SkipClientSANVerify, ServerName, AllowedCN, AllowedHostname and EmptyCN are currently not enforced.
+Client certificate policy beyond ClientAuthType and CRLVerifier \(for example a required subject\) is not configured here: call ServerTLSWithReloader first and set VerifyConnection on the returned config before the listener serves. Close drops the config, so a later ServerTLSWithReloader call returns a new one without it.
 
 ```go
 type TLSInfo struct {
@@ -90,14 +95,6 @@ type TLSInfo struct {
     // certificate in the client's verified chains; a Revoked status rejects
     // the connection, errors and Unknown are logged and allowed.
     CRLVerifier crlcache.Verifier
-    // InsecureSkipVerify is not used by this package.
-    InsecureSkipVerify bool
-    // SkipClientSANVerify is not used by this package.
-    SkipClientSANVerify bool
-
-    // ServerName ensures the cert matches the given host in case of discovery / virtual hosting.
-    // It is not used by this package.
-    ServerName string
 
     // HandshakeFailure is optionally called when a connection fails to handshake. The
     // connection will be closed immediately afterwards.
@@ -111,24 +108,12 @@ type TLSInfo struct {
     // If empty, Go auto-populates it by default.
     // Note that cipher suites are prioritized in the given order.
     CipherSuites []string
-
-    // AllowedCN is a CN which must be provided by a client.
-    // It is not enforced by this package.
-    AllowedCN string
-
-    // AllowedHostname is an IP address or hostname that must match the TLS
-    // certificate provided by a client. It is not enforced by this package.
-    AllowedHostname string
-
-    // EmptyCN indicates that the cert must have empty CN.
-    // It is not enforced by this package.
-    EmptyCN bool
     // contains filtered or unexported fields
 }
 ```
 
 <a name="TLSInfo.Close"></a>
-### func \(\*TLSInfo\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L89>)
+### func \(\*TLSInfo\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L72>)
 
 ```go
 func (info *TLSInfo) Close()
@@ -137,7 +122,7 @@ func (info *TLSInfo) Close()
 Close stops the certificate reloader and drops the cached tls.Config. It is safe to call when ServerTLSWithReloader was never called.
 
 <a name="TLSInfo.Config"></a>
-### func \(\*TLSInfo\) [Config](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L101>)
+### func \(\*TLSInfo\) [Config](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L84>)
 
 ```go
 func (info *TLSInfo) Config() *tls.Config
@@ -146,7 +131,7 @@ func (info *TLSInfo) Config() *tls.Config
 Config returns the tls.Config built by ServerTLSWithReloader, or nil if it has not been called \(or after Close\).
 
 <a name="TLSInfo.Empty"></a>
-### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L83>)
+### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L66>)
 
 ```go
 func (info *TLSInfo) Empty() bool
@@ -155,16 +140,16 @@ func (info *TLSInfo) Empty() bool
 Empty reports whether CertFile or KeyFile is missing, i.e. TLS cannot be served.
 
 <a name="TLSInfo.ServerTLSWithReloader"></a>
-### func \(\*TLSInfo\) [ServerTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L109>)
+### func \(\*TLSInfo\) [ServerTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L93>)
 
 ```go
 func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error)
 ```
 
-ServerTLSWithReloader builds \(once\) and returns the server tls.Config from the files, applies CipherSuites, and installs a KeypairReloader polling every 5 minutes as GetCertificate. It returns an error if the certificate has already expired. Subsequent calls return the cached config.
+ServerTLSWithReloader builds \(once\) and returns the server tls.Config from the files, applies CipherSuites, and installs a KeypairReloader polling every 5 minutes as GetCertificate. It returns an error if the certificate has already expired. Subsequent calls return the cached config. A call that fails caches nothing, so a later call loads the files again.
 
 <a name="TLSInfo.String"></a>
-### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L77>)
+### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L60>)
 
 ```go
 func (info *TLSInfo) String() string

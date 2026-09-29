@@ -17,10 +17,19 @@ import (
 )
 
 var (
+	// fixtureDir is created per test process, so concurrent test runs do
+	// not overwrite each other's certificates; TestMain removes it.
+	fixtureDir     string
 	serverCertFile string
 	serverKeyFile  string
 	serverRootFile string
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	_ = os.RemoveAll(fixtureDir)
+	os.Exit(code)
+}
 
 func init() {
 	ca1 := testca.NewEntity(
@@ -46,12 +55,15 @@ func init() {
 		testca.DNSName("localhost", "127.0.0.1"),
 	)
 
-	tmpDir := filepath.Join(os.TempDir(), "test-transport")
-	os.MkdirAll(tmpDir, os.ModePerm)
+	var err error
+	fixtureDir, err = os.MkdirTemp("", "test-transport-")
+	if err != nil {
+		logger.Panic(err)
+	}
 
-	serverCertFile = filepath.Join(tmpDir, "test-server.pem")
-	serverKeyFile = filepath.Join(tmpDir, "test-server-key.pem")
-	serverRootFile = filepath.Join(tmpDir, "test-server-rootca.pem")
+	serverCertFile = filepath.Join(fixtureDir, "test-server.pem")
+	serverKeyFile = filepath.Join(fixtureDir, "test-server-key.pem")
+	serverRootFile = filepath.Join(fixtureDir, "test-server-rootca.pem")
 
 	//
 	// save keys

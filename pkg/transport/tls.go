@@ -10,15 +10,18 @@ import (
 	"github.com/effective-security/porto/pkg/tlsconfig"
 )
 
+// reloadInterval is how often the server key pair files are polled.
+const reloadInterval = 5 * time.Minute
+
 // TLSInfo is the file-based TLS configuration of a server listener.
 // ServerTLSWithReloader builds and caches the tls.Config; Close releases the
 // reloader. It is not safe for concurrent use while being initialized.
 //
-// Fields that are read by this package: CertFile, KeyFile, TrustedCAFile,
-// ClientCAFile, ClientAuthType, CipherSuites, CRLVerifier, HandshakeFailure,
-// HandshakeTimeout.
-// InsecureSkipVerify, SkipClientSANVerify, ServerName, AllowedCN,
-// AllowedHostname and EmptyCN are currently not enforced.
+// Client certificate policy beyond ClientAuthType and CRLVerifier (for
+// example a required subject) is not configured here: call
+// ServerTLSWithReloader first and set VerifyConnection on the returned
+// config before the listener serves. Close drops the config, so a later
+// ServerTLSWithReloader call returns a new one without it.
 type TLSInfo struct {
 	// CertFile and KeyFile are the PEM server certificate chain and key; required.
 	CertFile string
@@ -35,14 +38,6 @@ type TLSInfo struct {
 	// certificate in the client's verified chains; a Revoked status rejects
 	// the connection, errors and Unknown are logged and allowed.
 	CRLVerifier crlcache.Verifier
-	// InsecureSkipVerify is not used by this package.
-	InsecureSkipVerify bool
-	// SkipClientSANVerify is not used by this package.
-	SkipClientSANVerify bool
-
-	// ServerName ensures the cert matches the given host in case of discovery / virtual hosting.
-	// It is not used by this package.
-	ServerName string
 
 	// HandshakeFailure is optionally called when a connection fails to handshake. The
 	// connection will be closed immediately afterwards.
@@ -56,18 +51,6 @@ type TLSInfo struct {
 	// If empty, Go auto-populates it by default.
 	// Note that cipher suites are prioritized in the given order.
 	CipherSuites []string
-
-	// AllowedCN is a CN which must be provided by a client.
-	// It is not enforced by this package.
-	AllowedCN string
-
-	// AllowedHostname is an IP address or hostname that must match the TLS
-	// certificate provided by a client. It is not enforced by this package.
-	AllowedHostname string
-
-	// EmptyCN indicates that the cert must have empty CN.
-	// It is not enforced by this package.
-	EmptyCN bool
 
 	tlsCfg      *tls.Config
 	tlsReloader *tlsconfig.KeypairReloader
@@ -105,17 +88,15 @@ func (info *TLSInfo) Config() *tls.Config {
 // ServerTLSWithReloader builds (once) and returns the server tls.Config from
 // the files, applies CipherSuites, and installs a KeypairReloader polling
 // every 5 minutes as GetCertificate. It returns an error if the certificate
-// has already expired. Subsequent calls return the cached config.
+// has already expired. Subsequent calls return the cached config. A call
+// that fails caches nothing, so a later call loads the files again.
 func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
-	var err error
-
 	if info.tlsCfg != nil {
 		return info.tlsCfg, nil
 	}
 
-	// FINDINGS P-080: tlsCfg stays set when a later step fails, so a retry
-	// returns the rejected config without a reloader.
-	info.tlsCfg, err = tlsconfig.NewServerTLSFromFiles(
+	// Build into locals: info keeps no state from a failed attempt.
+	cfg, err := tlsconfig.NewServerTLSFromFiles(
 		info.CertFile,
 		info.KeyFile,
 		info.TrustedCAFile,
@@ -125,29 +106,31 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		return nil, err
 	}
 
-	if len(info.tlsCfg.Certificates) > 0 &&
-		info.tlsCfg.Certificates[0].Leaf != nil &&
-		info.tlsCfg.Certificates[0].Leaf.NotAfter.Before(time.Now()) {
+	if len(cfg.Certificates) > 0 &&
+		cfg.Certificates[0].Leaf != nil &&
+		cfg.Certificates[0].Leaf.NotAfter.Before(time.Now()) {
 		return nil, errors.New("tls: certificate has expired")
 	}
 
-	if err = tlsconfig.UpdateCipherSuites(info.tlsCfg, info.CipherSuites); err != nil {
+	if err = tlsconfig.UpdateCipherSuites(cfg, info.CipherSuites); err != nil {
 		return nil, err
 	}
 
-	info.tlsReloader, err = tlsconfig.NewKeypairReloader(
+	reloader, err := tlsconfig.NewKeypairReloader(
 		"",
 		info.CertFile,
 		info.KeyFile,
-		5*time.Minute)
+		reloadInterval)
 	if err != nil {
 		return nil, err
 	}
 
 	//  TODO: tlsloader.WithOCSPStaple(cfg.OCSPFile)
-	info.tlsCfg.GetCertificate = info.tlsReloader.GetKeypairFunc()
+	cfg.GetCertificate = reloader.GetKeypairFunc()
 	// Go skips GetCertificate for clients without SNI when Certificates is set.
-	info.tlsCfg.Certificates = nil
+	cfg.Certificates = nil
 
-	return info.tlsCfg, nil
+	info.tlsCfg = cfg
+	info.tlsReloader = reloader
+	return cfg, nil
 }

@@ -208,6 +208,8 @@ func configureListeners(cfg *Config) (_ map[string]*serveCtx, _ *transport.TLSIn
 			}
 			sctx.listener = kal
 		}
+		// cmux retries temporary Accept errors without waiting.
+		sctx.listener = newBackoffListener(sctx.listener)
 		// TODO: register profiler, tracer, etc
 	}
 

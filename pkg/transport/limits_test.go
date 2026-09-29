@@ -19,7 +19,7 @@ func TestTLSHandshakeDeadline(t *testing.T) {
 		CertFile:         serverCertFile,
 		KeyFile:          serverKeyFile,
 		HandshakeTimeout: 100 * time.Millisecond,
-		HandshakeFailure: func(_ *tls.Conn, err error) { failures <- err },
+		HandshakeFailure: recordFailure(failures),
 	}
 	defer info.Close()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
