@@ -6,7 +6,7 @@
 import "github.com/effective-security/porto/pkg/redisclient"
 ```
 
-Package redisclient wraps github.com/redis/go\-redis/v9 with a key prefix, JSON marshalling of values, error wrapping and a set of higher\-level helpers: bounded \("with eviction"\) sets and hashes, a simple distributed lock and a one\-execution\-per\-window rate limiter.
+Package redisclient wraps github.com/redis/go\-redis/v9 with a key prefix, JSON marshalling of values, error wrapping and a set of higher\-level helpers: bounded \("with eviction"\) sets and hashes, an owner\-bound distributed lock and a one\-execution\-per\-window rate limiter.
 
 RedisClient embeds \*redis.Client, so raw commands remain available, while the wrapper methods apply the prefix via Key. Provider is the interface implemented by RedisClient and is what consumers should depend on.
 
@@ -28,11 +28,24 @@ var u User
 if err := c.Get(ctx, "user:1", &u); redisclient.IsNotFoundError(err) {
 	// missing
 }
+
+token, remaining, err := c.TryLock(ctx, "job", 30*time.Second)
+if err != nil {
+	return err
+}
+if token == "" {
+	return fmt.Errorf("job is locked for %s", remaining)
+}
+defer c.ReleaseLock(ctx, "job", token) // only while token holds the lock
 ```
 
-Config YAML/JSON fields: server \(redis:// or rediss:// URL\), ttl, client\_tls \{cert, key, trusted\_ca\}, user, password. Password from Config overrides credentials embedded in the URL.
+Config YAML/JSON fields: server \(redis:// or rediss:// URL\), ttl, client\_tls \{cert, key, trusted\_ca\}, user, password. Password from Config overrides credentials embedded in the URL. Only the server address and database are logged; a malformed URL is reported without the URL.
 
-Values: string and \[\]byte are stored as\-is, everything else is JSON encoded \(see Marshal / UnmarshalStringCmd\). Get and HGet return ErrNotFound for a missing key; the other commands return the wrapped go\-redis error. WithPrefix returns a child that shares the connection and whose Close is a no\-op; only the root client returned by New closes the connection.
+Keys: a key is cleaned as a rooted path and joined with the prefix, so ".." cannot leave the prefix, and lock and rate\-limit keys cannot leave their "lock:" and "ratelimit:" namespaces; Keys and ScanKeys take Redis glob patterns relative to the prefix, match the prefix literally and return relative keys.
+
+Values: string and \[\]byte are stored as\-is, everything else is JSON encoded \(see Marshal / UnmarshalStringCmd\). Get and HGet return ErrNotFound for a missing key; the other commands return the wrapped go\-redis error. WithPrefix returns a child that shares the connection and whose Close is a no\-op; only the root client returned by New closes the connection, and after that the commands of the root and its children fail with redis.ErrClosed.
+
+Coordination: TryLock returns a random owner token and ReleaseLock deletes the lock only while it still holds that token \(a Lua compare\-and\-delete\), so an expired owner cannot release a successor's lock. TryAcquireRateLimit starts a window with SET NX PX: one call per window succeeds, denied calls write nothing, and the window is measured by the server's clock. SAddWithEviction and HSetWithEviction update the collection and its insertion\-order list in one Lua script. The server must allow Lua scripting \(EVALSHA\).
 
 ## Index
 
@@ -76,7 +89,7 @@ Values: string and \[\]byte are stored as\-is, everything else is JSON encoded \
   - [func \(c \*RedisClient\) RPop\(ctx context.Context, key string\) \(string, error\)](<#RedisClient.RPop>)
   - [func \(c \*RedisClient\) RPush\(ctx context.Context, key string, values ...any\) error](<#RedisClient.RPush>)
   - [func \(c \*RedisClient\) RawClient\(\) \*redis.Client](<#RedisClient.RawClient>)
-  - [func \(c \*RedisClient\) ReleaseLock\(ctx context.Context, key string\) \(bool, error\)](<#RedisClient.ReleaseLock>)
+  - [func \(c \*RedisClient\) ReleaseLock\(ctx context.Context, key, token string\) \(bool, error\)](<#RedisClient.ReleaseLock>)
   - [func \(c \*RedisClient\) SAdd\(ctx context.Context, key string, members ...any\) error](<#RedisClient.SAdd>)
   - [func \(c \*RedisClient\) SAddWithEviction\(ctx context.Context, key string, listKey string, limit int64, member string\) error](<#RedisClient.SAddWithEviction>)
   - [func \(c \*RedisClient\) SCard\(ctx context.Context, key string\) \(int64, error\)](<#RedisClient.SCard>)
@@ -88,7 +101,7 @@ Values: string and \[\]byte are stored as\-is, everything else is JSON encoded \
   - [func \(c \*RedisClient\) SubKey\(key string\) string](<#RedisClient.SubKey>)
   - [func \(c \*RedisClient\) TTL\(ctx context.Context, key string\) \(time.Duration, error\)](<#RedisClient.TTL>)
   - [func \(c \*RedisClient\) TryAcquireRateLimit\(ctx context.Context, key string, window time.Duration\) \(bool, time.Duration, error\)](<#RedisClient.TryAcquireRateLimit>)
-  - [func \(c \*RedisClient\) TryLock\(ctx context.Context, key string, timeout time.Duration\) \(bool, time.Duration, error\)](<#RedisClient.TryLock>)
+  - [func \(c \*RedisClient\) TryLock\(ctx context.Context, key string, timeout time.Duration\) \(string, time.Duration, error\)](<#RedisClient.TryLock>)
   - [func \(c \*RedisClient\) WithPrefix\(prefix string\) \*RedisClient](<#RedisClient.WithPrefix>)
   - [func \(c \*RedisClient\) ZAdd\(ctx context.Context, key string, score float64, member string\) error](<#RedisClient.ZAdd>)
   - [func \(c \*RedisClient\) ZCard\(ctx context.Context, key string\) \(int64, error\)](<#RedisClient.ZCard>)
@@ -107,7 +120,7 @@ var ErrNotFound = errors.New("not found")
 ```
 
 <a name="IsNotFoundError"></a>
-## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L136>)
+## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L157>)
 
 ```go
 func IsNotFoundError(err error) bool
@@ -125,13 +138,13 @@ func Marshal(v any) (any, error)
 Marshal marshals the value into a format suitable for Redis storage. string and \[\]byte are stored as\-is, while other types are marshaled to JSON.
 
 <a name="NewRedisClient"></a>
-## func [NewRedisClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L159>)
+## func [NewRedisClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L185>)
 
 ```go
 func NewRedisClient(cfg *Config) (*redis.Client, error)
 ```
 
-NewRedisClient builds a raw \*redis.Client from cfg: the URL is parsed, TLS is configured from ClientTLS files, Password/User override the URL credentials, and maintenance notifications are disabled. The connection is established lazily.
+NewRedisClient builds a raw \*redis.Client from cfg: the URL is parsed, TLS is configured from ClientTLS files, Password/User override the URL credentials, and maintenance notifications are disabled. Only the server address and database are logged, and a malformed URL is reported without the URL, which may embed a password. The connection is established lazily.
 
 <a name="UnmarshalStringCmd"></a>
 ## func [UnmarshalStringCmd](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/marshal.go#L31>)
@@ -143,7 +156,7 @@ func UnmarshalStringCmd(val *redis.StringCmd, v any) error
 UnmarshalStringCmd unmarshals the value from Redis storage into the provided variable. string and \[\]byte are converted as\-is, while JSON is unmarshaled into the target type.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L118-L129>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L139-L150>)
 
 Config specifies the Redis connection.
 
@@ -163,27 +176,30 @@ type Config struct {
 ```
 
 <a name="DistributedLock"></a>
-## type [DistributedLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L26-L37>)
+## type [DistributedLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L39-L53>)
 
-DistributedLock provides distributed locking functionality
+DistributedLock provides an owner\-bound lock that expires on its own.
 
 ```go
 type DistributedLock interface {
-    // TryLock attempts to acquire a lock with the given key and timeout
-    // Returns true if lock was acquired, false otherwise, and remaining time if lock exists
-    TryLock(ctx context.Context, key string, timeout time.Duration) (bool, time.Duration, error)
+    // TryLock attempts to acquire the lock for key, expiring after timeout
+    // (at least 1ms). It returns the owner token when the lock was
+    // acquired; otherwise the token is empty and the remaining time is how
+    // long the current holder keeps the lock.
+    TryLock(ctx context.Context, key string, timeout time.Duration) (token string, remaining time.Duration, err error)
 
-    // ReleaseLock releases the lock for the given key
-    // Returns true if lock was released, false if lock didn't exist or was already released
-    ReleaseLock(ctx context.Context, key string) (bool, error)
+    // ReleaseLock releases the lock for key only while it is still held
+    // with token, the value returned by TryLock. It returns false when the
+    // lock expired or is held by another owner.
+    ReleaseLock(ctx context.Context, key, token string) (bool, error)
 
-    // IsLocked checks if a lock exists for the given key
+    // IsLocked reports whether anyone holds the lock for key.
     IsLocked(ctx context.Context, key string) (bool, error)
 }
 ```
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L52-L115>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L73-L136>)
 
 Provider is the Redis operations interface implemented by \*RedisClient; depend on it rather than on the concrete type. All keys are relative to the client prefix. See the RedisClient methods for per\-operation details.
 
@@ -255,23 +271,27 @@ type Provider interface {
 ```
 
 <a name="RateLimiter"></a>
-## type [RateLimiter](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L40-L47>)
+## type [RateLimiter](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L57-L68>)
 
-RateLimiter provides rate limiting functionality
+RateLimiter allows one execution per window for a key, across every client of the Redis server.
 
 ```go
 type RateLimiter interface {
-    // TryAcquireRateLimit attempts to acquire a rate limit slot for the given key
-    // Returns true if rate limit allows the operation, false if rate limit exceeded, and remaining time if exceeded
+    // TryAcquireRateLimit starts a window of the given length (at least
+    // 1ms) for key and returns true when no window is active; otherwise it
+    // returns false and the time until the active window ends. A denied
+    // call does not extend the active window.
     TryAcquireRateLimit(ctx context.Context, key string, window time.Duration) (bool, time.Duration, error)
 
-    // GetRateLimitRemainingTime returns the remaining time until the rate limit window resets
+    // GetRateLimitRemainingTime returns the time until the active window
+    // for key ends (at least 1ms while it is active), or 0 when none is
+    // active.
     GetRateLimitRemainingTime(ctx context.Context, key string) (time.Duration, error)
 }
 ```
 
 <a name="RedisClient"></a>
-## type [RedisClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L145-L150>)
+## type [RedisClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L166-L174>)
 
 RedisClient implements Provider on top of an embedded \*redis.Client. The wrapper methods prefix keys \(see Key\) and wrap errors; the embedded client's own methods are also reachable but bypass the prefix. Create it with New or NewWithClient, and derive namespaced children with WithPrefix.
 
@@ -283,7 +303,7 @@ type RedisClient struct {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L194>)
+### func [New](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L234>)
 
 ```go
 func New(cfg *Config) (*RedisClient, error)
@@ -292,7 +312,7 @@ func New(cfg *Config) (*RedisClient, error)
 New creates a root RedisClient \(no prefix\) from cfg. The returned client owns the connection: its Close closes it.
 
 <a name="NewWithClient"></a>
-### func [NewWithClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L210>)
+### func [NewWithClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L250>)
 
 ```go
 func NewWithClient(client *redis.Client) (*RedisClient, error)
@@ -301,16 +321,16 @@ func NewWithClient(client *redis.Client) (*RedisClient, error)
 NewWithClient wraps an existing \*redis.Client without a prefix. The caller keeps ownership of the connection: Close is a no\-op. The error is always nil.
 
 <a name="RedisClient.Close"></a>
-### func \(\*RedisClient\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L245>)
+### func \(\*RedisClient\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L289>)
 
 ```go
 func (c *RedisClient) Close() error
 ```
 
-Close closes the underlying connection when this client owns it \(created by New\); for clients from NewWithClient or WithPrefix it is a no\-op. Close errors are logged, never returned; the client must not be used afterwards.
+Close closes the underlying connection when this client owns it \(created by New\) and returns the close error; for clients from NewWithClient or WithPrefix it is a no\-op. It is idempotent. Children from WithPrefix share the connection: after the root is closed, their commands, like the root's, fail with redis.ErrClosed.
 
 <a name="RedisClient.Del"></a>
-### func \(\*RedisClient\) [Del](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L310>)
+### func \(\*RedisClient\) [Del](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L387>)
 
 ```go
 func (c *RedisClient) Del(ctx context.Context, key string) error
@@ -319,7 +339,7 @@ func (c *RedisClient) Del(ctx context.Context, key string) error
 Del removes key; a missing key is not an error.
 
 <a name="RedisClient.Exists"></a>
-### func \(\*RedisClient\) [Exists](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L394>)
+### func \(\*RedisClient\) [Exists](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L471>)
 
 ```go
 func (c *RedisClient) Exists(ctx context.Context, key string) (bool, error)
@@ -328,7 +348,7 @@ func (c *RedisClient) Exists(ctx context.Context, key string) (bool, error)
 Exists reports whether key exists.
 
 <a name="RedisClient.Expire"></a>
-### func \(\*RedisClient\) [Expire](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L403>)
+### func \(\*RedisClient\) [Expire](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L480>)
 
 ```go
 func (c *RedisClient) Expire(ctx context.Context, key string, expiration time.Duration) (bool, error)
@@ -337,7 +357,7 @@ func (c *RedisClient) Expire(ctx context.Context, key string, expiration time.Du
 Expire sets the TTL of key and reports whether the key existed.
 
 <a name="RedisClient.Get"></a>
-### func \(\*RedisClient\) [Get](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L276>)
+### func \(\*RedisClient\) [Get](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L353>)
 
 ```go
 func (c *RedisClient) Get(ctx context.Context, key string, v any) error
@@ -346,16 +366,16 @@ func (c *RedisClient) Get(ctx context.Context, key string, v any) error
 Get loads the value stored under key into v, which must be a non\-nil pointer \(see UnmarshalStringCmd\). It returns ErrNotFound for a missing key.
 
 <a name="RedisClient.GetRateLimitRemainingTime"></a>
-### func \(\*RedisClient\) [GetRateLimitRemainingTime](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L835>)
+### func \(\*RedisClient\) [GetRateLimitRemainingTime](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L981>)
 
 ```go
 func (c *RedisClient) GetRateLimitRemainingTime(ctx context.Context, key string) (time.Duration, error)
 ```
 
-GetRateLimitRemainingTime returns the remaining time until the rate limit window resets
+GetRateLimitRemainingTime returns the time until the active window of "ratelimit:\<key\>" ends, at least 1ms while it is active, or 0 when no window is active \(or the key has no expiry\).
 
 <a name="RedisClient.HDel"></a>
-### func \(\*RedisClient\) [HDel](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L598>)
+### func \(\*RedisClient\) [HDel](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L703>)
 
 ```go
 func (c *RedisClient) HDel(ctx context.Context, key string, fields ...string) error
@@ -364,7 +384,7 @@ func (c *RedisClient) HDel(ctx context.Context, key string, fields ...string) er
 HDel removes fields from the hash at key.
 
 <a name="RedisClient.HExists"></a>
-### func \(\*RedisClient\) [HExists](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L607>)
+### func \(\*RedisClient\) [HExists](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L712>)
 
 ```go
 func (c *RedisClient) HExists(ctx context.Context, key string, field string) (bool, error)
@@ -373,7 +393,7 @@ func (c *RedisClient) HExists(ctx context.Context, key string, field string) (bo
 HExists reports whether the hash at key has field.
 
 <a name="RedisClient.HGet"></a>
-### func \(\*RedisClient\) [HGet](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L577>)
+### func \(\*RedisClient\) [HGet](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L682>)
 
 ```go
 func (c *RedisClient) HGet(ctx context.Context, key string, field string) (string, error)
@@ -382,7 +402,7 @@ func (c *RedisClient) HGet(ctx context.Context, key string, field string) (strin
 HGet returns a field of the hash at key, or ErrNotFound when the field or the hash is missing.
 
 <a name="RedisClient.HGetAll"></a>
-### func \(\*RedisClient\) [HGetAll](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L589>)
+### func \(\*RedisClient\) [HGetAll](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L694>)
 
 ```go
 func (c *RedisClient) HGetAll(ctx context.Context, key string) (map[string]string, error)
@@ -391,7 +411,7 @@ func (c *RedisClient) HGetAll(ctx context.Context, key string) (map[string]strin
 HGetAll returns all fields of the hash at key \(empty map when missing\).
 
 <a name="RedisClient.HKeys"></a>
-### func \(\*RedisClient\) [HKeys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L616>)
+### func \(\*RedisClient\) [HKeys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L721>)
 
 ```go
 func (c *RedisClient) HKeys(ctx context.Context, key string) ([]string, error)
@@ -400,7 +420,7 @@ func (c *RedisClient) HKeys(ctx context.Context, key string) ([]string, error)
 HKeys returns the field names of the hash at key.
 
 <a name="RedisClient.HSet"></a>
-### func \(\*RedisClient\) [HSet](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L567>)
+### func \(\*RedisClient\) [HSet](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L672>)
 
 ```go
 func (c *RedisClient) HSet(ctx context.Context, key string, field string, value any) error
@@ -409,7 +429,7 @@ func (c *RedisClient) HSet(ctx context.Context, key string, field string, value 
 HSet sets a single field of the hash at key.
 
 <a name="RedisClient.HSetMany"></a>
-### func \(\*RedisClient\) [HSetMany](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L549>)
+### func \(\*RedisClient\) [HSetMany](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L654>)
 
 ```go
 func (c *RedisClient) HSetMany(ctx context.Context, key string, values map[string]any) error
@@ -418,16 +438,16 @@ func (c *RedisClient) HSetMany(ctx context.Context, key string, values map[strin
 HSetMany sets several fields of the hash at key in one HSET command. An empty map is a no\-op.
 
 <a name="RedisClient.HSetWithEviction"></a>
-### func \(\*RedisClient\) [HSetWithEviction](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L637>)
+### func \(\*RedisClient\) [HSetWithEviction](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L746>)
 
 ```go
 func (c *RedisClient) HSetWithEviction(ctx context.Context, hashKey, orderListKey string, maxFields int64, field string, value any) error
 ```
 
-HSetWithEviction sets field in the hash at hashKey and records the insertion order in the list at orderListKey; when the list grows beyond maxFields the oldest field is deleted from the hash. The steps are separate commands \(not atomic\) and errors from the eviction step are ignored.
+HSetWithEviction sets field in the hash at hashKey and appends it to the insertion\-order list at orderListKey when the field is new \(removing stale list entries for it first\); updating a field keeps its position. While the list holds more than maxFields entries \(maxFields \>= 1\), its oldest entry is removed from the list and the hash. The update runs as one Lua script, so it is atomic, and hashKey and orderListKey must differ. value is encoded as by HSet. A key of the wrong type fails the call before anything is written. Adding a new field scans the list \(LREM\), so its cost grows with maxFields.
 
 <a name="RedisClient.HVals"></a>
-### func \(\*RedisClient\) [HVals](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L625>)
+### func \(\*RedisClient\) [HVals](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L730>)
 
 ```go
 func (c *RedisClient) HVals(ctx context.Context, key string) ([]string, error)
@@ -436,34 +456,34 @@ func (c *RedisClient) HVals(ctx context.Context, key string) ([]string, error)
 HVals returns the field values of the hash at key.
 
 <a name="RedisClient.IsLocked"></a>
-### func \(\*RedisClient\) [IsLocked](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L771>)
+### func \(\*RedisClient\) [IsLocked](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L889>)
 
 ```go
 func (c *RedisClient) IsLocked(ctx context.Context, key string) (bool, error)
 ```
 
-IsLocked checks if a lock exists for the given key
+IsLocked reports whether anyone holds the lock "lock:\<key\>".
 
 <a name="RedisClient.Key"></a>
-### func \(\*RedisClient\) [Key](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L259>)
+### func \(\*RedisClient\) [Key](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L304>)
 
 ```go
 func (c *RedisClient) Key(key string) string
 ```
 
-Key returns the full Redis key for key: the prefix joined with key using path.Join \(so "a//b" and "../x" are cleaned\), or key itself when there is no prefix.
+Key returns the full Redis key for key, or key itself when there is no prefix. key is cleaned as a rooted path and then joined with the prefix, so "a//b", "/a/" and "a" name the same key and ".." cannot leave the prefix: "../x" names "\<prefix\>x".
 
 <a name="RedisClient.Keys"></a>
-### func \(\*RedisClient\) [Keys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L432>)
+### func \(\*RedisClient\) [Keys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L510>)
 
 ```go
 func (c *RedisClient) Keys(ctx context.Context, pattern string) ([]string, error)
 ```
 
-Keys returns list of keys. This method should be used mostly for testing, as in prod many keys maybe returned. It blocks and scans the entire Redis keyspace — not safe for large production datasets.
+Keys returns the keys, relative to the prefix, that match the Redis glob pattern, which is cleaned like a key; the prefix matches literally. This method should be used mostly for testing, as in prod many keys maybe returned. It blocks and scans the entire Redis keyspace — not safe for large production datasets.
 
 <a name="RedisClient.LIndex"></a>
-### func \(\*RedisClient\) [LIndex](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L385>)
+### func \(\*RedisClient\) [LIndex](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L462>)
 
 ```go
 func (c *RedisClient) LIndex(ctx context.Context, key string, index int64) (string, error)
@@ -472,7 +492,7 @@ func (c *RedisClient) LIndex(ctx context.Context, key string, index int64) (stri
 LIndex returns the element at index in the list at key.
 
 <a name="RedisClient.LLen"></a>
-### func \(\*RedisClient\) [LLen](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L376>)
+### func \(\*RedisClient\) [LLen](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L453>)
 
 ```go
 func (c *RedisClient) LLen(ctx context.Context, key string) (int64, error)
@@ -481,7 +501,7 @@ func (c *RedisClient) LLen(ctx context.Context, key string) (int64, error)
 LLen returns the length of the list at key \(0 when missing\).
 
 <a name="RedisClient.LPop"></a>
-### func \(\*RedisClient\) [LPop](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L338>)
+### func \(\*RedisClient\) [LPop](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L415>)
 
 ```go
 func (c *RedisClient) LPop(ctx context.Context, key string) (string, error)
@@ -490,7 +510,7 @@ func (c *RedisClient) LPop(ctx context.Context, key string) (string, error)
 LPop removes and returns the first element of the list at key. An empty or missing list yields a wrapped redis.Nil error, not ErrNotFound.
 
 <a name="RedisClient.LPush"></a>
-### func \(\*RedisClient\) [LPush](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L319>)
+### func \(\*RedisClient\) [LPush](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L396>)
 
 ```go
 func (c *RedisClient) LPush(ctx context.Context, key string, values ...any) error
@@ -499,7 +519,7 @@ func (c *RedisClient) LPush(ctx context.Context, key string, values ...any) erro
 LPush prepends values to the list at key.
 
 <a name="RedisClient.LRange"></a>
-### func \(\*RedisClient\) [LRange](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L358>)
+### func \(\*RedisClient\) [LRange](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L435>)
 
 ```go
 func (c *RedisClient) LRange(ctx context.Context, key string, start, stop int64) ([]string, error)
@@ -508,7 +528,7 @@ func (c *RedisClient) LRange(ctx context.Context, key string, start, stop int64)
 LRange returns the elements of the list at key between the start and stop indexes \(inclusive, negative counts from the end\).
 
 <a name="RedisClient.LTrim"></a>
-### func \(\*RedisClient\) [LTrim](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L367>)
+### func \(\*RedisClient\) [LTrim](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L444>)
 
 ```go
 func (c *RedisClient) LTrim(ctx context.Context, key string, start, stop int64) error
@@ -517,7 +537,7 @@ func (c *RedisClient) LTrim(ctx context.Context, key string, start, stop int64) 
 LTrim keeps only the elements of the list at key between start and stop.
 
 <a name="RedisClient.Ping"></a>
-### func \(\*RedisClient\) [Ping](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L421>)
+### func \(\*RedisClient\) [Ping](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L498>)
 
 ```go
 func (c *RedisClient) Ping(ctx context.Context) error
@@ -526,7 +546,7 @@ func (c *RedisClient) Ping(ctx context.Context) error
 Ping checks connectivity to the server.
 
 <a name="RedisClient.RPop"></a>
-### func \(\*RedisClient\) [RPop](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L348>)
+### func \(\*RedisClient\) [RPop](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L425>)
 
 ```go
 func (c *RedisClient) RPop(ctx context.Context, key string) (string, error)
@@ -535,7 +555,7 @@ func (c *RedisClient) RPop(ctx context.Context, key string) (string, error)
 RPop removes and returns the last element of the list at key. An empty or missing list yields a wrapped redis.Nil error, not ErrNotFound.
 
 <a name="RedisClient.RPush"></a>
-### func \(\*RedisClient\) [RPush](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L328>)
+### func \(\*RedisClient\) [RPush](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L405>)
 
 ```go
 func (c *RedisClient) RPush(ctx context.Context, key string, values ...any) error
@@ -544,7 +564,7 @@ func (c *RedisClient) RPush(ctx context.Context, key string, values ...any) erro
 RPush appends values to the list at key.
 
 <a name="RedisClient.RawClient"></a>
-### func \(\*RedisClient\) [RawClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L219>)
+### func \(\*RedisClient\) [RawClient](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L259>)
 
 ```go
 func (c *RedisClient) RawClient() *redis.Client
@@ -553,16 +573,16 @@ func (c *RedisClient) RawClient() *redis.Client
 RawClient returns the raw Redis client This is useful for using the client in a context where the Provider interface is not used
 
 <a name="RedisClient.ReleaseLock"></a>
-### func \(\*RedisClient\) [ReleaseLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L748>)
+### func \(\*RedisClient\) [ReleaseLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L865>)
 
 ```go
-func (c *RedisClient) ReleaseLock(ctx context.Context, key string) (bool, error)
+func (c *RedisClient) ReleaseLock(ctx context.Context, key, token string) (bool, error)
 ```
 
-ReleaseLock releases a distributed lock by deleting the lock key Note: This is a simple implementation. For production use, you might want to verify that the lock belongs to the current process before releasing it
+ReleaseLock deletes the lock "lock:\<key\>" only while it holds token, in one Lua script \(compare\-and\-delete\). It returns true when the lock was released and false when it expired or another owner holds it; an empty token is an error.
 
 <a name="RedisClient.SAdd"></a>
-### func \(\*RedisClient\) [SAdd](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L477>)
+### func \(\*RedisClient\) [SAdd](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L557>)
 
 ```go
 func (c *RedisClient) SAdd(ctx context.Context, key string, members ...any) error
@@ -571,16 +591,16 @@ func (c *RedisClient) SAdd(ctx context.Context, key string, members ...any) erro
 SAdd adds members to the set at key.
 
 <a name="RedisClient.SAddWithEviction"></a>
-### func \(\*RedisClient\) [SAddWithEviction](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L525>)
+### func \(\*RedisClient\) [SAddWithEviction](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L609>)
 
 ```go
 func (c *RedisClient) SAddWithEviction(ctx context.Context, key string, listKey string, limit int64, member string) error
 ```
 
-SAddWithEviction adds member to the set at key and records the insertion order in the list at listKey; when the list grows beyond limit the oldest member is removed from both. The steps are separate commands \(not atomic\) and errors from the eviction step are ignored.
+SAddWithEviction adds member to the set at key and appends it to the insertion\-order list at listKey when it was not a member yet \(removing stale list entries for it first\); re\-adding a member keeps its position. While the list holds more than limit entries \(limit \>= 1\), its oldest entry is removed from the list and the set. The update runs as one Lua script, so it is atomic, and key and listKey must differ. A key of the wrong type fails the call before anything is written. Adding a new member scans the list \(LREM\), so its cost grows with limit.
 
 <a name="RedisClient.SCard"></a>
-### func \(\*RedisClient\) [SCard](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L513>)
+### func \(\*RedisClient\) [SCard](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L593>)
 
 ```go
 func (c *RedisClient) SCard(ctx context.Context, key string) (int64, error)
@@ -589,7 +609,7 @@ func (c *RedisClient) SCard(ctx context.Context, key string) (int64, error)
 SCard returns the number of members of the set at key.
 
 <a name="RedisClient.SIsMember"></a>
-### func \(\*RedisClient\) [SIsMember](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L495>)
+### func \(\*RedisClient\) [SIsMember](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L575>)
 
 ```go
 func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bool, error)
@@ -598,7 +618,7 @@ func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bo
 SIsMember reports whether member belongs to the set at key.
 
 <a name="RedisClient.SMembers"></a>
-### func \(\*RedisClient\) [SMembers](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L504>)
+### func \(\*RedisClient\) [SMembers](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L584>)
 
 ```go
 func (c *RedisClient) SMembers(ctx context.Context, key string) ([]string, error)
@@ -607,7 +627,7 @@ func (c *RedisClient) SMembers(ctx context.Context, key string) ([]string, error
 SMembers returns all members of the set at key.
 
 <a name="RedisClient.SRem"></a>
-### func \(\*RedisClient\) [SRem](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L486>)
+### func \(\*RedisClient\) [SRem](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L566>)
 
 ```go
 func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) error
@@ -616,16 +636,16 @@ func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) erro
 SRem removes members from the set at key.
 
 <a name="RedisClient.ScanKeys"></a>
-### func \(\*RedisClient\) [ScanKeys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L448>)
+### func \(\*RedisClient\) [ScanKeys](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L525>)
 
 ```go
 func (c *RedisClient) ScanKeys(ctx context.Context, pattern string, limit int) ([]string, error)
 ```
 
-ScanKeys returns keys matching pattern \(relative to the prefix\) using SCAN in batches of 100, stopping once at least limit keys were collected \(limit \<= 0 means 1000\) or the scan completes. It may return up to 99 keys more than limit.
+ScanKeys returns keys matching pattern \(relative to the prefix, see Keys\) using SCAN with a COUNT hint of 100, stopping once at least limit keys were collected \(limit \<= 0 means 1000\) or the scan completes. The last batch may take the result past limit.
 
 <a name="RedisClient.Set"></a>
-### func \(\*RedisClient\) [Set](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L296>)
+### func \(\*RedisClient\) [Set](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L373>)
 
 ```go
 func (c *RedisClient) Set(ctx context.Context, key string, v any, expiration time.Duration) error
@@ -634,16 +654,16 @@ func (c *RedisClient) Set(ctx context.Context, key string, v any, expiration tim
 Set stores v under key \(see Marshal for the encoding\) with the given expiration; 0 means no expiry and redis.KeepTTL keeps the existing one.
 
 <a name="RedisClient.SubKey"></a>
-### func \(\*RedisClient\) [SubKey](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L267>)
+### func \(\*RedisClient\) [SubKey](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L313>)
 
 ```go
 func (c *RedisClient) SubKey(key string) string
 ```
 
-SubKey strips the client prefix from a full Redis key, inverting Key.
+SubKey strips the client prefix from a full Redis key, inverting Key for cleaned keys; the prefix itself, Key\(""\), maps to "".
 
 <a name="RedisClient.TTL"></a>
-### func \(\*RedisClient\) [TTL](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L412>)
+### func \(\*RedisClient\) [TTL](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L489>)
 
 ```go
 func (c *RedisClient) TTL(ctx context.Context, key string) (time.Duration, error)
@@ -652,34 +672,34 @@ func (c *RedisClient) TTL(ctx context.Context, key string) (time.Duration, error
 TTL returns the remaining TTL of key \(\-1 for no expiry, \-2 when missing\).
 
 <a name="RedisClient.TryAcquireRateLimit"></a>
-### func \(\*RedisClient\) [TryAcquireRateLimit](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L784>)
+### func \(\*RedisClient\) [TryAcquireRateLimit](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L963>)
 
 ```go
 func (c *RedisClient) TryAcquireRateLimit(ctx context.Context, key string, window time.Duration) (bool, time.Duration, error)
 ```
 
-TryAcquireRateLimit implements a sliding\-window limiter that allows one execution per window for key, using the sorted set "ratelimit:\<key\>" and the "ratelimit\_window:\<key\>" value. Every call, allowed or not, records its timestamp, so continuous denied attempts keep the window busy. It returns \(true, 0, nil\) when allowed, otherwise \(false, time until the window resets, nil\). The commands are pipelined but not transactional.
+TryAcquireRateLimit allows one execution per window for key: it starts a window by creating "ratelimit:\<key\>" with SET NX PX and returns \(true, 0, nil\), or returns \(false, time until the active window ends, nil\) when the key exists. A denied call writes nothing, so polling does not extend the window, and the check and the write are one atomic command. The window, which must be at least 1ms, is measured by the Redis server's clock, and the allowed call's window applies until it ends. Under a prefix, a key whose ".." segments would leave the "ratelimit:" namespace is an error, here and in GetRateLimitRemainingTime.
 
 <a name="RedisClient.TryLock"></a>
-### func \(\*RedisClient\) [TryLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L721>)
+### func \(\*RedisClient\) [TryLock](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L842>)
 
 ```go
-func (c *RedisClient) TryLock(ctx context.Context, key string, timeout time.Duration) (bool, time.Duration, error)
+func (c *RedisClient) TryLock(ctx context.Context, key string, timeout time.Duration) (string, time.Duration, error)
 ```
 
-TryLock attempts to acquire the lock "lock:\<key\>" with SET NX EX, expiring after timeout. It returns \(true, 0, nil\) when acquired, otherwise \(false, remaining TTL, nil\). The lock is not owner\-bound: any caller can release it with ReleaseLock.
+TryLock attempts to acquire the lock "lock:\<key\>" with SET NX PX, expiring after timeout, which must be at least 1ms. It returns \(token, 0, nil\) when acquired, where token is a random value that ReleaseLock requires, otherwise \("", remaining TTL, nil\); the remaining TTL is 0 for a lock written without expiry. The acquisition and the TTL read run in one MULTI/EXEC transaction. Under a prefix, a key whose ".." segments would leave the "lock:" namespace is an error, here and in ReleaseLock and IsLocked.
 
 <a name="RedisClient.WithPrefix"></a>
-### func \(\*RedisClient\) [WithPrefix](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L227>)
+### func \(\*RedisClient\) [WithPrefix](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L268>)
 
 ```go
 func (c *RedisClient) WithPrefix(prefix string) *RedisClient
 ```
 
-WithPrefix returns a child client sharing the connection whose keys are namespaced under "/\<prefix\>/" \(surrounding spaces and slashes are trimmed\). The child's Close is a no\-op. Prefixes do not nest: the parent prefix is ignored.
+WithPrefix returns a child client sharing the connection whose keys are namespaced under "/\<prefix\>/" \(surrounding spaces and slashes are trimmed and the prefix is cleaned as a path, so "a//b" is "/a/b/"\). The child's Close is a no\-op. Prefixes do not nest: the parent prefix is ignored.
 
 <a name="RedisClient.ZAdd"></a>
-### func \(\*RedisClient\) [ZAdd](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L663>)
+### func \(\*RedisClient\) [ZAdd](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L780>)
 
 ```go
 func (c *RedisClient) ZAdd(ctx context.Context, key string, score float64, member string) error
@@ -688,7 +708,7 @@ func (c *RedisClient) ZAdd(ctx context.Context, key string, score float64, membe
 ZAdd adds member with score to the sorted set at key, updating the score if the member exists. The go\-redis error is returned unwrapped.
 
 <a name="RedisClient.ZCard"></a>
-### func \(\*RedisClient\) [ZCard](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L698>)
+### func \(\*RedisClient\) [ZCard](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L815>)
 
 ```go
 func (c *RedisClient) ZCard(ctx context.Context, key string) (int64, error)
@@ -697,7 +717,7 @@ func (c *RedisClient) ZCard(ctx context.Context, key string) (int64, error)
 ZCard returns the number of members of the sorted set at key.
 
 <a name="RedisClient.ZIncrBy"></a>
-### func \(\*RedisClient\) [ZIncrBy](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L670>)
+### func \(\*RedisClient\) [ZIncrBy](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L787>)
 
 ```go
 func (c *RedisClient) ZIncrBy(ctx context.Context, key string, increment float64, member string) error
@@ -706,7 +726,7 @@ func (c *RedisClient) ZIncrBy(ctx context.Context, key string, increment float64
 ZIncrBy adds increment to the score of member in the sorted set at key. The go\-redis error is returned unwrapped.
 
 <a name="RedisClient.ZRem"></a>
-### func \(\*RedisClient\) [ZRem](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L677>)
+### func \(\*RedisClient\) [ZRem](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L794>)
 
 ```go
 func (c *RedisClient) ZRem(ctx context.Context, key string, members ...any) error
@@ -715,7 +735,7 @@ func (c *RedisClient) ZRem(ctx context.Context, key string, members ...any) erro
 ZRem removes members from the sorted set at key. The go\-redis error is returned unwrapped.
 
 <a name="RedisClient.ZRemRangeByRank"></a>
-### func \(\*RedisClient\) [ZRemRangeByRank](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L710>)
+### func \(\*RedisClient\) [ZRemRangeByRank](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L827>)
 
 ```go
 func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error)
@@ -724,7 +744,7 @@ func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, st
 ZRemRangeByRank removes the elements of the sorted set at key between the start and stop ranks \(0\-based, ascending by score\) and returns the count removed. Use \(0, \-N\-1\) to keep only the top N. The go\-redis error is returned unwrapped.
 
 <a name="RedisClient.ZRevRangeWithScores"></a>
-### func \(\*RedisClient\) [ZRevRangeWithScores](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L685>)
+### func \(\*RedisClient\) [ZRevRangeWithScores](<https://github.com/effective-security/porto/blob/main/pkg/redisclient/redisclient.go#L802>)
 
 ```go
 func (c *RedisClient) ZRevRangeWithScores(ctx context.Context, key string, start, stop int64) ([]redis.Z, error)

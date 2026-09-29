@@ -4,8 +4,17 @@
 //
 // Values are JSON encoded on Set and decoded into the pointer passed to
 // Get, so both backends behave the same. A missing or expired entry is
-// reported as ErrNotFound (test with IsNotFoundError). Keys are joined
-// with the provider prefix using path.Join.
+// reported as ErrNotFound (test with IsNotFoundError).
+//
+// Keys: a key is cleaned as a rooted path and joined with the provider
+// prefix, so "x", "/x" and "x/" name the same entry and ".." cannot leave
+// the prefix ("../x" is "<prefix>/x"); a proxy prefix is cleaned the same
+// way. Keys takes a Redis glob pattern relative to the provider ('*' and
+// '?' also match '/', "[...]" sets, '\' escapes), matches the prefix
+// literally and returns the matching unexpired keys relative to the
+// provider, in the form Get accepts (the key "" only for an empty pattern);
+// the memory provider implements the Redis matcher, so both backends list
+// the same keys.
 //
 //	var p cache.Provider
 //	if cfg.Provider == "redis" {

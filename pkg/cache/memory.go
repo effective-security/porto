@@ -1,12 +1,11 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"maps"
-	"path"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 )
 
 type memProv struct {
-	prefix string
+	ns namespace
 
 	// mu guards subs and closed, so that Subscribe cannot register a
 	// subscription that a concurrent Close would miss; Publish holds it for
@@ -32,13 +31,19 @@ type entry struct {
 	data []byte
 }
 
-// NewMemoryProvider returns an in-process Provider whose keys are joined
-// with prefix. Values are kept JSON encoded; the store is unbounded and
-// expired entries are only dropped on Get or CleanExpired.
+// live reports whether e has not expired at now.
+func (e *entry) live(now time.Time) bool {
+	return e.expires == nil || e.expires.After(now)
+}
+
+// NewMemoryProvider returns an in-process Provider whose keys are stored
+// under prefix like the Redis provider's (an empty prefix becomes "/").
+// Values are kept JSON encoded; the store is unbounded and expired entries
+// are only dropped on Get or CleanExpired.
 func NewMemoryProvider(prefix string) Provider {
 	prov := &memProv{
-		prefix: prefix,
-		subs:   make(map[*msub]struct{}),
+		ns:   newNamespace(cmp.Or(prefix, "/")),
+		subs: make(map[*msub]struct{}),
 	}
 
 	return prov
@@ -72,7 +77,7 @@ func (p *memProv) Set(_ context.Context, key string, v any, ttl time.Duration) e
 		ttl = DefaultTTL
 	}
 
-	k := path.Join(p.prefix, key)
+	k := p.ns.key(key)
 	b, err := json.Marshal(v)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal value: %s", k)
@@ -92,11 +97,11 @@ func (p *memProv) Set(_ context.Context, key string, v any, ttl time.Duration) e
 
 // Get data
 func (p *memProv) Get(_ context.Context, key string, v any) error {
-	k := path.Join(p.prefix, key)
+	k := p.ns.key(key)
 	if ent, ok := p.cache.Load(k); ok {
 		e := ent.(*entry)
-		if e.expires == nil || e.expires.After(NowFunc()) {
-			err := json.Unmarshal(ent.(*entry).data, v)
+		if e.live(NowFunc()) {
+			err := json.Unmarshal(e.data, v)
 			if err != nil {
 				return errors.Wrapf(err, "failed to unmarshal value: %s", k)
 			}
@@ -113,8 +118,7 @@ func (p *memProv) Delete(_ context.Context, keys ...string) error {
 		return nil
 	}
 	for _, key := range keys {
-		k := path.Join(p.prefix, key)
-		p.cache.Delete(k)
+		p.cache.Delete(p.ns.key(key))
 	}
 	return nil
 }
@@ -123,27 +127,26 @@ func (p *memProv) Delete(_ context.Context, keys ...string) error {
 func (p *memProv) CleanExpired(_ context.Context) {
 	now := NowFunc()
 	p.cache.Range(func(key any, value any) bool {
-		e := value.(*entry)
-		if e.expires != nil && !e.expires.After(now) {
-			k := key.(string)
-			p.cache.Delete(k)
+		if !value.(*entry).live(now) {
+			p.cache.Delete(key)
 		}
 		return true
 	})
 }
 
-// Keys returns list of keys.
+// Keys returns the live keys, relative to the provider, whose stored names
+// match the Redis glob pattern as Redis KEYS would (see globMatch).
 // This method should be used mostly for testing, as in prod many keys maybe returned
 func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
-	k := path.Join(p.prefix, pattern)
-	k = strings.TrimRight(k, "*?")
-
-	var list []string
-
-	p.cache.Range(func(key any, _ any) bool {
+	glob := p.ns.pattern(pattern)
+	now := NowFunc()
+	list := []string{}
+	p.cache.Range(func(key any, value any) bool {
 		name := key.(string)
-		if strings.HasPrefix(name, k) {
-			list = append(list, name)
+		if value.(*entry).live(now) && globMatch(glob, name) {
+			if rel, ok := p.ns.listed(pattern, name); ok {
+				list = append(list, rel)
+			}
 		}
 		return true
 	})

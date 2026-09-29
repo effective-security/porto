@@ -52,11 +52,7 @@ byte-exact test.
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
-| P-044 | pkg/redisclient, pkg/cache              | `redisclient.go` `Key`; `memory.go`, `proxy.go`, `redis.go`              | `path.Join` lets `..` in a key escape the prefix namespace                                                                                   | security    | MEDIUM   | Needs Approval |
-| P-045 | pkg/redisclient                         | `redisclient.go` `NewRedisClient`                                        | Redis URL, which may embed a password, logged at INFO                                                                                        | security    | MEDIUM   | Open           |
 | P-046 | pkg/retriable                           | `retriable.go` `New`                                                     | `request:` block without `retry_limit` silently disables retries                                                                             | correctness | MEDIUM   | Needs Approval |
-| P-047 | pkg/redisclient                         | `redisclient.go` `ReleaseLock`, `TryLock`                                | Lock release is not owner-bound and not atomic                                                                                               | correctness | MEDIUM   | Needs Approval |
 | P-052 | pkg/transport                           | `tls.go` `TLSInfo`                                                       | `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify`, `SkipClientSANVerify` are never enforced                      | security    | MEDIUM   | Needs Approval |
 | P-053 | pkg/transport                           | `keepalive_listener.go` `Accept`                                         | `errors.WithStack` on accept errors defeats `Temporary()` retry in net/http and grpc                                                         | bug         | MEDIUM   | Open           |
 | P-080 | pkg/transport                           | `tls.go` `TLSInfo.ServerTLSWithReloader`                                 | A failed first call caches a half-built `tls.Config`; later calls return it without error or reloader                                        | correctness | LOW      | Open           |
@@ -65,9 +61,6 @@ byte-exact test.
 | P-058 | pkg/retriable                           | `retriable.go` `Policy.ShouldRetry`, `DefaultPolicy`                     | 429 entry in `DefaultPolicy` is unreachable                                                                                                  | correctness | LOW      | Needs Approval |
 | P-060 | pkg/retriable                           | `nonce.go` `pushNonce`, `Nonce`                                          | Cache trim drops the newest nonce; `Nonce()` ignores context                                                                                 | bug         | LOW      | Open           |
 | P-061 | pkg/retriable                           | `retriable.go` `WithTLS`, `WithDNSServer`                                | Unchecked `*http.Transport` assertion; mutates a caller-supplied transport in place                                                          | bug         | LOW      | Needs Approval |
-| P-062 | pkg/redisclient                         | `redisclient.go` `Close`                                                 | Nils the embedded client; children keep using a closed connection; close errors hidden                                                       | bug         | LOW      | Needs Approval |
-| P-063 | pkg/redisclient                         | `redisclient.go` `SAddWithEviction`, `HSetWithEviction`                  | Errors ignored; re-adds create duplicate list entries and mis-evict                                                                          | correctness | LOW      | Open           |
-| P-064 | pkg/cache                               | `memory.go` `Keys` vs `redis.go` `Keys`                                  | Memory returns prefixed names, Redis strips the prefix; pattern subsets differ                                                               | correctness | LOW      | Needs Approval |
 | P-065 | pkg/retriable                           | `retriable.go` `RequestURL`                                              | Byte-offset slicing breaks URLs with userinfo                                                                                                | bug         | LOW      | Open           |
 | P-066 | pkg/retriable                           | `storage.go`, `retriable.go`                                             | Archived `go-homedir` import; `WithUserAgent` blocks up to 1s; error bodies buffered unbounded                                               | correctness | LOW      | Open           |
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
@@ -162,31 +155,10 @@ byte-exact test.
 - Evidence: B06 verification (2026-09-28), `go test -coverpkg=./... -coverprofile=<file> ./...` followed by `go tool cover -func=<file>`, measured 83.5% total; CI `MIN_TESTCOV` is 90. This remains queued in B24.
 - Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
 
-### P-043 Rate limiter starvation and non-atomic window
-
-- Evidence: `Pipeline()` (not `TxPipeline`) does `ZCard` then unconditional `ZAdd`/`Set`/`Expire`; allowed only when the count is 0.
-- Impact: a caller polling faster than the window is denied forever; two concurrent callers can both win.
-- Fix: `ZAdd` only when allowed, inside a Lua script or `WATCH` transaction.
-
-### P-044 Key namespace escape
-
-- Evidence: `path.Join(c.prefix, key)` cleans `..`, so `Key("../other/x")` under `/tenant-a/` yields `/other/x`. Same pattern in `pkg/cache`.
-- Fix: reject `..` or concatenate without cleaning.
-
-### P-045 Redis URL logged
-
-- Evidence: `logger.KV(xlog.INFO, "redis", cfg.Server)` where `Server` may be `redis://user:password@host/db`.
-- Fix: log `options.Addr` after `ParseURL`.
-
 ### P-046 `request:` without `retry_limit`
 
 - Evidence: `pol.TotalRetryLimit = cfg.Request.RetryLimit` overwrites the default 5 with 0 whenever the block is present.
 - Fix: `cmp.Or(cfg.Request.RetryLimit, pol.TotalRetryLimit)` or a pointer field.
-
-### P-047 Lock release not owner-bound
-
-- Evidence: `TryLock` stores a timestamp value; `ReleaseLock` does `Exists` then `Del` without comparing the value.
-- Fix: return a token from `TryLock` and release with a compare-and-delete script.
 
 ### P-052 Unenforced `TLSInfo` fields
 
@@ -199,16 +171,13 @@ byte-exact test.
 - Impact: a transient `EMFILE` stops the server instead of backing off.
 - Fix: return `err` unwrapped.
 
-### P-056 to P-066 retriable / redisclient / cache LOW items
+### P-056 to P-066 retriable LOW items
 
 - P-056: `time.Sleep(sleepDuration)` ignores `ctx.Done()`; `consumeResponseBody` only drains.
 - P-057: `ctx, _ = c.ensureContext(...)` drops the cancel func.
 - P-058: `ShouldRetry` returns `LimitExceeded` for 429 before consulting `p.Retries`.
 - P-060: `c.nonces = c.nonces[nonceCacheLimit/2 : count-1]` drops the freshest nonce; `Nonce()` uses `context.Background()`.
 - P-061: `c.httpClient.Transport.(*http.Transport)` unchecked; `http.DefaultTransport` mutated when passed in.
-- P-062: `Close` sets `c.Client = nil` and always returns nil.
-- P-063: `length, _ := c.LLen(...)`, `oldest, _ := c.LPop(...)`, `_ = c.SRem(...)`; `RPush` appends duplicates.
-- P-064: memory `Keys` appends the full name; Redis `Keys` trims the prefix; memory supports only a trailing wildcard.
 - P-065: `path := rawURL[len(host):]` with `host := u.Scheme + "://" + u.Host`.
 - P-066: `go-homedir` vs `resolve.ExpandPath`; `netutil.WaitForNetwork(time.Second)` in a constructor; `bodyCopy` of error responses unbounded.
 
@@ -235,7 +204,5 @@ byte-exact test.
 
 - P-013: changes observable auth behavior; tests assert the current strings.
 - P-023: changes metric label semantics for dashboards.
-- P-046, P-058, P-061, P-062: currently silent or panicking paths become errors or warnings.
-- P-043, P-047: rate limiter and lock semantics change under concurrency.
-- P-044, P-064: key layout changes for keys containing `..`, `//` or a prefix.
+- P-046, P-058, P-061: currently silent or panicking paths become errors or warnings.
 - P-052, P-073, P-074: public type behavior or config surface.

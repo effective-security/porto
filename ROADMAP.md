@@ -32,13 +32,6 @@ Metric names may change, so this needs a compatibility note.
 Guard task state with a mutex, fix `Stop`, then enable `RACE=true` in the
 CI `covtest` step so regressions are caught. Retires P-048, P-049, P-071.
 
-## 6. `pkg/cache` and `pkg/redisclient` semantics
-
-`GetOrSet` should write back with a TTL; memory and Redis `Keys` should
-agree on prefix stripping and glob support; the Redis lock should be
-owner-bound (token + compare-and-delete script) and the rate limiter
-atomic (Lua). Retires P-036, P-043, P-047, P-064.
-
 ## 8. Unenforced `transport.TLSInfo` fields
 
 Either port the etcd SAN/CN checks into the `tlsCheckFunc` chain or delete

@@ -76,7 +76,9 @@ type Subscription interface {
 }
 
 // Provider is the cache interface implemented by the memory, Redis and
-// proxy providers. Implementations are safe for concurrent use.
+// proxy providers. Implementations are safe for concurrent use. A key is
+// cleaned as a rooted path and stored under the provider prefix, so ".."
+// cannot leave the prefix.
 type Provider interface {
 	// Set stores v (JSON encoded, or raw for string/[]byte on Redis) under
 	// key. ttl == 0 applies the provider default, KeepTTL disables expiry.
@@ -96,8 +98,13 @@ type Provider interface {
 	// failed subscription that reports ErrClosed.
 	// It is rare to Close a Client, as the Client is meant to be long-lived and shared between many goroutines.
 	Close() error
-	// Keys returns the keys matching pattern (glob for Redis, prefix match
-	// for memory). It scans the whole keyspace and is meant for tests.
+	// Keys returns the unexpired keys, relative to the provider, that
+	// match the Redis glob pattern ('*' and '?' also match '/'), which is
+	// relative to the provider and cleaned like a key; the prefix matches
+	// literally. Only keys that Get can read are listed, and the key ""
+	// only for an empty pattern. The memory provider matches as Redis KEYS
+	// does (ranges with bytes >= 0x80 compare unsigned).
+	// It scans the whole keyspace and is meant for tests.
 	Keys(ctx context.Context, pattern string) ([]string, error)
 
 	// IsLocal returns true when the cache lives in this process only.

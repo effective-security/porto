@@ -25,8 +25,12 @@ func TestMemProv_CleanExpired(t *testing.T) {
 	require.NoError(t, p.Set(ctx, "live", "v", time.Hour))
 	require.NoError(t, p.Set(ctx, "dead", "v", time.Millisecond))
 
-	//time.Sleep(5 * time.Millisecond)
 	NowFunc = func() time.Time { return base.Add(2 * time.Millisecond) }
+
+	// like Redis, Keys does not list an expired entry before it is cleaned
+	keys, err := p.Keys(ctx, "*")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"live"}, keys)
 
 	p.CleanExpired(ctx)
 
@@ -34,9 +38,32 @@ func TestMemProv_CleanExpired(t *testing.T) {
 	assert.NoError(t, p.Get(ctx, "live", &out))
 	assert.Equal(t, "v", out)
 	assert.True(t, IsNotFoundError(p.Get(ctx, "dead", &out)))
-	keys, err := p.Keys(ctx, "*")
+	keys, err = p.Keys(ctx, "*")
 	require.NoError(t, err)
-	assert.Len(t, keys, 1)
+	assert.Equal(t, []string{"live"}, keys)
+}
+
+func TestMemProv_KeysRoot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// an empty prefix is "/": the key "" is listed only for an empty
+	// pattern, as under a named prefix
+	for _, prefix := range []string{"", "named"} {
+		p := NewMemoryProvider(prefix)
+		require.NoError(t, p.Set(ctx, "", "root", time.Minute))
+		require.NoError(t, p.Set(ctx, "x", "v", time.Minute))
+		keys, err := p.Keys(ctx, "*")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"x"}, keys, prefix)
+		keys, err = p.Keys(ctx, "")
+		require.NoError(t, err)
+		assert.Equal(t, []string{""}, keys, prefix)
+		keys, err = p.Keys(ctx, "none*")
+		require.NoError(t, err)
+		assert.NotNil(t, keys, prefix)
+		assert.Empty(t, keys, prefix)
+	}
 }
 
 // memTestTimeout bounds a Publish that must not block; memNoMessageWait is
