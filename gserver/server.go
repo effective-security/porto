@@ -103,7 +103,9 @@ type GServer interface {
 // listeners, the per-listener HTTP and gRPC servers, and the registered
 // services. Use Start to construct it; the zero value is not usable.
 type Server struct {
-	// Listeners are the accepted network listeners, one per unique listen address.
+	// Listeners are the accepted network listeners, one per unique listen
+	// address. They are wrappers (accept backoff, TCP keepalive), not the
+	// *net.TCPListener or *net.UnixListener values; use Addr and Close.
 	Listeners []net.Listener
 
 	ipaddr   string

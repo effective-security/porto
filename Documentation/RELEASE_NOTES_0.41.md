@@ -12,6 +12,8 @@
 
 - Redact credential headers from retriable HTTP client debug dumps. Token and DPoP key writes now use private temporary files and replace existing credential paths atomically; newly created credential folders use mode `0700`.
 
+- B15: `transport.TLSInfo` no longer has the `AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify` and `SkipClientSANVerify` fields. They were documented but never enforced, so a server that set them could accept clients they were meant to reject. Code that sets them now fails to compile (see Breaking changes).
+
 ### Concurrency, deadlocks and panics
 
 - TLS certificate reloads now load files outside the handshake lock. The reloading HTTP transport keeps one TLS config and selects the current client certificate for each handshake; it clones a supplied `http.Transport` and closes idle connections after rotation and on `Close`.
@@ -32,6 +34,8 @@
 
 - B07: `gserver.Server.Close` no longer blocks when a listener's setup failed after `Start`; `serve` starts no server until its TLS listener is ready and always closes the channel `Close` waits on. `Close` now stops the TLS certificate reloader, which previously leaked one goroutine per `Start`/`Close` cycle, and runs its teardown once: services are closed once, and a repeated or concurrent `Close` returns after the first teardown has finished (previously a second call closed the services again). A failed `Start` now releases everything on every error path: the reloader is stopped, services created by earlier factories are closed when a later factory fails or is missing, and the cleanup no longer depends on a shadowed error variable. `configureListeners` now really closes the listeners it opened before a later listen URL failed (its previous deferred cleanup read a result that the error return had already reset, so the first listener stayed bound) and stops the reloader it started.
 
+- B15: keepalive listeners (`transport.NewKeepAliveListener`) no longer panic when the wrapped listener returns a connection without TCP keepalive support (for example a Unix socket); the connection is returned without keepalive.
+
 ### Correctness and interoperability
 
 - Return REST server HTTP bind errors from `StartHTTP`, support `Config()` and IPv6 bind addresses (`HostName()` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` add them), and make `StopHTTP` safe before start and on repeated calls.
@@ -50,6 +54,10 @@
 
 - `cache.GetOrSet` now stores a successful getter result using the provider's default TTL, reports invalid getter types without panicking, and returns cache write errors.
 
+- B15: `pkg/transport` listeners return accept errors unwrapped, so net/http, grpc and cmux retry temporary errors such as `EMFILE` (too many open files) instead of stopping. Previously the keepalive listener wrapped the error, which made `gserver`'s cmux loop, and with it every server on that address, stop for good. The TLS listener (`transport.NewTLSListener`) likewise stopped accepting after its first accept error and then returned that error on every `Accept`; it now passes each error to one `Accept` call, keeps accepting, and stops when the wrapped listener returns `net.ErrClosed` or when it is closed itself. A wrapped listener that reports its closure with another error (a cmux listener does) keeps the TLS listener's accept loop running until its `Close`; net/http and grpc close the listener when they stop, but other callers must close it. After `Close`, `Accept` returns an error wrapping `net.ErrClosed`. `gserver` now waits between failed accepts (5ms doubling to 1s, reset after a successful accept, each failure logged as a warning) before cmux retries them, so descriptor exhaustion neither stops the server nor spins its accept loop.
+
+- B15: a failed `TLSInfo.ServerTLSWithReloader` call (expired certificate, unknown cipher suite, reloader error) no longer caches the half-built config: a later call, or `NewTLSListener`, returned it without an error and without certificate reloading. A retry now loads the files again. When `ServerTLSWithReloader` fails, `NewTLSListener` leaves the listener it was given open, as before; that is now documented.
+
 ### Tests and tooling
 
 ## New features and behaviour
@@ -57,6 +65,7 @@
 - B06: shared `xhttp/limits` defaults bound HTTP header reads (10s), whole-request reads (30s), idle keepalive connections (60s), cmux detection and eager TLS handshakes (10s). Header deadlines follow native net/http semantics; HTTP/2 has no per-stream header deadline. Request bodies default to 10 MiB, including standalone `marshal.DecodeBody`. Unknown-length bodies and trailing bytes are bounded too; `RequestTooLarge` now returns HTTP 413. `marshal.LimitRequestBody` writes no response: a known oversized body fails on its first read, so the 413 from `DecodeBody` carries CORS and correlation headers and appears in request logs and metrics. Native gRPC streams on TLS listeners are exempt from the read deadline, so long-lived client and bidi streams are not cut after 30s.
 - B11: cache pub/sub delivery is at most once and `Publish` never waits for a subscriber: each subscription buffers 100 undelivered messages (previously 10 for memory); the memory provider drops messages for a full subscriber and Redis follows the go-redis channel policy (a message is dropped after its reader waited one minute). Redis `Subscribe` waits for the server to confirm the subscription, bounded by the context (otherwise by the go-redis dial timeout plus 10s), so a message published after `Subscribe` returns is delivered; a subscription that could not be established returns the wrapped error from `ReceiveMessage` (the context error when the wait was cancelled), and `Publish` errors name the channel.
 - Prometheus binds synchronously, returns bind errors without terminating the process, and returns a closer that shuts down its HTTP endpoint. Its endpoint also uses the shared read/body limits.
+- B15: keepalive listeners set TCP keepalive with `SetKeepAliveConfig`: probes start after 30s idle, are sent every 15s, and a peer is dropped after 9 unanswered probes (165s). These are the values Go 1.27 produced before; they are now explicit and apply even when the wrapped listener disabled keepalive. A failure to set the options is logged at DEBUG and does not fail `Accept`.
 
 ## Breaking changes: what clients must change
 
@@ -83,3 +92,5 @@
 - B13: cache `Keys` returns keys relative to the provider: the memory and proxy providers previously returned full prefixed names, and the Redis provider under a prefix without a trailing slash returned keys with a leading `/`; callers that stripped prefixes themselves must stop. Patterns are Redis globs on the memory provider too (`*` and `?` match `/`). A key whose `..` segments previously climbed above the key's first segment (such as `../x`, or `../app/x` under `/app/`, in `redisclient` or `cache`) now resolves inside the prefix, so data written through such a key is no longer reachable by it; all other keys keep their stored names.
 
 - `cache.GetOrSet` now writes on a cache miss. Callers that require a read without a cache write should use `Get` and their getter directly. On a miss, the destination must point to a concrete type; interface destinations return an error because their values cannot round-trip reliably across providers.
+
+- B15: remove any use of `transport.TLSInfo.AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`, `InsecureSkipVerify` and `SkipClientSANVerify`; they never had any effect. To enforce a client certificate policy, call `TLSInfo.ServerTLSWithReloader` and set `VerifyConnection` on the returned config before calling `transport.NewTLSListener` (the listener uses the same config). Callers that compared the TLS listener's `Accept` error after `Close` with the wrapped listener's own error should use `errors.Is(err, net.ErrClosed)`. `gserver.Server.Listeners` now holds accept-backoff wrappers for every address, including Unix sockets (previously `*net.UnixListener`); code that type-asserted them must use `Addr` and `Close` only.

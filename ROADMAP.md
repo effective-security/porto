@@ -32,12 +32,6 @@ Metric names may change, so this needs a compatibility note.
 Guard task state with a mutex, fix `Stop`, then enable `RACE=true` in the
 CI `covtest` step so regressions are caught. Retires P-048, P-049, P-071.
 
-## 8. Unenforced `transport.TLSInfo` fields
-
-Either port the etcd SAN/CN checks into the `tlsCheckFunc` chain or delete
-`AllowedCN`, `AllowedHostname`, `EmptyCN`, `ServerName`,
-`InsecureSkipVerify`, `SkipClientSANVerify`. Retires P-052.
-
 ## 9. Route-template metric labels
 
 `telemetry.NewRequestMetrics` labels by raw path. Stash the registered

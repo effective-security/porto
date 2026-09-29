@@ -341,9 +341,13 @@ info := &transport.TLSInfo{
 	ClientAuthType: tls.VerifyClientCertIfGiven,
 }
 defer info.Close()
-ln, _ := net.Listen("tcp", ":8443")
+ln, err := net.Listen("tcp", ":8443")
+if err != nil {
+	return err
+}
 tlsLn, err := transport.NewTLSListener(ln, info) // keypair reloaded every 5 minutes
 if err != nil {
+	_ = ln.Close() // left open when the TLS config fails to load
 	return err
 }
 srv := &http.Server{Handler: h, TLSConfig: info.Config(), ReadHeaderTimeout: 10 * time.Second}

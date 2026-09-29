@@ -24,8 +24,7 @@ import (
 )
 
 // TestNewKeepAliveListener tests NewKeepAliveListener returns a listener
-// that accepts connections.
-// TODO: verify the keepalive option is set correctly
+// that accepts connections. The keepalive options are checked in b15 tests.
 func TestNewKeepAliveListener(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

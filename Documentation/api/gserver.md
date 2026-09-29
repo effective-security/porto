@@ -104,7 +104,7 @@ var (
 ```
 
 <a name="NewRequestValidationUnaryInterceptor"></a>
-## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L744>)
+## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L746>)
 
 ```go
 func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor
@@ -358,7 +358,7 @@ type GServer interface {
 ```
 
 <a name="Start"></a>
-### func [Start](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L143-L149>)
+### func [Start](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L145-L151>)
 
 ```go
 func Start(name string, cfg *Config, container *dig.Container, serviceFactories map[string]ServiceFactory, opts ...Option) (GServer, error)
@@ -516,13 +516,15 @@ type RouteRegistrator interface {
 ```
 
 <a name="Server"></a>
-## type [Server](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L105-L134>)
+## type [Server](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L105-L136>)
 
 Server is the GServer implementation returned by Start. It owns the listeners, the per\-listener HTTP and gRPC servers, and the registered services. Use Start to construct it; the zero value is not usable.
 
 ```go
 type Server struct {
-    // Listeners are the accepted network listeners, one per unique listen address.
+    // Listeners are the accepted network listeners, one per unique listen
+    // address. They are wrappers (accept backoff, TCP keepalive), not the
+    // *net.TCPListener or *net.UnixListener values; use Addr and Close.
     Listeners []net.Listener
     // contains filtered or unexported fields
 }
@@ -608,7 +610,7 @@ stopped server
 </details>
 
 <a name="Server.AddService"></a>
-### func \(\*Server\) [AddService](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L419>)
+### func \(\*Server\) [AddService](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L421>)
 
 ```go
 func (e *Server) AddService(svc Service)
@@ -617,7 +619,7 @@ func (e *Server) AddService(svc Service)
 AddService registers svc by its Name, replacing any service with the same name. It must be called from a ServiceFactory, before Start begins serving; the services map is not synchronized.
 
 <a name="Server.Close"></a>
-### func \(\*Server\) [Close](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L323>)
+### func \(\*Server\) [Close](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L325>)
 
 ```go
 func (e *Server) Close()
@@ -626,7 +628,7 @@ func (e *Server) Close()
 Close gracefully shuts down all servers/listeners. Client requests will be terminated with request timeout. After timeout, enforce remaining requests be closed immediately. It then closes the listeners and stops the TLS certificate reloader. The teardown runs once, so services are closed once; a later or concurrent call returns after the teardown has finished.
 
 <a name="Server.Configuration"></a>
-### func \(\*Server\) [Configuration](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L412>)
+### func \(\*Server\) [Configuration](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L414>)
 
 ```go
 func (e *Server) Configuration() *Config
@@ -635,7 +637,7 @@ func (e *Server) Configuration() *Config
 Configuration returns a pointer to the server's copy of the Config; mutating it after Start has no effect on already configured listeners.
 
 <a name="Server.Discovery"></a>
-### func \(\*Server\) [Discovery](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L465>)
+### func \(\*Server\) [Discovery](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L467>)
 
 ```go
 func (e *Server) Discovery() discovery.Discovery
@@ -644,7 +646,7 @@ func (e *Server) Discovery() discovery.Discovery
 Discovery returns the discovery.Discovery injected from the container; all services are registered with it under the server name after Start.
 
 <a name="Server.Err"></a>
-### func \(\*Server\) [Err](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L403>)
+### func \(\*Server\) [Err](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L405>)
 
 ```go
 func (e *Server) Err() <-chan error
@@ -653,7 +655,7 @@ func (e *Server) Err() <-chan error
 Err returns the channel on which listener/serve errors are reported. The channel is buffered and is never closed; errors are dropped once Close begins.
 
 <a name="Server.Hostname"></a>
-### func \(\*Server\) [Hostname](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L453>)
+### func \(\*Server\) [Hostname](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L455>)
 
 ```go
 func (e *Server) Hostname() string
@@ -662,7 +664,7 @@ func (e *Server) Hostname() string
 Hostname is the hostname
 
 <a name="Server.IsReady"></a>
-### func \(\*Server\) [IsReady](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L431>)
+### func \(\*Server\) [IsReady](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L433>)
 
 ```go
 func (e *Server) IsReady() bool
@@ -671,7 +673,7 @@ func (e *Server) IsReady() bool
 IsReady returns true when every registered service reports IsReady.
 
 <a name="Server.ListenURLs"></a>
-### func \(\*Server\) [ListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L448>)
+### func \(\*Server\) [ListenURLs](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L450>)
 
 ```go
 func (e *Server) ListenURLs() []string
@@ -680,7 +682,7 @@ func (e *Server) ListenURLs() []string
 ListenURLs returns the configured Config.ListenURLs \(not the resolved listener addresses\).
 
 <a name="Server.LocalIP"></a>
-### func \(\*Server\) [LocalIP](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L459>)
+### func \(\*Server\) [LocalIP](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L461>)
 
 ```go
 func (e *Server) LocalIP() string
@@ -689,7 +691,7 @@ func (e *Server) LocalIP() string
 LocalIP returns the local IPv4 address detected at startup, or 127.0.0.1 when it could not be determined.
 
 <a name="Server.Name"></a>
-### func \(\*Server\) [Name](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L406>)
+### func \(\*Server\) [Name](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L408>)
 
 ```go
 func (e *Server) Name() string
@@ -698,7 +700,7 @@ func (e *Server) Name() string
 Name returns server name
 
 <a name="Server.Service"></a>
-### func \(\*Server\) [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L426>)
+### func \(\*Server\) [Service](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L428>)
 
 ```go
 func (e *Server) Service(name string) Service
@@ -707,7 +709,7 @@ func (e *Server) Service(name string) Service
 Service returns the registered service with the given name, or nil.
 
 <a name="Server.StartedAt"></a>
-### func \(\*Server\) [StartedAt](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L442>)
+### func \(\*Server\) [StartedAt](<https://github.com/effective-security/porto/blob/main/gserver/server.go#L444>)
 
 ```go
 func (e *Server) StartedAt() time.Time
@@ -831,7 +833,7 @@ func (info *TLSInfo) String() string
 String returns a loggable summary of the TLS file locations; safe on a nil receiver.
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L736-L739>)
+## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L738-L741>)
 
 Validator is implemented by request messages that can validate themselves; NewRequestValidationUnaryInterceptor calls it before the handler.
 

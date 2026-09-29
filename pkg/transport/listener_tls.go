@@ -28,13 +28,20 @@ import (
 	"golang.org/x/crypto/ocsp"
 )
 
-// tlsListener overrides a TLS listener so it will reject client
-// certificates with insufficient SAN credentials or CRL revoked
-// certificates.
+// tlsListener completes each TLS handshake before Accept returns the
+// connection and rejects connections that fail check (the CRL check when
+// TLSInfo.CRLVerifier is set).
 type tlsListener struct {
 	net.Listener
-	connc            chan net.Conn
-	donec            chan struct{}
+	connc chan net.Conn
+	// errc passes Accept errors of the inner listener, other than
+	// net.ErrClosed, to the next Accept call.
+	errc      chan error
+	closec    chan struct{} // closed by Close
+	closeOnce sync.Once
+	donec     chan struct{} // closed when acceptLoop returns
+	// err is the error that stopped acceptLoop (it wraps net.ErrClosed); it
+	// is read only after donec is closed.
 	err              error
 	handshakeFailure func(*tls.Conn, error)
 	handshakeTimeout time.Duration
@@ -48,10 +55,20 @@ type tlsCheckFunc func(context.Context, *tls.Conn) error
 // handshake or the CRL check (when tlsinfo.CRLVerifier is set) are closed and
 // reported to tlsinfo.HandshakeFailure. It calls tlsinfo.ServerTLSWithReloader,
 // so the tls.Config is available afterwards via tlsinfo.Config(). If tlsinfo
-// is nil or Empty, l is closed and an error returned. The caller must Close
-// the returned listener; Close blocks until the accept loop and pending
-// handshakes finish. HandshakeTimeout defaults to 10s; a negative value
-// disables it. The deadline is cleared before a successful connection is returned.
+// is nil or Empty, l is closed and an error returned; if
+// ServerTLSWithReloader fails, its error is returned and l is left open.
+// The caller must Close the returned listener; Close blocks until the accept
+// loop and pending handshakes finish. HandshakeTimeout defaults to 10s; a
+// negative value disables it. The deadline is cleared before a successful
+// connection is returned.
+//
+// An Accept error of l other than net.ErrClosed does not stop the listener:
+// it is returned unchanged by the next Accept call, so the caller decides
+// whether to retry (net/http and grpc back off on temporary errors such as
+// EMFILE), and accepting continues after it. A wrapped listener that reports
+// its closure with another error, such as a cmux listener, keeps the accept
+// loop running until Close; net/http and grpc close the listener when such
+// an error stops them.
 func NewTLSListener(l net.Listener, tlsinfo *TLSInfo) (net.Listener, error) {
 	check := func(context.Context, *tls.Conn) error { return nil }
 	return newTLSListener(l, tlsinfo, check)
@@ -116,6 +133,8 @@ func newTLSListener(l net.Listener, tlsinfo *TLSInfo, check tlsCheckFunc) (net.L
 	tlsl := &tlsListener{
 		Listener:         tls.NewListener(l, tlsCfg),
 		connc:            make(chan net.Conn),
+		errc:             make(chan error),
+		closec:           make(chan struct{}),
 		donec:            make(chan struct{}),
 		handshakeFailure: hf,
 		check:            check,
@@ -125,16 +144,24 @@ func newTLSListener(l net.Listener, tlsinfo *TLSInfo, check tlsCheckFunc) (net.L
 	return tlsl, nil
 }
 
+// Close closes the inner listener and waits until the accept loop and the
+// pending handshakes have finished.
 func (l *tlsListener) Close() error {
+	l.closeOnce.Do(func() { close(l.closec) })
 	err := l.Listener.Close()
 	<-l.donec
 	return err
 }
 
+// Accept returns the next handshaked connection, or the next Accept error of
+// the inner listener. After Close, or after the inner listener reported
+// net.ErrClosed, it returns an error wrapping net.ErrClosed.
 func (l *tlsListener) Accept() (net.Conn, error) {
 	select {
 	case conn := <-l.connc:
 		return conn, nil
+	case err := <-l.errc:
+		return nil, err
 	case <-l.donec:
 		return nil, l.err
 	}
@@ -162,8 +189,11 @@ func (l *tlsListener) acceptLoop() {
 	for {
 		conn, err := l.Listener.Accept()
 		if err != nil {
-			l.err = err
-			return
+			if stopErr := l.forwardAcceptError(err); stopErr != nil {
+				l.err = stopErr
+				return
+			}
+			continue
 		}
 
 		pendingMu.Lock()
@@ -203,6 +233,27 @@ func (l *tlsListener) acceptLoop() {
 	}
 }
 
+// forwardAcceptError hands err to the next Accept call. It returns the
+// error that stops the accept loop instead: err itself when the inner
+// listener reports that it is closed, or net.ErrClosed when Close was called.
+func (l *tlsListener) forwardAcceptError(err error) error {
+	if errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	// Checked first: select picks randomly when an Accept call is also waiting.
+	select {
+	case <-l.closec:
+		return errors.WithStack(net.ErrClosed)
+	default:
+	}
+	select {
+	case l.errc <- err:
+		return nil
+	case <-l.closec:
+		return errors.WithStack(net.ErrClosed)
+	}
+}
+
 func (l *tlsListener) handshake(conn *tls.Conn) error {
 	if l.handshakeTimeout > 0 {
 		if err := conn.SetDeadline(time.Now().Add(l.handshakeTimeout)); err != nil {
@@ -217,90 +268,3 @@ func (l *tlsListener) handshake(conn *tls.Conn) error {
 	}
 	return nil
 }
-
-/*
-func checkSAN(ctx context.Context, tlsConn *tls.Conn) error {
-	st := tlsConn.ConnectionState()
-	if certs := st.PeerCertificates; len(certs) > 0 {
-		addr := tlsConn.RemoteAddr().String()
-		return checkCertSAN(ctx, certs[0], addr)
-	}
-	return nil
-}
-
-func checkCertSAN(ctx context.Context, cert *x509.Certificate, remoteAddr string) error {
-	if len(cert.IPAddresses) == 0 && len(cert.DNSNames) == 0 {
-		return nil
-	}
-	h, _, herr := net.SplitHostPort(remoteAddr)
-	if herr != nil {
-		return herr
-	}
-	if len(cert.IPAddresses) > 0 {
-		cerr := cert.VerifyHostname(h)
-		if cerr == nil {
-			return nil
-		}
-		if len(cert.DNSNames) == 0 {
-			return cerr
-		}
-	}
-	if len(cert.DNSNames) > 0 {
-		ok, err := isHostInDNS(ctx, h, cert.DNSNames)
-		if ok {
-			return nil
-		}
-		errStr := ""
-		if err != nil {
-			errStr = " (" + err.Error() + ")"
-		}
-		return fmt.Errorf("tls: %q does not match any of DNSNames %q"+errStr, h, cert.DNSNames)
-	}
-	return nil
-}
-
-func isHostInDNS(ctx context.Context, host string, dnsNames []string) (ok bool, err error) {
-	// reverse lookup
-	wildcards, names := []string{}, []string{}
-	for _, dns := range dnsNames {
-		if strings.HasPrefix(dns, "*.") {
-			wildcards = append(wildcards, dns[1:])
-		} else {
-			names = append(names, dns)
-		}
-	}
-	lnames, lerr := net.DefaultResolver.LookupAddr(ctx, host)
-	for _, name := range lnames {
-		// strip trailing '.' from PTR record
-		if name[len(name)-1] == '.' {
-			name = name[:len(name)-1]
-		}
-		for _, wc := range wildcards {
-			if strings.HasSuffix(name, wc) {
-				return true, nil
-			}
-		}
-		for _, n := range names {
-			if n == name {
-				return true, nil
-			}
-		}
-	}
-	err = lerr
-
-	// forward lookup
-	for _, dns := range names {
-		addrs, lerr := net.DefaultResolver.LookupHost(ctx, dns)
-		if lerr != nil {
-			err = lerr
-			continue
-		}
-		for _, addr := range addrs {
-			if addr == host {
-				return true, nil
-			}
-		}
-	}
-	return false, err
-}
-*/
