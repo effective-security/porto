@@ -52,7 +52,8 @@ type Task interface {
 	// Name returns "<taskName>@<callback function name>" as set by Do;
 	// empty before Do is called.
 	Name() string
-	// RunCount returns how many times Run has started the callback.
+	// RunCount returns how many runs have started; a run is counted when it
+	// is marked running, right before its callback is invoked.
 	RunCount() uint32
 	// Schedule returns a snapshot of the current schedule and run state.
 	Schedule() *Schedule
@@ -395,43 +396,8 @@ func (j *task) Run() bool {
 	defer timer.Stop()
 	select {
 	case j.runLock <- struct{}{}:
-		now := TimeNow()
-		j.state.Lock()
-		j.schedule.LastRunAt = &now
-		j.running = true
-		count := atomic.AddUint32(&j.schedule.RunCount, 1)
-		callback := j.callback
-		params := j.params
-		j.state.Unlock()
-
-		logger.KV(xlog.DEBUG,
-			"status", "running",
-			"run_count", count,
-			"started_at", now,
-			"task", j.Name())
-
-		j.Publish()
-
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.KV(xlog.ERROR,
-						"reason", "panic",
-						"task", j.Name(),
-						"err", r,
-						"stack", string(debug.Stack()))
-				}
-			}()
-			callback.Call(params)
-		}()
-
-		j.state.Lock()
-		j.running = false
-		j.schedule.UpdateNextRun()
-		j.state.Unlock()
-		j.Publish()
-
-		<-j.runLock
+		j.begin()
+		j.execute()
 		return true
 	case <-timer.C:
 	}
@@ -447,6 +413,69 @@ func (j *task) Run() bool {
 		"task", j.Name())
 
 	return false
+}
+
+// tryRun starts a run in a new goroutine unless the task is already
+// running, and reports whether it did. The task is marked running before
+// tryRun returns, so a caller that dispatches under a lock (the scheduler)
+// and then stops observes the run through IsRunning at once.
+func (j *task) tryRun() bool {
+	select {
+	case j.runLock <- struct{}{}:
+	default:
+		return false
+	}
+	j.begin()
+	go j.execute()
+	return true
+}
+
+// begin records the start of a run; the caller holds the run lock.
+func (j *task) begin() {
+	now := TimeNow()
+	j.state.Lock()
+	j.schedule.LastRunAt = &now
+	j.running = true
+	count := atomic.AddUint32(&j.schedule.RunCount, 1)
+	j.state.Unlock()
+
+	logger.KV(xlog.DEBUG,
+		"status", "running",
+		"run_count", count,
+		"started_at", now,
+		"task", j.Name())
+}
+
+// execute publishes, invokes the callback, records the completion and
+// releases the run lock; the caller holds the run lock after begin.
+func (j *task) execute() {
+	j.state.RLock()
+	callback := j.callback
+	params := j.params
+	j.state.RUnlock()
+
+	j.Publish()
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.KV(xlog.ERROR,
+					"reason", "panic",
+					"task", j.Name(),
+					"err", r,
+					"stack", string(debug.Stack()))
+			}
+		}()
+		callback.Call(params)
+	}()
+
+	j.state.Lock()
+	j.running = false
+	j.schedule.UpdateNextRun()
+	j.state.Unlock()
+	j.Publish()
+
+	<-j.runLock
 }
 
 func parseTimeFormat(t string) (hour, minutes int, err error) {

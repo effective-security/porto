@@ -95,6 +95,62 @@ func Test_StartAndStop(t *testing.T) {
 	assert.False(t, scheduler.IsRunning())
 }
 
+// Test_StopStartsNoRun checks that no task run starts after Stop returned
+// and that runs started before Stop are visible to IsRunning immediately,
+// across many start/stop cycles with a fast ticker (formerly P-081).
+func Test_StopStartsNoRun(t *testing.T) {
+	t.Parallel()
+	const interval = time.Millisecond
+	const cycles = 25
+
+	scheduler := NewScheduler(WithTickerInterval(interval)).(*scheduler)
+	tasks := []Task{
+		NewTaskAtIntervals(0, Seconds).Do("first", func() {}),
+		NewTaskAtIntervals(0, Seconds).Do("second", func() {}),
+	}
+	for _, task := range tasks {
+		scheduler.Add(task)
+	}
+	counts := func() []uint32 {
+		out := make([]uint32, len(tasks))
+		for i, task := range tasks {
+			out[i] = task.RunCount()
+		}
+		return out
+	}
+	idle := func() bool {
+		for _, task := range tasks {
+			if task.IsRunning() {
+				return false
+			}
+		}
+		return true
+	}
+
+	for range cycles {
+		before := counts()
+		require.NoError(t, scheduler.Start())
+		require.Eventually(t, func() bool {
+			after := counts()
+			for i := range tasks {
+				if after[i] <= before[i] {
+					return false
+				}
+			}
+			return true
+		}, 5*time.Second, interval)
+
+		require.NoError(t, scheduler.Stop())
+		require.Eventually(t, idle, time.Second, 100*time.Microsecond)
+		stopped := counts()
+
+		// several ticks later nothing has started
+		time.Sleep(10 * interval)
+		assert.True(t, idle(), "a task is running after Stop")
+		assert.Equal(t, stopped, counts(), "a task run started after Stop")
+	}
+}
+
 func Test_AddAndClear(t *testing.T) {
 	scheduler := NewScheduler().(*scheduler)
 	require.NotNil(t, scheduler)

@@ -35,9 +35,28 @@
 // providers cannot reliably restore values into interface destinations.
 // Concurrent misses may run the getter more than once.
 //
-// Pub/Sub: Subscribe returns a Subscription whose ReceiveMessage blocks
-// until a message arrives or the context is done (checked about once a
-// second); Close unregisters it. The memory provider delivers to every
-// subscriber of the channel in-process only; the Redis provider uses Redis
+// Pub/Sub: Subscribe returns a Subscription whose ReceiveMessage returns
+// the next message, ctx.Err() as soon as the context is done, or ErrClosed
+// after Close; Close is idempotent, and closing the provider closes its
+// subscriptions (a Subscribe during or after that Close returns a
+// subscription reporting ErrClosed). A message published after Subscribe
+// returns reaches the new subscriber: the Redis provider waits for the
+// server to confirm the subscription, and a subscription it could not
+// establish reports the error from ReceiveMessage. Delivery is at most
+// once and Publish never waits for a subscriber: each subscriber buffers
+// 100 undelivered messages; a memory subscriber whose buffer is full misses
+// the message, and a Redis subscriber follows the go-redis channel policy
+// (its reader waits up to one minute, then drops the message). The memory
+// provider delivers in-process only; the Redis provider uses Redis
 // channels, which are not prefixed.
+//
+//	sub := p.Subscribe(ctx, "invalidate")
+//	defer sub.Close()
+//	for {
+//		msg, err := sub.ReceiveMessage(ctx)
+//		if err != nil {
+//			return err // ctx done, ErrClosed, or the subscription failed
+//		}
+//		handle(msg)
+//	}
 package cache

@@ -1,7 +1,12 @@
 package cache_test
 
 import (
+	"bufio"
 	"context"
+	"net"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +57,117 @@ func TestProvider(t *testing.T) {
 		provTest(t, r, root)
 	})
 
+	t.Run("redis provider closed", func(t *testing.T) {
+		r, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   host,
+			Password: "redis",
+		}, root)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(ctx, pubsubTimeout)
+		defer cancel()
+		const chanName = "closed-provider"
+		sub := r.Subscribe(ctx, chanName)
+		// a delivered marker proves the subscription is live; the second
+		// message stays queued in the subscription
+		require.NoError(t, r.Publish(ctx, chanName, "marker"))
+		require.NoError(t, r.Publish(ctx, chanName, "queued"))
+		rr := awaitResult(t, receiveAsync(ctx, sub), pubsubTimeout)
+		require.NoError(t, rr.err)
+		assert.Equal(t, "marker", rr.msg)
+
+		pending := r.Subscribe(ctx, chanName)
+		res := receiveAsync(ctx, pending)
+		require.NoError(t, r.Close())
+
+		// the pending receive reports the closed provider, the queued
+		// message is discarded and the go-redis goroutines are released
+		// without Close on the subscriptions
+		rr = awaitResult(t, res, pubsubTimeout)
+		assert.ErrorIs(t, rr.err, cache.ErrClosed)
+		_, err = sub.ReceiveMessage(ctx)
+		assert.ErrorIs(t, err, cache.ErrClosed)
+		assert.Eventually(t, func() bool {
+			return pubsubGoroutines() == 0
+		}, pubsubTimeout, 20*time.Millisecond, "go-redis pub/sub goroutines leaked")
+		assert.NoError(t, sub.Close())
+		assert.NoError(t, pending.Close())
+	})
+
+	t.Run("redis subscribe during close", func(t *testing.T) {
+		r, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   host,
+			Password: "redis",
+		}, root)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(ctx, pubsubTimeout)
+		defer cancel()
+		const chanName = "closing"
+		const subscribers = 8
+		subs := make(chan cache.Subscription, subscribers)
+		var wg sync.WaitGroup
+		for range subscribers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				subs <- r.Subscribe(ctx, chanName)
+			}()
+		}
+		// close while subscriptions are being established: each one is
+		// either closed by the provider or rejected, never left live
+		require.NoError(t, r.Close())
+		wg.Wait()
+		close(subs)
+		for sub := range subs {
+			_, err := sub.ReceiveMessage(ctx)
+			assert.ErrorIs(t, err, cache.ErrClosed)
+			assert.NoError(t, sub.Close())
+		}
+
+		// after Close, Subscribe is rejected without a round trip
+		sub := r.Subscribe(ctx, chanName)
+		_, err = sub.ReceiveMessage(ctx)
+		require.ErrorIs(t, err, cache.ErrClosed)
+		assert.Contains(t, err.Error(), "provider closed")
+		assert.NoError(t, sub.Close())
+
+		assert.Eventually(t, func() bool {
+			return pubsubGoroutines() == 0
+		}, pubsubTimeout, 20*time.Millisecond, "go-redis pub/sub goroutines leaked")
+	})
+
+	t.Run("redis slow subscriber closed", func(t *testing.T) {
+		r, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   host,
+			Password: "redis",
+		}, root)
+		require.NoError(t, err)
+		defer func() {
+			assert.NoError(t, r.Close())
+		}()
+
+		ctx, cancel := context.WithTimeout(ctx, pubsubTimeout)
+		defer cancel()
+		const chanName = "slow-subscriber"
+		sub := r.Subscribe(ctx, chanName)
+		// overflow the subscriber buffer so the go-redis reader blocks on
+		// its send, then Close must release it without waiting for the
+		// go-redis one-minute send timeout
+		for i := range 2 * cache.SubscriberBufferSize {
+			require.NoError(t, r.Publish(ctx, chanName, strconv.Itoa(i)))
+		}
+		require.Eventually(t, readerBlockedOnSend, pubsubTimeout, 20*time.Millisecond,
+			"go-redis reader did not block on the full channel")
+
+		require.NoError(t, sub.Close())
+		_, err = sub.ReceiveMessage(ctx)
+		assert.ErrorIs(t, err, cache.ErrClosed)
+		assert.Eventually(t, func() bool {
+			return pubsubGoroutines() == 0
+		}, pubsubTimeout, 20*time.Millisecond, "go-redis reader leaked after Close")
+	})
+
 	mem := cache.NewMemoryProvider(root)
 	defer func() {
 		assert.NoError(t, mem.Close())
@@ -60,6 +176,25 @@ func TestProvider(t *testing.T) {
 
 	t.Run("memory", func(t *testing.T) {
 		provTest(t, mem, root)
+	})
+
+	t.Run("memory provider closed", func(t *testing.T) {
+		m := cache.NewMemoryProvider(root)
+		ctx, cancel := context.WithTimeout(ctx, pubsubTimeout)
+		defer cancel()
+		const chanName = "closed-provider"
+		sub := m.Subscribe(ctx, chanName)
+		require.NoError(t, m.Publish(ctx, chanName, "queued"))
+		pending := m.Subscribe(ctx, chanName)
+		res := receiveAsync(ctx, pending)
+
+		require.NoError(t, m.Close())
+		r := awaitResult(t, res, promptTimeout)
+		assert.ErrorIs(t, r.err, cache.ErrClosed)
+		_, err := sub.ReceiveMessage(ctx)
+		assert.ErrorIs(t, err, cache.ErrClosed)
+		assert.NoError(t, sub.Close())
+		assert.NoError(t, pending.Close())
 	})
 
 	t.Run("proxy", func(t *testing.T) {
@@ -73,7 +208,7 @@ func TestProvider(t *testing.T) {
 }
 
 func provTest(t *testing.T, p cache.Provider, root string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var strVal string
@@ -235,64 +370,405 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 
 	p.CleanExpired(ctx)
 
-	// test channel
+	pubsubTest(t, p)
+}
+
+// pubsubTimeout bounds every wait in pubsubTest; a Redis round trip is
+// milliseconds, so hitting it means a receive is stuck.
+const pubsubTimeout = 5 * time.Second
+
+// promptTimeout bounds a ReceiveMessage that must return without waiting
+// for a message: after ctx is done or the subscription is closed.
+const promptTimeout = time.Second
+
+type recvResult struct {
+	msg string
+	err error
+}
+
+// receiveAsync runs one ReceiveMessage in a goroutine so the test can
+// cancel or close while it is pending and assert from the test goroutine.
+func receiveAsync(ctx context.Context, sub cache.Subscription) <-chan recvResult {
+	res := make(chan recvResult, 1)
+	go func() {
+		msg, err := sub.ReceiveMessage(ctx)
+		res <- recvResult{msg: msg, err: err}
+	}()
+	return res
+}
+
+func awaitResult(t *testing.T, res <-chan recvResult, timeout time.Duration) recvResult {
+	t.Helper()
+	select {
+	case r := <-res:
+		return r
+	case <-time.After(timeout):
+		require.FailNow(t, "ReceiveMessage did not return", "waited %s", timeout)
+		return recvResult{}
+	}
+}
+
+// goroutineStacks returns the stack dump of every goroutine.
+func goroutineStacks() string {
+	buf := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return string(buf[:n])
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+// pubsubGoroutines counts the goroutines started by go-redis
+// PubSub.Channel by their "created by" stack line; the memory provider
+// starts none. The == 0 leak checks rely on TestProvider running
+// sequentially: Go starts top-level t.Parallel tests only after it ends.
+func pubsubGoroutines() int {
+	return strings.Count(goroutineStacks(), "created by github.com/redis/go-redis/v9.(*channel).init")
+}
+
+// readerBlockedOnSend reports whether a go-redis message reader is blocked
+// sending into a full subscriber channel: that send is the only blocking
+// select in initMsgChan, while a socket read shows as IO wait.
+func readerBlockedOnSend() bool {
+	for _, g := range strings.Split(goroutineStacks(), "\n\n") {
+		if strings.Contains(g, "[select") && strings.Contains(g, "go-redis/v9.(*channel).initMsgChan.func1") {
+			return true
+		}
+	}
+	return false
+}
+
+func pubsubTest(t *testing.T, p cache.Provider) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	chanName := "test" + certutil.RandomString(4)
 
 	t.Run("cancel", func(t *testing.T) {
-		ctx2, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-
 		sub := p.Subscribe(ctx, chanName)
 		defer func() {
 			assert.NoError(t, sub.Close())
 		}()
 
-		var wg sync.WaitGroup
-		wg.Add(1)
+		// wait without publishing, then cancel: the receive returns promptly
+		ctx2, cancel2 := context.WithCancel(ctx)
+		res := receiveAsync(ctx2, sub)
+		cancel2()
+		r := awaitResult(t, res, promptTimeout)
+		assert.ErrorIs(t, r.err, context.Canceled)
+		assert.Empty(t, r.msg)
 
-		// wait without publishing
-		go func() {
-			defer wg.Done()
-			_, err := sub.ReceiveMessage(ctx2)
-			assert.Error(t, err, "context canceled")
-		}()
-		cancel()
-		cerr := ctx2.Err()
-		assert.Error(t, cerr)
-		wg.Wait()
+		// a receive that times out
+		ctx3, cancel3 := context.WithTimeout(ctx, 20*time.Millisecond)
+		defer cancel3()
+		r = awaitResult(t, receiveAsync(ctx3, sub), promptTimeout)
+		assert.ErrorIs(t, r.err, context.DeadlineExceeded)
+
+		// abandoned receives must not consume the next message (formerly P-041)
+		require.NoError(t, p.Publish(ctx, chanName, "after-cancel"))
+		r = awaitResult(t, receiveAsync(ctx, sub), pubsubTimeout)
+		require.NoError(t, r.err)
+		assert.Equal(t, "after-cancel", r.msg)
 	})
 
-	sub1 := p.Subscribe(ctx, chanName)
-	sub2 := p.Subscribe(ctx, chanName)
+	t.Run("close", func(t *testing.T) {
+		sub := p.Subscribe(ctx, chanName)
 
+		res := receiveAsync(ctx, sub)
+		require.NoError(t, sub.Close())
+		r := awaitResult(t, res, promptTimeout)
+		assert.ErrorIs(t, r.err, cache.ErrClosed)
+
+		// idempotent, and later receives fail the same way
+		assert.NoError(t, sub.Close())
+		_, err := sub.ReceiveMessage(ctx)
+		assert.ErrorIs(t, err, cache.ErrClosed)
+
+		// publishing to a closed subscriber is not an error
+		assert.NoError(t, p.Publish(ctx, chanName, "nobody"))
+
+		// a message buffered before Close is discarded (memory buffers
+		// synchronously; for Redis the message may still be in flight)
+		sub = p.Subscribe(ctx, chanName)
+		require.NoError(t, p.Publish(ctx, chanName, "buffered"))
+		require.NoError(t, sub.Close())
+		_, err = sub.ReceiveMessage(ctx)
+		assert.ErrorIs(t, err, cache.ErrClosed)
+	})
+
+	t.Run("broadcast", func(t *testing.T) {
+		sub1 := p.Subscribe(ctx, chanName)
+		sub2 := p.Subscribe(ctx, chanName)
+		defer func() {
+			assert.NoError(t, sub1.Close())
+			assert.NoError(t, sub2.Close())
+		}()
+
+		// Subscribe has returned, so the publish reaches both subscribers
+		require.NoError(t, p.Publish(ctx, chanName, "val1"))
+		require.NoError(t, p.Publish(ctx, chanName, "val2"))
+
+		for _, sub := range []cache.Subscription{sub1, sub2} {
+			r := awaitResult(t, receiveAsync(ctx, sub), pubsubTimeout)
+			require.NoError(t, r.err)
+			assert.Equal(t, "val1", r.msg)
+			r = awaitResult(t, receiveAsync(ctx, sub), pubsubTimeout)
+			require.NoError(t, r.err)
+			assert.Equal(t, "val2", r.msg)
+		}
+
+		if !p.IsLocal() {
+			// the marker in pubsubGoroutines still matches go-redis
+			assert.Positive(t, pubsubGoroutines())
+		}
+	})
+
+	// every subscription is closed: no reader or health-check goroutine remains
+	assert.Eventually(t, func() bool {
+		return pubsubGoroutines() == 0
+	}, pubsubTimeout, 20*time.Millisecond, "go-redis pub/sub goroutines leaked")
+}
+
+func TestRedisSubscribeUnreachable(t *testing.T) {
+	t.Parallel()
+
+	p, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server: "redis://127.0.0.1:1",
+	}, "unreachable")
+	require.NoError(t, err)
 	defer func() {
-		assert.NoError(t, sub1.Close())
-		assert.NoError(t, sub2.Close())
+		assert.NoError(t, p.Close())
 	}()
 
-	ctx2, cancel := context.WithTimeout(ctx, 6*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), pubsubTimeout)
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	sub := p.Subscribe(ctx, "chan")
+	require.NotNil(t, sub)
+	_, err = sub.ReceiveMessage(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to subscribe to channel chan")
+	// the error is stable and Close holds nothing
+	_, err2 := sub.ReceiveMessage(ctx)
+	assert.EqualError(t, err2, err.Error())
+	assert.NoError(t, sub.Close())
+	assert.NoError(t, sub.Close())
 
+	err = p.Publish(ctx, "chan", "msg")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to publish to channel chan")
+}
+
+// silentRedis is a fake Redis that answers every command with an error,
+// which go-redis tolerates for HELLO and CLIENT SETINFO, except SUBSCRIBE,
+// which it never confirms. A non-nil onCommand is called with the upper
+// case name of every command received, before the reply; it may block to
+// hold the reply.
+func silentRedis(t *testing.T, onCommand func(name string)) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, ln.Close())
+	})
 	go func() {
-		defer wg.Done()
-		msg, err := sub1.ReceiveMessage(ctx2)
-		require.NoError(t, err)
-		assert.Equal(t, "val1", msg)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serveSilentRedis(conn, onCommand)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+func serveSilentRedis(conn net.Conn, onCommand func(name string)) {
+	defer func() {
+		_ = conn.Close()
+	}()
+	rd := bufio.NewReader(conn)
+	for {
+		line, err := rd.ReadString('\n')
+		if err != nil {
+			return
+		}
+		if !strings.HasPrefix(line, "*") {
+			continue
+		}
+		argc, err := strconv.Atoi(strings.TrimSpace(line[1:]))
+		if err != nil {
+			return
+		}
+		args := make([]string, 0, argc)
+		for range argc {
+			// bulk string: $<len> line, then the data line
+			if _, err := rd.ReadString('\n'); err != nil {
+				return
+			}
+			arg, err := rd.ReadString('\n')
+			if err != nil {
+				return
+			}
+			args = append(args, strings.TrimSpace(arg))
+		}
+		if len(args) == 0 {
+			continue
+		}
+		name := strings.ToUpper(args[0])
+		if onCommand != nil {
+			onCommand(name)
+		}
+		if name == "SUBSCRIBE" {
+			continue
+		}
+		if _, err := conn.Write([]byte("-ERR unknown command\r\n")); err != nil {
+			return
+		}
+	}
+}
+
+// awaitSubscription returns the result of an asynchronous Subscribe or
+// fails the test when it takes longer than timeout.
+func awaitSubscription(t *testing.T, res <-chan cache.Subscription, timeout time.Duration) cache.Subscription {
+	t.Helper()
+	select {
+	case sub := <-res:
+		return sub
+	case <-time.After(timeout):
+		require.FailNow(t, "Subscribe did not return", "waited %s", timeout)
+		return nil
+	}
+}
+
+func TestRedisSubscribeContext(t *testing.T) {
+	t.Parallel()
+
+	p, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server: "redis://" + silentRedis(t, nil),
+	}, "silent")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, p.Close())
 	}()
 
-	go func() {
-		defer wg.Done()
-		msg, err := sub2.ReceiveMessage(ctx2)
-		require.NoError(t, err)
-		assert.Equal(t, "val1", msg)
-	}()
+	subscribeAsync := func(ctx context.Context) <-chan cache.Subscription {
+		res := make(chan cache.Subscription, 1)
+		go func() {
+			res <- p.Subscribe(ctx, "chan")
+		}()
+		return res
+	}
 
-	err = p.Publish(ctx, chanName, "val1")
+	t.Run("cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		res := subscribeAsync(ctx)
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		sub := awaitSubscription(t, res, pubsubTimeout)
+		_, err := sub.ReceiveMessage(context.Background())
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Contains(t, err.Error(), "failed to subscribe to channel chan")
+		assert.NoError(t, sub.Close())
+	})
+
+	t.Run("deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		sub := awaitSubscription(t, subscribeAsync(ctx), pubsubTimeout)
+		_, err := sub.ReceiveMessage(context.Background())
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NoError(t, sub.Close())
+	})
+}
+
+// TestRedisSubscribeDuringClose closes the provider while Subscribe waits
+// for a confirmation that the fake server never sends: Close breaks the
+// connection, and the failure is reported as ErrClosed, not as the
+// resulting connection error.
+func TestRedisSubscribeDuringClose(t *testing.T) {
+	t.Parallel()
+
+	subscribed := make(chan struct{}, 1)
+	p, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server: "redis://" + silentRedis(t, func(name string) {
+			if name == "SUBSCRIBE" {
+				select {
+				case subscribed <- struct{}{}:
+				default:
+				}
+			}
+		}),
+	}, "silent-close")
 	require.NoError(t, err)
 
-	wg.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), pubsubTimeout)
+	defer cancel()
+	res := make(chan cache.Subscription, 1)
+	go func() {
+		res <- p.Subscribe(ctx, "chan")
+	}()
+	select {
+	case <-subscribed:
+	case <-time.After(pubsubTimeout):
+		require.FailNow(t, "SUBSCRIBE did not reach the server", "waited %s", pubsubTimeout)
+	}
+	require.NoError(t, p.Close())
+
+	sub := awaitSubscription(t, res, pubsubTimeout)
+	_, err = sub.ReceiveMessage(ctx)
+	require.ErrorIs(t, err, cache.ErrClosed)
+	assert.Contains(t, err.Error(), "failed to subscribe to channel chan: provider closed")
+	assert.NoError(t, sub.Close())
+}
+
+// TestRedisSubscribeCloseDuringSetup closes the provider while go-redis
+// still sets up the subscription connection (the fake server holds its
+// HELLO reply); the client does not track that connection yet, so Close
+// cannot close it, and Subscribe must still report ErrClosed at once
+// instead of waiting for the confirmation.
+func TestRedisSubscribeCloseDuringSetup(t *testing.T) {
+	t.Parallel()
+
+	hello := make(chan struct{})
+	release := make(chan struct{})
+	releaseHello := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseHello)
+	var holdOnce sync.Once
+	p, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server: "redis://" + silentRedis(t, func(name string) {
+			if name == "HELLO" {
+				holdOnce.Do(func() {
+					close(hello)
+					<-release
+				})
+			}
+		}),
+	}, "silent-setup")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), pubsubTimeout)
+	defer cancel()
+	res := make(chan cache.Subscription, 1)
+	go func() {
+		res <- p.Subscribe(ctx, "chan")
+	}()
+	select {
+	case <-hello:
+	case <-time.After(pubsubTimeout):
+		require.FailNow(t, "HELLO did not reach the server", "waited %s", pubsubTimeout)
+	}
+	require.NoError(t, p.Close())
+	releaseHello()
+
+	// the confirmation wait would last until ctx expires
+	sub := awaitSubscription(t, res, promptTimeout)
+	_, err = sub.ReceiveMessage(ctx)
+	require.ErrorIs(t, err, cache.ErrClosed)
+	assert.Contains(t, err.Error(), "failed to subscribe to channel chan: provider closed")
+	assert.NoError(t, sub.Close())
 }
 
 func TestIsNotFoundError(t *testing.T) {

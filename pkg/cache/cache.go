@@ -47,12 +47,31 @@ type RedisConfig struct {
 	Password string `json:"password,omitempty" yaml:"password,omitempty"`
 }
 
+// subscriberBufferSize is the number of undelivered messages a Subscription
+// buffers for a subscriber that is not currently in ReceiveMessage. It is
+// the memory provider's per-subscriber channel size and the go-redis
+// message channel size for Redis subscriptions.
+const subscriberBufferSize = 100
+
 // Subscription is a channel subscription returned by Provider.Subscribe.
+// Delivery is at most once: a subscriber that has fallen more than 100
+// messages behind misses messages; see Provider.Publish.
 type Subscription interface {
-	// Close unregisters the subscription and releases its resources.
+	// Close unregisters the subscription and releases its resources,
+	// discarding buffered messages. It is idempotent, and it unblocks a
+	// pending ReceiveMessage, which then returns ErrClosed. Closing the
+	// provider closes its subscriptions; calling Close on them afterwards
+	// is harmless. During an outage Close may wait for an
+	// in-flight go-redis redial.
 	Close() error
-	// ReceiveMessage blocks until a message arrives or ctx is done
-	// (checked about once per second), returning ctx.Err() in the latter case.
+	// ReceiveMessage returns the next buffered message, or blocks until a
+	// message arrives, ctx is done (returning ctx.Err()) or the
+	// subscription is closed (returning ErrClosed). It returns promptly in
+	// the last two cases and may be called from one goroutine at a time.
+	// A Subscription that Subscribe could not establish returns the
+	// subscribe error from every ReceiveMessage call. A Redis subscription
+	// does not report connection loss: go-redis reconnects and resubscribes
+	// in the background, and messages published meanwhile are lost.
 	ReceiveMessage(ctx context.Context) (string, error)
 }
 
@@ -70,7 +89,11 @@ type Provider interface {
 	// CleanExpired removes expired entries from the memory provider;
 	// it is a no-op for Redis, which expires keys itself.
 	CleanExpired(ctx context.Context)
-	// Close closes the client, releasing any open resources.
+	// Close closes the client, releasing any open resources. The memory
+	// and Redis providers close their live subscriptions first, so a
+	// pending ReceiveMessage returns ErrClosed and queued messages are
+	// discarded; a Subscribe that runs during or after Close returns a
+	// failed subscription that reports ErrClosed.
 	// It is rare to Close a Client, as the Client is meant to be long-lived and shared between many goroutines.
 	Close() error
 	// Keys returns the keys matching pattern (glob for Redis, prefix match
@@ -80,10 +103,23 @@ type Provider interface {
 	// IsLocal returns true when the cache lives in this process only.
 	IsLocal() bool
 
-	// Publish sends message to every subscriber of channel.
+	// Publish sends message to every current subscriber of channel. It
+	// never waits for a subscriber: a memory subscriber whose buffer of
+	// 100 undelivered messages is full misses the message,
+	// and a Redis subscriber is subject to the go-redis channel policy
+	// (delivery waits up to one minute, then the message is dropped). A
+	// Redis Publish also fails when ctx is done or the server is unreachable.
 	Publish(ctx context.Context, channel, message string) error
 	// Subscribe registers a subscriber for channel; call Close on the result
-	// when done.
+	// when done. A message published after Subscribe returns is delivered
+	// to the new subscriber (Redis confirms the subscription with the
+	// server before returning; the wait ends when ctx is done, returning
+	// ctx.Err() through ReceiveMessage; otherwise connecting is bounded by
+	// the go-redis dial timeout and the confirmation by 10 seconds).
+	// Subscribe never returns nil: when the subscription could not be
+	// established, or the provider is closed, the returned
+	// Subscription reports the error from ReceiveMessage and its Close is
+	// a no-op.
 	Subscribe(ctx context.Context, channel string) Subscription
 }
 
@@ -143,6 +179,35 @@ func GetOrSet(ctx context.Context, p Provider, key string, value any, getter fun
 
 // ErrNotFound is returned by Get for a missing or expired key.
 var ErrNotFound = errors.New("not found")
+
+// ErrClosed is returned by Subscription.ReceiveMessage after Close or after
+// the provider was closed, discarding buffered messages, and by the failed
+// subscription that Subscribe returns during or after the provider's Close.
+var ErrClosed = errors.New("subscription closed")
+
+// failedSub is returned by Subscribe when the subscription could not be
+// established; it holds no resources.
+type failedSub struct {
+	err error
+}
+
+// closedSub is the failed subscription returned by Subscribe during or
+// after the provider's Close.
+func closedSub(channel string) *failedSub {
+	return &failedSub{
+		err: errors.Wrapf(ErrClosed, "failed to subscribe to channel %s: provider closed", channel),
+	}
+}
+
+// Close is a no-op: nothing was established.
+func (s *failedSub) Close() error {
+	return nil
+}
+
+// ReceiveMessage returns the subscribe error.
+func (s *failedSub) ReceiveMessage(_ context.Context) (string, error) {
+	return "", s.err
+}
 
 // IsNotFoundError reports whether err is (or wraps) ErrNotFound, or whose
 // message contains "not found".

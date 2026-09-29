@@ -3,9 +3,12 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -14,10 +17,22 @@ import (
 	"github.com/redis/go-redis/v9/maintnotifications"
 )
 
+// subscribeTimeout bounds the wait for the server's subscription
+// confirmation in Subscribe when ctx has no earlier deadline.
+const subscribeTimeout = 10 * time.Second
+
 type redisProv struct {
 	prefix string
 	cfg    RedisConfig
 	client *redis.Client
+
+	// mu guards subs and closed, so that Subscribe cannot register a
+	// subscription that a concurrent Close would miss.
+	mu sync.Mutex
+	// subs holds the live subscriptions so that Close can release them
+	// before the client is closed.
+	subs   map[*rsub]struct{}
+	closed bool
 }
 
 // NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed
@@ -61,15 +76,60 @@ func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 		prefix: prefix,
 		cfg:    cfg,
 		client: redis.NewClient(options),
+		subs:   make(map[*rsub]struct{}),
 	}
 
 	return prov, nil
 }
 
-// Close closes the client, releasing any open resources.
+// Close closes every live subscription, then the client. A pending
+// ReceiveMessage returns ErrClosed, buffered messages are discarded and a
+// Subscribe during or after Close returns a failed subscription reporting
+// ErrClosed.
 // It is rare to Close a Client, as the Client is meant to be long-lived and shared between many goroutines.
 func (p *redisProv) Close() error {
-	return p.client.Close()
+	p.mu.Lock()
+	p.closed = true
+	subs := slices.Collect(maps.Keys(p.subs))
+	p.subs = nil
+	p.mu.Unlock()
+
+	var err error
+	for _, s := range subs {
+		if cerr := s.Close(); cerr != nil {
+			err = errors.CombineErrors(err, cerr)
+		}
+	}
+	if cerr := p.client.Close(); cerr != nil {
+		err = errors.CombineErrors(err, errors.WithMessage(cerr, "failed to close redis client"))
+	}
+	return err
+}
+
+// isClosed reports whether Close was called.
+func (p *redisProv) isClosed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.closed
+}
+
+// register adds s to the live subscriptions; it reports false when the
+// provider is closed, in which case the caller releases s.
+func (p *redisProv) register(s *rsub) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return false
+	}
+	p.subs[s] = struct{}{}
+	return true
+}
+
+// unregister removes s from the live subscriptions.
+func (p *redisProv) unregister(s *rsub) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.subs, s)
 }
 
 // IsLocal returns true, if cache is local
@@ -181,48 +241,190 @@ func (p *redisProv) Keys(ctx context.Context, pattern string) ([]string, error) 
 	return list, nil
 }
 
-// Publish publishes message to channel
+// Publish publishes message to channel. Redis never waits for subscribers.
 func (p *redisProv) Publish(ctx context.Context, channel, message string) error {
-	return p.client.Publish(ctx, channel, message).Err()
+	err := p.client.Publish(ctx, channel, message).Err()
+	if err != nil {
+		return errors.Wrapf(err, "failed to publish to channel %s", channel)
+	}
+	return nil
 }
 
-// Subscribe subscribes to channel
+// Subscribe subscribes to channel and waits for the server to confirm the
+// subscription, so a message published after Subscribe returns is
+// delivered. The wait ends when ctx is done; otherwise connecting is
+// bounded by the go-redis DialTimeout (attempted at most twice) and the
+// confirmation read by subscribeTimeout. On failure the returned
+// Subscription reports the error from ReceiveMessage: ErrClosed when the
+// provider was closed before or during the wait.
 func (p *redisProv) Subscribe(ctx context.Context, channel string) Subscription {
-	return &rsub{p.client.Subscribe(ctx, channel)}
+	if p.isClosed() {
+		return closedSub(channel)
+	}
+	// go-redis writes SUBSCRIBE eagerly and records the channel afterwards,
+	// even when the write failed. A failed write reconnects at once and
+	// resubscribes only the channels recorded so far, so that connection
+	// may have nothing subscribed and the confirmation below times out into
+	// a failedSub; when that reconnect failed as well, the confirmation
+	// read dials again and resubscribes from the recorded set, so it can
+	// still succeed.
+	ps := p.client.Subscribe(ctx, channel)
+	if p.isClosed() {
+		// Close may have run while go-redis set up the connection, which the
+		// client does not track until it is ready, so Close may not have
+		// closed it
+		sub := closedSub(channel)
+		if cerr := closePubSub(ps); cerr != nil {
+			sub.err = errors.CombineErrors(sub.err, cerr)
+		}
+		return sub
+	}
+	err := confirmSubscription(ctx, ps)
+	if err != nil {
+		if cerr := closePubSub(ps); cerr != nil {
+			err = errors.CombineErrors(err, cerr)
+		}
+		if p.isClosed() {
+			// Close broke the connection that awaited the confirmation:
+			// report the closed provider, keeping the go-redis error
+			sub := closedSub(channel)
+			sub.err = errors.WithSecondaryError(sub.err, err)
+			return sub
+		}
+		return &failedSub{
+			err: errors.Wrapf(err, "failed to subscribe to channel %s", channel),
+		}
+	}
+	s := &rsub{
+		prov: p,
+		ps:   ps,
+		// go-redis reads on its own goroutine, reconnects and resubscribes
+		// after connection loss, and drops a message after waiting one
+		// minute for a full channel.
+		ch:   ps.Channel(redis.WithChannelSize(subscriberBufferSize)),
+		done: make(chan struct{}),
+	}
+	if !p.register(s) {
+		// Close ran meanwhile and could not see s: release its goroutines
+		sub := closedSub(channel)
+		if cerr := s.Close(); cerr != nil {
+			sub.err = errors.CombineErrors(sub.err, cerr)
+		}
+		return sub
+	}
+	return s
+}
+
+// confirmSubscription waits for the server's reply to SUBSCRIBE. go-redis
+// bounds the read by the ctx deadline and subscribeTimeout but does not
+// watch ctx.Done, so a cancellation closes ps to unblock the read; the
+// reader goroutine always exits within that bound.
+func confirmSubscription(ctx context.Context, ps *redis.PubSub) error {
+	confirmed := make(chan error, 1)
+	go func() {
+		reply, err := ps.ReceiveTimeout(ctx, subscribeTimeout)
+		if err == nil {
+			if _, ok := reply.(*redis.Subscription); !ok {
+				err = errors.Errorf("unexpected reply %T", reply)
+			}
+		}
+		confirmed <- err
+	}()
+
+	select {
+	case err := <-confirmed:
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			// keep the go-redis error as a secondary diagnostic
+			return errors.WithSecondaryError(errors.WithStack(ctx.Err()), err)
+		}
+		if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+			// the socket deadline derived from ctx fired before ctx's timer
+			return errors.WithSecondaryError(errors.WithStack(context.DeadlineExceeded), err)
+		}
+		return err
+	case <-ctx.Done():
+		err := errors.WithStack(ctx.Err())
+		if cerr := closePubSub(ps); cerr != nil {
+			err = errors.CombineErrors(err, cerr)
+		}
+		if rerr := <-confirmed; rerr != nil {
+			err = errors.WithSecondaryError(err, rerr)
+		}
+		return err
+	}
+}
+
+// closePubSub closes ps; a second close is not an error.
+func closePubSub(ps *redis.PubSub) error {
+	err := ps.Close()
+	if err != nil && !errors.Is(err, redis.ErrClosed) {
+		return errors.WithMessage(err, "failed to close subscription")
+	}
+	return nil
 }
 
 type rsub struct {
-	prov *redis.PubSub
+	prov *redisProv
+	ps   *redis.PubSub
+	// ch is fed by the go-redis reader goroutine, which closes it when the
+	// client was closed.
+	ch <-chan *redis.Message
+	// done is closed by Close to unblock ReceiveMessage; the provider's
+	// Close closes it too.
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
+// Close closes the Redis subscription and stops its go-redis goroutines; it
+// is idempotent and unblocks a pending ReceiveMessage with ErrClosed.
 func (s *rsub) Close() error {
-	return s.prov.Close()
+	var err error
+	s.closeOnce.Do(func() {
+		close(s.done)
+		s.prov.unregister(s)
+		err = closePubSub(s.ps)
+		// The go-redis reader may be blocked sending into the full channel
+		// and only watches its one-minute send timeout, not Close. Draining
+		// unblocks it; it then observes the closed PubSub and closes ch,
+		// which ends this goroutine.
+		go func() {
+			for range s.ch { // drain until the reader closes ch
+			}
+		}()
+	})
+	return err
 }
+
+// ReceiveMessage returns the next message, ctx.Err() when ctx is done or
+// ErrClosed after Close or after the provider was closed. Connection loss
+// is not reported: go-redis reconnects and resubscribes in the background.
 func (s *rsub) ReceiveMessage(ctx context.Context) (string, error) {
-	// Redis 9 has a bug that ReceiveMessage does not return error on timeout
-
-	ch := make(chan any)
-
-	go func() {
-		msg, err := s.prov.ReceiveMessage(ctx)
-		if err != nil {
-			ch <- err
-		} else {
-			ch <- msg
+	select {
+	case <-s.done:
+		return "", errors.WithStack(ErrClosed)
+	default:
+	}
+	select {
+	case msg, ok := <-s.ch:
+		if !ok {
+			// the reader stopped because the client was closed without the
+			// provider's Close (which closes done first): release the
+			// health-check goroutine, which only Close stops
+			return "", errors.CombineErrors(errors.WithStack(ErrClosed), s.Close())
 		}
-	}()
-
-	for {
 		select {
-		case msg := <-ch:
-			if err, ok := msg.(error); ok {
-				return "", err
-			}
-			return msg.(*redis.Message).Payload, nil
-		case <-time.After(time.Second):
-			if e := ctx.Err(); e != nil {
-				return "", e
-			}
+		case <-s.done:
+			// Close raced the delivery: buffered messages are discarded
+			return "", errors.WithStack(ErrClosed)
+		default:
+			return msg.Payload, nil
 		}
+	case <-s.done:
+		return "", errors.WithStack(ErrClosed)
+	case <-ctx.Done():
+		return "", errors.WithStack(ctx.Err())
 	}
 }

@@ -658,7 +658,9 @@ func TestError_ManyErrorWriteDoesNotHoldLock(t *testing.T) {
 	case <-time.After(wait):
 		t.Fatal("a second response blocked behind a slow response write")
 	}
-	assert.Equal(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"},"two":{"code":"invalid_parameter","message":"two"}}}`, fast.Body.String())
+	// the compact encoder writes map keys in iteration order, so compare
+	// the JSON structurally
+	assert.JSONEq(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"},"two":{"code":"invalid_parameter","message":"two"}}}`, fast.Body.String())
 
 	close(release)
 	select {
@@ -667,5 +669,5 @@ func TestError_ManyErrorWriteDoesNotHoldLock(t *testing.T) {
 		t.Fatal("the slow response never finished")
 	}
 	// The slow response was snapshotted before "two" was added.
-	assert.Equal(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"}}}`, slow.Body.String())
+	assert.JSONEq(t, `{"code":"invalid_request","message":"many","errors":{"one":{"code":"invalid_parameter","message":"one"}}}`, slow.Body.String())
 }

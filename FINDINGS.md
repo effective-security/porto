@@ -52,8 +52,6 @@ byte-exact test.
 | P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
 | P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-041 | pkg/cache                               | `redis.go` `rsub.ReceiveMessage`                                         | Goroutine leaked per cancelled or timed-out receive                                                                                          | bug         | MEDIUM   | Open           |
-| P-042 | pkg/cache                               | `memory.go` `memProv.Publish`                                            | Blocks forever on a subscriber that stopped draining                                                                                         | bug         | MEDIUM   | Open           |
 | P-043 | pkg/redisclient                         | `redisclient.go` `TryAcquireRateLimit`                                   | Denied attempts are recorded, starving pollers; read and write are not atomic                                                                | correctness | MEDIUM   | Needs Approval |
 | P-044 | pkg/redisclient, pkg/cache              | `redisclient.go` `Key`; `memory.go`, `proxy.go`, `redis.go`              | `path.Join` lets `..` in a key escape the prefix namespace                                                                                   | security    | MEDIUM   | Needs Approval |
 | P-045 | pkg/redisclient                         | `redisclient.go` `NewRedisClient`                                        | Redis URL, which may embed a password, logged at INFO                                                                                        | security    | MEDIUM   | Open           |
@@ -76,7 +74,6 @@ byte-exact test.
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
 | P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
 | P-074 | pkg/transport, pkg/tlsconfig            | `keepalive_listener.go`, `cipher_suites.go`                              | Modernization: `SetKeepAliveConfig`; derive cipher names from `tls.CipherSuites()` and reject insecure ones                                  | correctness | LOW      | Needs Approval |
-| P-075 | pkg/cache                               | `cache_test.go` `TestProvider/redis` (pub/sub)                           | Flaky under load: Redis `ReceiveMessage` hits a 5s i/o timeout; `require` used inside goroutines                                             | docs        | LOW      | Open           |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
 
 ## Details
@@ -165,16 +162,6 @@ byte-exact test.
 - Evidence: B06 verification (2026-09-28), `go test -coverpkg=./... -coverprofile=<file> ./...` followed by `go tool cover -func=<file>`, measured 83.5% total; CI `MIN_TESTCOV` is 90. This remains queued in B24.
 - Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
 
-### P-041 Redis subscription goroutine leak
-
-- Evidence: `ReceiveMessage` spawns a goroutine sending on an unbuffered channel and selects on a 1s timer; returning through the timer branch leaves the sender blocked forever.
-- Fix: buffer the channel (size 1) and select on `ctx.Done()`.
-
-### P-042 Memory `Publish` blocks
-
-- Evidence: unconditional `s.ch <- message` inside `subs.Range`; buffer is 10; `ctx` ignored.
-- Fix: non-blocking send with drop or `ctx.Done()`.
-
 ### P-043 Rate limiter starvation and non-atomic window
 
 - Evidence: `Pipeline()` (not `TxPipeline`) does `ZCard` then unconditional `ZAdd`/`Set`/`Expire`; allowed only when the count is 0.
@@ -231,11 +218,6 @@ byte-exact test.
 - P-068: `_ = pprof.StartCPUProfile(cpuf)`; closer keeps the file name, not the handle.
 - P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
 - P-074: `SetKeepAlive`+`SetKeepAlivePeriod`; hand-maintained cipher map including RC4/3DES.
-
-### P-075 Flaky Redis pub/sub test
-
-- Evidence: one run of `go test ./...` (all packages in parallel, Redis in testcontainers) failed `TestProvider/redis` at `cache_test.go:270` with `read tcp [::1]:40600->[::1]:32789: i/o timeout`; the test passes in isolation and on rerun. The receiving goroutines call `require.NoError`, which invokes `FailNow` from a non-test goroutine.
-- Fix: use `assert` plus an error channel in the goroutines; give the subscription time to be established before `Publish` (or retry the publish); consider a longer context deadline for the container-backed subtest. Related to P-041.
 
 ### P-076 gRPC-Web gzip ignores quality values
 
