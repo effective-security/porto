@@ -155,9 +155,42 @@ requests without a client IP are not limited. Deployments with explicit
 `headers_ip_lookups` retain that override and must ensure those fields are
 set by a trusted proxy.
 
+## Completed B11 decision — cache pub/sub slow-subscriber policy
+
+Pub/sub delivery is at most once and `Publish` never waits for a
+subscriber. Each subscription buffers 100 undelivered messages. The memory
+provider drops the message for a subscriber whose buffer is full and
+returns nil; it returns `ctx.Err()` only when ctx is already done. Redis
+subscriptions read through go-redis `PubSub.Channel` (one reader and one
+health-check goroutine per subscription, automatic reconnect and
+resubscribe); its reader waits up to one minute for a full channel, then
+drops the message, so a Redis subscriber that stops draining stalls its own
+connection first and loses messages later. `ReceiveMessage` starts no
+goroutine and returns promptly with `ctx.Err()` when ctx is done or
+`cache.ErrClosed` after `Close`; `Close` is idempotent and unblocks a
+pending receive. Redis `Subscribe` waits for the server's subscription
+confirmation (bounded by ctx; without it, by the go-redis dial timeout for
+connecting plus 10s for the confirmation) so a message published after
+`Subscribe` returns reaches the subscriber, matching the memory provider;
+a subscription that could not be established is returned as a
+`Subscription` whose `ReceiveMessage` returns the wrapped error and whose
+`Close` is a no-op, because the `Subscribe` signature has no error result.
+A Redis subscription does not report connection loss: go-redis reconnects
+and resubscribes in the background and messages published meanwhile are
+lost; closing a provider (memory or Redis) closes its live subscriptions
+first, so `ReceiveMessage` returns `ErrClosed`, queued messages are
+discarded and the go-redis goroutines are released; registration is
+serialized with `Close` on both providers, and a `Subscribe` after or
+during `Close` returns a failed subscription reporting `ErrClosed`; `Close` on a subscription drains the
+go-redis channel so a reader blocked on a full buffer exits at once instead
+of after its one-minute send timeout, and may wait for an in-flight redial
+during an outage. Buffered messages are discarded by `Close` on both
+providers. Subscribers must treat a message gap as possible and
+re-subscribe after a failed `Subscribe`; `Publish` errors now carry the
+channel name.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B11 — Cache pub/sub                        | P2       | `pkg/cache`: prevent blocked or leaked subscription goroutines, define publish behavior for slow consumers, and stabilize the Redis pub/sub test.                                                                                                                     | P-041, P-042, P-075                                                         | Slow-subscriber policy                                |
 | B12 — Redis coordination and secrets       | P2       | `pkg/redisclient`: make rate-limit windows atomic and non-starving, make lock release owner-bound, redact connection logging, and fix close and eviction error handling.                                                                                              | P-043, P-045, P-047, P-062, P-063                                           | Rate-limit, lock, and close semantics                 |
 | B13 — Key namespaces                       | P2       | `pkg/redisclient`, `pkg/cache`: prevent `..` from escaping a prefix and align memory/Redis `Keys` prefix and pattern behavior.                                                                                                                                        | P-044, P-064                                                                | Key layout and pattern contract                       |
 | B15 — TLS listener and policy              | P2       | `pkg/transport`: enforce or remove documented `TLSInfo` checks, preserve temporary accept errors, stop caching a half-built server TLS config after an error, and modernize keepalive configuration. Handshake deadlines are in B06.                                  | P-052, P-053, P-074 (transport portion), P-080                              | TLSInfo contract                                      |

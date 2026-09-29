@@ -52,7 +52,14 @@ type Scheduler interface {
 	// It returns an error if the scheduler is already running.
 	Start() error
 	// Stop signals the ticker goroutine to exit. It does not wait for the
-	// goroutine or for in-flight tasks. Repeated calls succeed.
+	// goroutine or for in-flight tasks. A task created by this package
+	// (New, NewTask*) is not dispatched after Stop returned, and every run
+	// dispatched before is already counted by RunCount and reported by
+	// Task.IsRunning until it finishes, although its callback may begin
+	// executing after Stop returned. The
+	// scheduler cannot mark a custom Task implementation running: it calls
+	// its Run on a new goroutine, so a run dispatched before Stop may begin,
+	// and become visible, after Stop returned. Repeated calls succeed.
 	Stop() error
 	// Publish calls Publish on every registered task.
 	Publish()
@@ -178,11 +185,30 @@ func (s *scheduler) Get(id string) Task {
 	return nil
 }
 
-// runPending will run all the tasks that are scheduled to run.
-func (s *scheduler) runPending() {
-	for _, task := range s.getRunnableTasks() {
-		logger.KV(xlog.DEBUG, "status", "pending_run", "task", task.Name())
-		go task.Run()
+// runPending dispatches every due task of the scheduler run identified by
+// quit. The liveness check and the dispatch share the lifecycle lock, and a
+// dispatched *task is marked running (IsRunning, RunCount) before the lock
+// is released, so no *task is dispatched after Stop returned and every
+// dispatch before Stop is visible at once; its callback runs on a new
+// goroutine and may begin after Stop returned. A custom Task implementation
+// is run with go Run(), which can begin after the lock was released and
+// Stop returned: the scheduler cannot mark it running, and waiting here for
+// Run to begin would hold the lock across arbitrary code.
+func (s *scheduler) runPending(quit chan struct{}) {
+	runnable := s.getRunnableTasks()
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if !s.running || s.quit != quit {
+		return
+	}
+	for _, t := range runnable {
+		logger.KV(xlog.DEBUG, "status", "pending_run", "task", t.Name())
+		if j, ok := t.(*task); ok {
+			j.tryRun()
+			continue
+		}
+		go t.Run()
 	}
 }
 
@@ -250,7 +276,9 @@ func (s *scheduler) Start() error {
 		for {
 			select {
 			case <-ticker.C:
-				s.runPending()
+				// a tick that was ready when Stop closed quit may win this
+				// select; runPending re-checks the run under the lock
+				s.runPending(quit)
 			case <-quit:
 				return
 			}
@@ -262,7 +290,10 @@ func (s *scheduler) Start() error {
 }
 
 // Stop signals the ticker goroutine to exit; it does not wait for it or for
-// in-flight tasks. Repeated calls succeed.
+// in-flight tasks, but no *task is dispatched after Stop returned and every
+// dispatch before is already reported by Task.IsRunning until the run
+// finishes (see runPending for callbacks and custom Task implementations).
+// Repeated calls succeed.
 func (s *scheduler) Stop() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()

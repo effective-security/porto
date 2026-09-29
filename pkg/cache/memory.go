@@ -3,11 +3,12 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
-	"uuid"
 
 	"github.com/cockroachdb/errors"
 )
@@ -15,7 +16,13 @@ import (
 type memProv struct {
 	prefix string
 
-	subs  sync.Map
+	// mu guards subs and closed, so that Subscribe cannot register a
+	// subscription that a concurrent Close would miss; Publish holds it for
+	// reading while it delivers.
+	mu     sync.RWMutex
+	subs   map[*msub]struct{}
+	closed bool
+
 	cache sync.Map
 }
 
@@ -31,14 +38,26 @@ type entry struct {
 func NewMemoryProvider(prefix string) Provider {
 	prov := &memProv{
 		prefix: prefix,
+		subs:   make(map[*msub]struct{}),
 	}
 
 	return prov
 }
 
-// Close closes the client, releasing any open resources.
+// Close closes every live subscription, so a pending ReceiveMessage
+// returns ErrClosed, and a later Subscribe returns a failed subscription
+// reporting ErrClosed; the in-process store itself stays usable.
 // It is rare to Close a Client, as the Client is meant to be long-lived and shared between many goroutines.
 func (p *memProv) Close() error {
+	p.mu.Lock()
+	p.closed = true
+	subs := slices.Collect(maps.Keys(p.subs))
+	p.subs = nil
+	p.mu.Unlock()
+
+	for _, s := range subs {
+		_ = s.Close() // never fails
+	}
 	return nil
 }
 
@@ -131,53 +150,95 @@ func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
 	return list, nil
 }
 
-// Publish publishes message to channel
-func (p *memProv) Publish(_ context.Context, channel, message string) error {
-	p.subs.Range(func(_ any, value any) bool {
-		s := value.(*msub)
+// Publish delivers message to every current subscriber of channel without
+// waiting: a subscriber whose buffer is full misses the message.
+func (p *memProv) Publish(ctx context.Context, channel, message string) error {
+	if err := ctx.Err(); err != nil {
+		return errors.WithStack(err)
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for s := range p.subs {
 		if s.channel == channel {
-			s.ch <- message
+			select {
+			case s.ch <- message:
+			default:
+				// slow subscriber: at-most-once delivery drops the message
+			}
 		}
-		return true
-	})
+	}
 
 	return nil
 }
 
-// Subscribe subscribes to channel
+// Subscribe registers a subscriber for channel; it fails only during or
+// after Close, returning a failed subscription reporting ErrClosed.
 func (p *memProv) Subscribe(_ context.Context, channel string) Subscription {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return closedSub(channel)
+	}
 	s := &msub{
 		prov:    p,
 		channel: channel,
-		id:      uuid.NewV7().String(),
-		ch:      make(chan string, 10),
+		ch:      make(chan string, subscriberBufferSize),
+		done:    make(chan struct{}),
 	}
-	p.subs.Store(s.id, s)
+	p.subs[s] = struct{}{}
 	return s
+}
+
+// unregister removes s from the live subscriptions.
+func (p *memProv) unregister(s *msub) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.subs, s)
 }
 
 type msub struct {
 	prov    *memProv
-	id      string
 	channel string
 
+	// ch carries published messages; it is not closed: Close signals done,
+	// and Publish stops sending once Close unregistered the subscription
+	// under the provider lock.
 	ch chan string
+	// done is closed by Close to unblock ReceiveMessage.
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
+// Close unregisters the subscription; it is idempotent and unblocks a
+// pending ReceiveMessage with ErrClosed.
 func (s *msub) Close() error {
-	s.prov.subs.Delete(s.id)
+	s.closeOnce.Do(func() {
+		s.prov.unregister(s)
+		close(s.done)
+	})
 	return nil
 }
 
+// ReceiveMessage returns the next message, ctx.Err() when ctx is done or
+// ErrClosed after Close.
 func (s *msub) ReceiveMessage(ctx context.Context) (string, error) {
-	for {
+	select {
+	case <-s.done:
+		return "", errors.WithStack(ErrClosed)
+	default:
+	}
+	select {
+	case msg := <-s.ch:
 		select {
-		case msg := <-s.ch:
+		case <-s.done:
+			// Close raced the delivery: buffered messages are discarded
+			return "", errors.WithStack(ErrClosed)
+		default:
 			return msg, nil
-		case <-time.After(time.Second):
-			if e := ctx.Err(); e != nil {
-				return "", e
-			}
 		}
+	case <-s.done:
+		return "", errors.WithStack(ErrClosed)
+	case <-ctx.Done():
+		return "", errors.WithStack(ctx.Err())
 	}
 }
