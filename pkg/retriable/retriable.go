@@ -1016,6 +1016,7 @@ func (c *Client) callerToken(ctx context.Context) (credentials.Token, bool, erro
 		c.refresh = refresh
 		c.lock.Unlock()
 
+		// FINDINGS P-087: a panic in GetCallerIdentity leaves c.refresh set.
 		fresh, err := provider.GetCallerIdentity(ctx)
 		if err != nil {
 			err = errors.WithMessage(err, "unable to get caller identity")

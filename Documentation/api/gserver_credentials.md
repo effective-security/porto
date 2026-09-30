@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/gserver/credentials"
 
 Package credentials implements gRPC transport and per\-RPC credentials for porto clients and servers.
 
-NewBundle wraps a \*tls.Config into a grpccredentials.Bundle whose PerRPCCredentials attaches an "authorization" metadata entry to every RPC. The token can be set statically with Bundle.UpdateAuthToken, refreshed on expiry through a CallerIdentity provider \(Bundle.WithCallerIdentity, used for AWS STS presigned tokens\), and for "DPoP" tokens a proof header is signed per call when a dpop.Signer is supplied with Bundle.WithDPoP.
+NewBundle wraps a \*tls.Config into a grpccredentials.Bundle whose PerRPCCredentials attaches an "authorization" metadata entry to every RPC. The token can be set statically with Bundle.UpdateAuthToken, refreshed on expiry through a CallerIdentity provider \(Bundle.WithCallerIdentity, used for AWS STS presigned tokens\), and for "DPoP" tokens a proof header is signed per call when a dpop.Signer is supplied with Bundle.WithDPoP. The setters are safe to call while RPCs run, and concurrent RPCs that find the token expired share one provider call.
 
 ```
 b := credentials.NewBundle(credentials.Config{TLSConfig: tlsCfg})
@@ -68,7 +68,7 @@ func NewOauthAccess(token string) credentials.PerRPCCredentials
 NewOauthAccess returns PerRPCCredentials that send token verbatim as the authorization metadata value \(include the scheme, e.g. "Bearer x"\). RPCs fail unless the connection provides PrivacyAndIntegrity security.
 
 <a name="TimeISO8601"></a>
-## func [TimeISO8601](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L34>)
+## func [TimeISO8601](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L43>)
 
 ```go
 func TimeISO8601(t time.Time) string
@@ -77,7 +77,7 @@ func TimeISO8601(t time.Time) string
 TimeISO8601 formats t using TimeFormatISO8601.
 
 <a name="Bundle"></a>
-## type [Bundle](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L91-L101>)
+## type [Bundle](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L102-L113>)
 
 Bundle is a grpccredentials.Bundle whose PerRPCCredentials sends the configured token. The setters are safe to call concurrently with RPCs. See https://pkg.go.dev/google.golang.org/grpc/credentials.
 
@@ -90,24 +90,25 @@ type Bundle interface {
     // token type is "DPoP".
     WithDPoP(signer dpop.Signer)
     // WithCallerIdentity sets the provider used to obtain a new token when
-    // the current one has expired.
+    // the current one has expired. A token refresh already running is
+    // discarded, and RPCs waiting for it ask the new provider.
     WithCallerIdentity(provider CallerIdentity)
 }
 ```
 
 <a name="NewBundle"></a>
-### func [NewBundle](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L106>)
+### func [NewBundle](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L118>)
 
 ```go
 func NewBundle(cfg Config) Bundle
 ```
 
-NewBundle constructs a Bundle whose transport credentials wrap cfg.TLSConfig and whose per\-RPC credentials require transport security. NewWithMode is not supported and returns nil, nil.
+NewBundle constructs a Bundle whose transport credentials wrap cfg.TLSConfig and whose per\-RPC credentials require transport security. NewWithMode is not supported and returns an error.
 
 <a name="CallerIdentity"></a>
-## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L82-L86>)
+## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L93-L97>)
 
-CallerIdentity obtains a fresh access token on demand; it is consulted by the per\-RPC credentials whenever the current token has expired.
+CallerIdentity obtains a fresh access token on demand; it is consulted by the per\-RPC credentials whenever the current token has expired. Concurrent RPCs that find the token expired share one GetCallerIdentity call, made with the context of the RPC that started it.
 
 ```go
 type CallerIdentity interface {
@@ -118,7 +119,7 @@ type CallerIdentity interface {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L39-L42>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L48-L51>)
 
 Config defines gRPC credential configuration.
 
@@ -130,7 +131,7 @@ type Config struct {
 ```
 
 <a name="Token"></a>
-## type [Token](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L46-L53>)
+## type [Token](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L55-L62>)
 
 Token is an access token sent as "\<TokenType\> \<AccessToken\>" in the authorization metadata.
 
@@ -146,7 +147,7 @@ type Token struct {
 ```
 
 <a name="Token.Expired"></a>
-### func \(Token\) [Expired](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L57>)
+### func \(Token\) [Expired](<https://github.com/effective-security/porto/blob/main/gserver/credentials/credentials.go#L66>)
 
 ```go
 func (t Token) Expired() bool

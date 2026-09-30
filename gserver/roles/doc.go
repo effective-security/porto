@@ -6,9 +6,10 @@
 // the token type, verifies an AWS STS presigned GetCallerIdentity URL ("AWS4"),
 // a DPoP-bound JWT ("DPoP") or a bearer JWT ("Bearer"); it can also fall back
 // to a JWT stored in a cookie (with CSRF double-submit checks for unsafe HTTP
-// methods) and to a client TLS certificate carrying a SPIFFE URI SAN. The
-// resulting identity.Identity carries the mapped role, subject, tenant and
-// claims; unauthenticated requests receive the guest identity.
+// methods and every gRPC call) and to a client TLS certificate carrying a
+// SPIFFE URI SAN. The resulting identity.Identity carries the mapped role,
+// subject, tenant and claims; unauthenticated requests receive the guest
+// identity.
 //
 // The provider is wired into gserver via Config.IdentityMap, but can be used
 // directly with xhttp/identity:

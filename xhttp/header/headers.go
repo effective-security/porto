@@ -75,6 +75,9 @@ const (
 	XClientIP = "X-CLIENT-IP"
 	// XCorrelationID is HTTP header for "X-Correlation-ID"
 	XCorrelationID = "X-Correlation-ID"
+	// XCSRFToken carries the double-submit CSRF token that must equal the
+	// CSRF cookie when a request is authenticated with the auth cookie.
+	XCSRFToken = "X-CSRF-Token"
 	// XDeviceID is HTTP header for "X-Device-ID"
 	XDeviceID = "X-Device-ID"
 	// XFilename contains the name of the artifact to sign

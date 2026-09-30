@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/jwt/dpop"
 	grpccredentials "google.golang.org/grpc/credentials"
@@ -19,6 +21,13 @@ var logger = xlog.NewPackageLogger("github.com/effective-security/porto/pkg", "c
 // TimeFormatISO8601 is the compact ISO 8601 layout ("yyyyMMddTHHmmssZ") used
 // by AWS SigV4 presigned URLs and by TimeISO8601.
 const TimeFormatISO8601 = "20060102T150405Z"
+
+const (
+	// dpopTokenType is the token type that gets a DPoP proof per RPC.
+	dpopTokenType = "DPoP"
+	// dpopFieldNameGRPC is the gRPC metadata key carrying the DPoP proof.
+	dpopFieldNameGRPC = "dpop"
+)
 
 var (
 
@@ -79,6 +88,8 @@ func (t Token) Expired() bool {
 
 // CallerIdentity obtains a fresh access token on demand; it is consulted by
 // the per-RPC credentials whenever the current token has expired.
+// Concurrent RPCs that find the token expired share one GetCallerIdentity
+// call, made with the context of the RPC that started it.
 type CallerIdentity interface {
 	// GetCallerIdentity returns a new token. If Expires is nil the token is
 	// cached for CacheTTL.
@@ -96,13 +107,14 @@ type Bundle interface {
 	// token type is "DPoP".
 	WithDPoP(signer dpop.Signer)
 	// WithCallerIdentity sets the provider used to obtain a new token when
-	// the current one has expired.
+	// the current one has expired. A token refresh already running is
+	// discarded, and RPCs waiting for it ask the new provider.
 	WithCallerIdentity(provider CallerIdentity)
 }
 
 // NewBundle constructs a Bundle whose transport credentials wrap
 // cfg.TLSConfig and whose per-RPC credentials require transport security.
-// NewWithMode is not supported and returns nil, nil.
+// NewWithMode is not supported and returns an error.
 func NewBundle(cfg Config) Bundle {
 	return &bundle{
 		tc: newTransportCredential(cfg.TLSConfig),
@@ -124,9 +136,11 @@ func (b *bundle) PerRPCCredentials() grpccredentials.PerRPCCredentials {
 	return b.rc
 }
 
-func (b *bundle) NewWithMode(_ string) (grpccredentials.Bundle, error) {
-	// no-op
-	return nil, nil
+// NewWithMode implements grpccredentials.Bundle. Mode switching, which the
+// grpclb and RLS balancers request, is not supported: it returns an error
+// instead of a copy that would send this bundle's token to a balancer.
+func (b *bundle) NewWithMode(mode string) (grpccredentials.Bundle, error) {
+	return nil, errors.Errorf("credentials bundle mode %q is not supported", mode)
 }
 
 // transportCredential implements "grpccredentials.TransportCredentials" interface.
@@ -167,11 +181,26 @@ func (tc *transportCredential) OverrideServerName(string) error {
 }
 
 // perRPCCredential implements "grpccredentials.PerRPCCredentials" interface.
+// mu guards every field; refresh is the in-flight CallerIdentity call that
+// concurrent RPCs with an expired token wait for.
 type perRPCCredential struct {
+	mu             sync.RWMutex
 	token          Token
 	dpopSigner     dpop.Signer
 	callerIdentity CallerIdentity
-	authTokenMu    sync.RWMutex
+	refresh        *tokenRefresh
+}
+
+// tokenRefresh is one CallerIdentity call. done is closed after token, err
+// and canceled are set, or after superseded is set when WithCallerIdentity
+// replaced the provider.
+type tokenRefresh struct {
+	done  chan struct{}
+	token Token
+	err   error
+	// canceled is set when the context of the RPC that made the call ended.
+	canceled   bool
+	superseded bool
 }
 
 func newPerRPCCredential() *perRPCCredential { return &perRPCCredential{} }
@@ -181,33 +210,24 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 }
 
 func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
-	rc.authTokenMu.RLock()
+	rc.mu.RLock()
 	token := rc.token
-	rc.authTokenMu.RUnlock()
+	provider := rc.callerIdentity
+	signer := rc.dpopSigner
+	rc.mu.RUnlock()
 
 	if token.Expired() {
-		if rc.callerIdentity != nil {
-			ti, err := rc.callerIdentity.GetCallerIdentity(ctx)
+		if provider != nil {
+			var err error
+			token, err = rc.refreshToken(ctx)
 			if err != nil {
 				return nil, err
 			}
-
-			if ti.Expires == nil {
-				exp := time.Now().Add(CacheTTL).UTC()
-				ti.Expires = &exp
-			}
-
-			rc.authTokenMu.Lock()
-			rc.token = *ti
-			token = rc.token
-			rc.authTokenMu.Unlock()
-
-			// this is an infrequent operation, so log it
-			logger.ContextKV(ctx, xlog.DEBUG,
-				"status", "GetCallerIdentity",
-				"expires", TimeISO8601(*token.Expires),
-				"expires_in", time.Until(*token.Expires).String(),
-			)
+			// the provider may have installed the signer bound to the new
+			// token with WithDPoP
+			rc.mu.RLock()
+			signer = rc.dpopSigner
+			rc.mu.RUnlock()
 		}
 		if token.AccessToken == "" {
 			logger.ContextKV(ctx, xlog.DEBUG,
@@ -233,19 +253,141 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 		TokenFieldNameGRPC: token.TokenType + " " + token.AccessToken,
 	}
 
-	if rc.dpopSigner != nil && strings.EqualFold(token.TokenType, "DPoP") {
+	if signer != nil && strings.EqualFold(token.TokenType, dpopTokenType) {
 		u := &url.URL{
 			Path: ri.Method,
 		}
 
-		dhdr, err := rc.dpopSigner.Sign(ctx, "POST", u, nil)
+		dhdr, err := signer.Sign(ctx, http.MethodPost, u, nil)
 		if err != nil {
-			return nil, err
+			return nil, errors.WithMessage(err, "unable to sign DPoP proof")
 		}
-		res["dpop"] = dhdr
+		res[dpopFieldNameGRPC] = dhdr
 	}
 
 	return res, nil
+}
+
+// refreshToken returns the current token when it has not expired, and
+// otherwise a token from the CallerIdentity provider. Concurrent callers
+// share one provider call, made with the context of the RPC that started
+// it: a waiter returns its token or error, or its own context error if that
+// ends first. A live waiter makes the next call when the shared one failed
+// after its RPC's context ended, or when WithCallerIdentity replaced the
+// provider meanwhile.
+func (rc *perRPCCredential) refreshToken(ctx context.Context) (Token, error) {
+	for {
+		rc.mu.Lock()
+		provider := rc.callerIdentity
+		token := rc.token
+		if provider == nil || !token.Expired() {
+			rc.mu.Unlock()
+			return token, nil
+		}
+		if refresh := rc.refresh; refresh != nil {
+			rc.mu.Unlock()
+			select {
+			case <-refresh.done:
+				if err := ctx.Err(); err != nil {
+					return Token{}, errors.WithStack(err)
+				}
+				if refresh.superseded || (refresh.err != nil && refresh.canceled) {
+					continue
+				}
+				return refresh.token, refresh.err
+			case <-ctx.Done():
+				return Token{}, errors.WithStack(ctx.Err())
+			}
+		}
+		// a superseded caller may come back here after its RPC ended
+		if err := ctx.Err(); err != nil {
+			rc.mu.Unlock()
+			return Token{}, errors.WithStack(err)
+		}
+		refresh := &tokenRefresh{done: make(chan struct{})}
+		rc.refresh = refresh
+		rc.mu.Unlock()
+
+		token, current, err := rc.leadRefresh(ctx, provider, refresh)
+		if !current {
+			continue
+		}
+		if err != nil {
+			return Token{}, err
+		}
+
+		// this is an infrequent operation, so log it
+		logger.ContextKV(ctx, xlog.DEBUG,
+			"status", "GetCallerIdentity",
+			"expires", TimeISO8601(*token.Expires),
+			"expires_in", time.Until(*token.Expires).String(),
+		)
+		return token, nil
+	}
+}
+
+// leadRefresh makes the provider call of refresh and publishes its result.
+// current is false when WithCallerIdentity superseded refresh and the result
+// was discarded. If the provider panics, the waiters are released with an
+// error and the panic continues.
+func (rc *perRPCCredential) leadRefresh(ctx context.Context, provider CallerIdentity, refresh *tokenRefresh) (token Token, current bool, err error) {
+	panicked := true
+	defer func() {
+		if panicked {
+			rc.finishRefresh(refresh, Token{}, errors.New("caller identity provider panicked"), false)
+		}
+	}()
+	token, err = fetchToken(ctx, provider)
+	panicked = false
+	current = rc.finishRefresh(refresh, token, err, ctx.Err() != nil)
+	return token, current, err
+}
+
+// finishRefresh stores the result of refresh and wakes its waiters. It
+// reports false, and changes nothing, when refresh was superseded.
+func (rc *perRPCCredential) finishRefresh(refresh *tokenRefresh, token Token, err error, canceled bool) bool {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if rc.refresh != refresh {
+		return false
+	}
+	if err == nil {
+		rc.token = token
+	}
+	refresh.token = token
+	refresh.err = err
+	refresh.canceled = canceled
+	rc.refresh = nil
+	close(refresh.done)
+	return true
+}
+
+// fetchToken calls provider and returns a copy of its token that always has
+// an expiry: CacheTTL from now when the provider sets none.
+func fetchToken(ctx context.Context, provider CallerIdentity) (Token, error) {
+	fresh, err := provider.GetCallerIdentity(ctx)
+	if err != nil {
+		return Token{}, errors.WithMessage(err, "unable to get caller identity")
+	}
+	if fresh == nil {
+		return Token{}, errors.New("caller identity returned no token")
+	}
+	token := copyToken(*fresh)
+	if token.Expires == nil {
+		expires := time.Now().Add(CacheTTL).UTC()
+		token.Expires = &expires
+	}
+	return token, nil
+}
+
+// copyToken returns t with its own copy of Expires, so a caller that keeps
+// the pointer cannot change the stored token.
+func copyToken(t Token) Token {
+	if t.Expires != nil {
+		expires := *t.Expires
+		t.Expires = &expires
+	}
+	return t
 }
 
 func (b *bundle) UpdateAuthToken(token Token) {
@@ -267,19 +409,27 @@ func (b *bundle) WithCallerIdentity(provider CallerIdentity) {
 }
 
 func (rc *perRPCCredential) UpdateAuthToken(token Token) {
-	rc.authTokenMu.Lock()
+	token = copyToken(token)
+	rc.mu.Lock()
 	rc.token = token
-	rc.authTokenMu.Unlock()
+	rc.mu.Unlock()
 }
 
 func (rc *perRPCCredential) WithDPoP(signer dpop.Signer) {
-	rc.authTokenMu.Lock()
+	rc.mu.Lock()
 	rc.dpopSigner = signer
-	rc.authTokenMu.Unlock()
+	rc.mu.Unlock()
 }
 
 func (rc *perRPCCredential) WithPresignedToken(provider CallerIdentity) {
-	rc.authTokenMu.Lock()
+	rc.mu.Lock()
 	rc.callerIdentity = provider
-	rc.authTokenMu.Unlock()
+	if refresh := rc.refresh; refresh != nil {
+		// the running call's result is discarded; its caller and the
+		// waiters start again with provider
+		refresh.superseded = true
+		rc.refresh = nil
+		close(refresh.done)
+	}
+	rc.mu.Unlock()
 }

@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/gserver/roles"
 
 Package roles maps authenticated callers to porto roles for both HTTP and gRPC requests.
 
-New builds an IdentityProvider from an IdentityMap. The provider inspects the Authorization header \(or gRPC "authorization" metadata\) and, depending on the token type, verifies an AWS STS presigned GetCallerIdentity URL \("AWS4"\), a DPoP\-bound JWT \("DPoP"\) or a bearer JWT \("Bearer"\); it can also fall back to a JWT stored in a cookie \(with CSRF double\-submit checks for unsafe HTTP methods\) and to a client TLS certificate carrying a SPIFFE URI SAN. The resulting identity.Identity carries the mapped role, subject, tenant and claims; unauthenticated requests receive the guest identity.
+New builds an IdentityProvider from an IdentityMap. The provider inspects the Authorization header \(or gRPC "authorization" metadata\) and, depending on the token type, verifies an AWS STS presigned GetCallerIdentity URL \("AWS4"\), a DPoP\-bound JWT \("DPoP"\) or a bearer JWT \("Bearer"\); it can also fall back to a JWT stored in a cookie \(with CSRF double\-submit checks for unsafe HTTP methods and every gRPC call\) and to a client TLS certificate carrying a SPIFFE URI SAN. The resulting identity.Identity carries the mapped role, subject, tenant and claims; unauthenticated requests receive the guest identity.
 
 The provider is wired into gserver via Config.IdentityMap, but can be used directly with xhttp/identity:
 
@@ -90,7 +90,7 @@ const (
 ```
 
 <a name="ParseSTSTokenExpiration"></a>
-## func [ParseSTSTokenExpiration](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L744>)
+## func [ParseSTSTokenExpiration](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L971>)
 
 ```go
 func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error)
@@ -99,7 +99,7 @@ func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, e
 ParseSTSTokenExpiration computes the expiry of an AWS SigV4 presigned URL from its X\-Amz\-Date and X\-Amz\-Expires query parameters. It also returns the raw parameter values for logging. An unparsable X\-Amz\-Expires falls back to credentials.CacheTTL.
 
 <a name="ValidateSTSPresignedURL"></a>
-## func [ValidateSTSPresignedURL](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L685>)
+## func [ValidateSTSPresignedURL](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L912>)
 
 ```go
 func ValidateSTSPresignedURL(presignedURL string) error
@@ -108,7 +108,7 @@ func ValidateSTSPresignedURL(presignedURL string) error
 ValidateSTSPresignedURL checks that a presigned URL supplied in an AWS4 token is an HTTPS GetCallerIdentity request addressed to an AWS STS endpoint \(sts.amazonaws.com, sts\[\-fips\].\<region\>.amazonaws.com\[.cn\], or an STS VPC endpoint under amazonaws.com\). Without this check the server would fetch an attacker\-chosen URL and trust the returned account and ARN.
 
 <a name="AWSIdentityMap"></a>
-## type [AWSIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L63-L75>)
+## type [AWSIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L66-L78>)
 
 AWSIdentityMap maps AWS STS caller identities \("AWS4" presigned GetCallerIdentity URL tokens\) to roles.
 
@@ -129,7 +129,7 @@ type AWSIdentityMap struct {
 ```
 
 <a name="CallerIdentity"></a>
-## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L776-L791>)
+## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L1003-L1018>)
 
 CallerIdentity is the JSON response of the AWS STS GetCallerIdentity API, see https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html. It is cached per presigned URL until Expires.
 
@@ -153,18 +153,20 @@ type CallerIdentity struct {
 ```
 
 <a name="CookiesConfig"></a>
-## type [CookiesConfig](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L38-L49>)
+## type [CookiesConfig](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L39-L52>)
 
-CookiesConfig configures cookie\-based JWT authentication, used when no Authorization header is present and JWT is enabled.
+CookiesConfig configures cookie\-based JWT authentication, used when no Authorization header \(or gRPC "authorization" metadata\) is present and JWT is enabled.
 
 ```go
 type CookiesConfig struct {
     // Auth specifies the name of the cookie to be used for JWT authentication.
     // If empty, the auth cookie is not used.
     Auth string `json:"auth" yaml:"auth"`
-    // CSRF specifies the name of the cookie to be used for CSRF protection
-    // (double-submit with the X-CSRF-Token header on unsafe methods).
-    // If empty, cookie authentication over HTTP is disabled.
+    // CSRF specifies the name of the cookie to be used for CSRF protection:
+    // the X-CSRF-Token header (x-csrf-token gRPC metadata) must equal it on
+    // unsafe HTTP methods and on every gRPC and gRPC-Web call. It is
+    // required when Auth is set and JWT is enabled; New returns an error
+    // otherwise.
     CSRF string `json:"csrf" yaml:"csrf"`
     // Domain specifies the domain of the cookie to be used for authentication and CSRF protection.
     // If empty, the cookie domain is not set.
@@ -173,7 +175,7 @@ type CookiesConfig struct {
 ```
 
 <a name="GenericIdentityMap"></a>
-## type [GenericIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L52-L59>)
+## type [GenericIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L55-L62>)
 
 GenericIdentityMap maps TLS client certificate identities to roles.
 
@@ -228,7 +230,7 @@ func (i *IdentityMap) GetCookiesConfig() CookiesConfig
 GetCookiesConfig returns the cookie configuration; safe on a nil receiver.
 
 <a name="IdentityProvider"></a>
-## type [IdentityProvider](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L70-L85>)
+## type [IdentityProvider](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L82-L97>)
 
 IdentityProvider extracts the caller identity from HTTP requests and gRPC contexts. IdentityFromRequest and IdentityFromContext are the mappers to pass to identity.NewContextHandler and identity.NewAuthUnaryInterceptor.
 
@@ -252,16 +254,16 @@ type IdentityProvider interface {
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L103>)
+### func [New](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L140>)
 
 ```go
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error)
 ```
 
-New returns an IdentityProvider for the given map. jwt is required when JWT or DPoP is enabled and may be nil otherwise. Missing claim names default to DefaultSubjectClaim, DefaultRoleClaim and DefaultTenantClaim. The provider is safe for concurrent use.
+New returns an IdentityProvider for the given map. jwt is required when JWT or DPoP is enabled and may be nil otherwise; cookies.csrf is required when JWT is enabled with cookies.auth. Missing claim names default to DefaultSubjectClaim, DefaultRoleClaim and DefaultTenantClaim. The provider is safe for concurrent use.
 
 <a name="JWTIdentityMap"></a>
-## type [JWTIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L79-L99>)
+## type [JWTIdentityMap](<https://github.com/effective-security/porto/blob/main/gserver/roles/config.go#L82-L102>)
 
 JWTIdentityMap maps JWT claims to roles; it is used for both bearer JWT and DPoP\-bound JWT authentication.
 
