@@ -507,10 +507,53 @@ gRPC and gRPC-Web clients that authenticate with the auth cookie must send
 the CSRF cookie and `X-CSRF-Token` (`x-csrf-token` metadata) with its value;
 cross-origin browser clients also add it to `cors.allowed_headers`.
 
+## Completed B21 and B23 decision — app initialization and TLS cipher names
+
+B21 (P-067, P-068 and P-073, plus P-088 and P-089 found by the reviews). The
+`appinit.Metrics` closer cancels the context of `cloudwatch.Sink.Run` and
+waits for it to return, so the publishing goroutine stops after `Run`
+published the last interval (the sink bounds that publish by 10s and logs
+its error). An interval is lost when the cancellation aborts a periodic
+publish in flight or meets a tick `Run` has not handled yet, and `Close`
+publishes nothing when `Run` already stopped on expired or missing
+credentials; fixing those needs a change to `cloudwatch.Sink.Run` in the
+metrics module. P-088: with `runtime_metrics`, the runtime stats collector
+of the global `*metrics.Metrics` also ran for the life of the process; the
+closer now signals it to stop (without waiting) before the CloudWatch
+runner. `CPUProfiler` returns the
+`pprof.StartCPUProfile` error; a second call while its own profile runs
+fails before creating (truncating) the file, and a failed start closes and
+removes the file, clearing the flag only after the removal (P-089, found
+by the review and the PR 603 review: releasing it first let a concurrent
+call start a profile on the same path that the removal then unlinked); the
+closer stops the profile and closes the file. P-073 (user decision):
+`CloudWatch.AdditionalTags`/`ReplaceTags` are removed, because the metrics
+CloudWatch sink no longer applies such tags; `AwsEndpoint` is keyed
+`aws_endpoint` only, without the legacy `awsendpoint`/`AwsEndpoint` keys;
+the `WaitOnExit` help text is fixed.
+
+B23 (P-074, tlsconfig portion, and P-090 found by the reviews; the
+`pkg/transport` portion of P-074 was fixed in B15). User decision: reject
+insecure suites, reject TLS 1.3 names, keep the CHACHA20 aliases. The accepted names are the `tls.CipherSuites`
+entries usable below TLS 1.3 plus the
+`TLS_ECDHE_{RSA,ECDSA}_WITH_CHACHA20_POLY1305` aliases, built at `init`
+from the Go release in use. Names in `tls.InsecureCipherSuites` (Go 1.27:
+RC4, 3DES, CBC-SHA256 and all `TLS_RSA_*` suites) return
+`insecure TLS cipher suite "<name>"`, TLS 1.3 names return
+`TLS 1.3 cipher suite "<name>" is not configurable`, and other names keep
+`unexpected TLS cipher suite "<name>"`; an alias is classified by its
+canonical name. `GetCipherSuite` reports only accepted names. No opt-in
+for insecure suites is provided. P-090 (found by the review and the PR 603
+review): the `UpdateCipherSuites`, `gserver.TLSInfo` and `transport.TLSInfo`
+comments describe the list as the enabled set only, because Go ignores the
+order of `tls.Config.CipherSuites`; no preference-order option is added.
+
+Migration: rename the CloudWatch `awsendpoint`/`AwsEndpoint` key to
+`aws_endpoint`; delete `add_tags`/`replace_tags`; remove insecure and
+TLS 1.3 names from `cipher_suites`.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B21 — App initialization                   | P3       | `pkg/appinit`, `pkg/appinit/config`: cancel the CloudWatch runner, handle CPU profile start/close errors, and resolve unused CloudWatch config fields and help text.                                                                                                  | P-067, P-068, P-073                                                         | Config-field behavior                                 |
-| B23 — TLS cipher names                     | P3       | `pkg/tlsconfig`: derive supported cipher names from Go's TLS API and reject insecure suites.                                                                                                                                                                          | P-074 (tlsconfig portion)                                                   | Cipher/config compatibility                           |
 | B24 — Coverage gate                        | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until total coverage exceeds the 90% CI gate.                                                                                                                                   | P-035                                                                       | None                                                  |
 | B27 — Retriable TLS config precedence      | P3       | `pkg/retriable`: keep `ClientConfig.TLS` when an option replaces the transport in `New`, or reject the combination.                                                                                                                                                   | P-083                                                                       | TLS/transport precedence                              |
 | B28 — HTTP metrics coverage                | P3       | `restserver`, `gserver`, `restserver/telemetry`: count responses produced before the metrics handler (identity 401, rate-limit 429, gserver preflights) and keep the `io.ReaderFrom` fast path through `ResponseCapture`.                                             | P-084, P-085                                                                | Metric coverage and `role` label                      |

@@ -28,8 +28,9 @@ CI `covtest` step so regressions are caught. Retires P-048, P-049, P-071.
 ## 10. Coverage and untested packages
 
 B06 verification measured 83.5% coverage against a 90% gate. `pkg/crlcache`,
-`pkg/streamctx`, `pkg/appinit/config`, `metricskey` and `tests/testutils`
-have no dedicated tests; B06 added Prometheus lifecycle tests in `appinit.Metrics`; `gserver/roles` has no STS tests beyond
+`pkg/streamctx`, `metricskey` and `tests/testutils` have no dedicated
+tests; B06 added Prometheus lifecycle tests in `appinit.Metrics` and B21
+added `pkg/appinit/config` decoding tests; `gserver/roles` has no STS tests beyond
 URL validation. Retires P-035.
 
 ## 11. Follow up after xpki v1.0 upgrade

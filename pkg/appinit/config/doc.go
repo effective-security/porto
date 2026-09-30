@@ -15,11 +15,11 @@
 //	    expiration: 5m
 //	  cloudwatch:
 //	    aws_region: us-west-2
+//	    aws_endpoint: http://localhost:4566   # optional, e.g. an emulator
 //	    namespace: MyService
 //	    publish_interval: 1m
 //	    with_sample_count: true
 //
 // The "cloudwatch" key has no omitempty tag and is always emitted on
-// marshal. CloudWatch.AwsEndpoint has no tags and therefore uses the
-// encoder's default key ("AwsEndpoint" in JSON, "awsendpoint" in YAML).
+// marshal.
 package config

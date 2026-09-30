@@ -35,5 +35,7 @@
 // once per process. Metrics also registers an xlog error hook that counts
 // logged errors in metricskey.HealthLogErrors.
 // Prometheus binds synchronously, returns bind errors to the caller, and uses
-// bounded HTTP read deadlines. Closing the metrics closer stops its endpoint.
+// bounded HTTP read deadlines. Closing the metrics closer stops its endpoint,
+// the runtime stats collector and the CloudWatch publisher, after the
+// publisher's final publish.
 package appinit

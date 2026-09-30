@@ -14,6 +14,8 @@
 //   - NewHTTPTransportWithReloader returns an http.RoundTripper whose client
 //     certificate is swapped in on reload.
 //   - UpdateCipherSuites maps cipher suite names to tls.Config.CipherSuites.
+//     The names come from tls.CipherSuites; suites in tls.InsecureCipherSuites
+//     and TLS 1.3 suites (not configurable in Go) are rejected.
 //
 // Server example:
 //

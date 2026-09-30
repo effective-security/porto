@@ -16,8 +16,6 @@ package tlsconfig
 
 import (
 	"crypto/tls"
-	"go/importer"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,33 +23,146 @@ import (
 )
 
 func TestGetCipherSuites(t *testing.T) {
-	pkg, err := importer.For("source", nil).Import("crypto/tls")
-	require.NoError(t, err)
+	t.Parallel()
 
-	cm := make(map[string]uint16)
-	for _, s := range pkg.Scope().Names() {
-		if strings.HasPrefix(s, "TLS_RSA_") || strings.HasPrefix(s, "TLS_ECDHE_") {
-			v, ok := GetCipherSuite(s)
-			require.True(t, ok, "Go implements missing cipher suite %q (%v)", s, v)
-
-			cm[s] = v
+	accepted := map[string]uint16{}
+	for _, cs := range tls.CipherSuites() {
+		v, ok := GetCipherSuite(cs.Name)
+		if cs.SupportedVersions[0] == tls.VersionTLS13 {
+			assert.False(t, ok, "TLS 1.3 suite %q is not configurable", cs.Name)
+			continue
 		}
+		require.True(t, ok, "Go implements secure cipher suite %q", cs.Name)
+		assert.Equal(t, cs.ID, v)
+		accepted[cs.Name] = cs.ID
 	}
-	require.Equal(t, cipherSuites, cm)
+	for _, cs := range tls.InsecureCipherSuites() {
+		_, ok := GetCipherSuite(cs.Name)
+		assert.False(t, ok, "insecure cipher suite %q must be rejected", cs.Name)
+	}
+
+	// The CHACHA20 aliases are crypto/tls constants tls.CipherSuites does not name.
+	accepted["TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"] = tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+	accepted["TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305"] = tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+	assert.Equal(t, accepted, cipherSuites)
+
+	for _, name := range []string{"", "not_found", "tls_ecdhe_rsa_with_aes_128_gcm_sha256"} {
+		v, ok := GetCipherSuite(name)
+		assert.False(t, ok, name)
+		assert.Zero(t, v, name)
+	}
 }
 
 func TestUpdateCipherSuites(t *testing.T) {
+	t.Parallel()
+
+	tcs := []struct {
+		name     string
+		suites   []string
+		expected []uint16
+		err      string
+	}{
+		{
+			name: "nil",
+		},
+		{
+			name:   "empty",
+			suites: []string{},
+		},
+		{
+			name: "order preserved",
+			suites: []string{
+				"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+				"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+				"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305",
+				"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+			},
+			expected: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			},
+		},
+		{
+			name:   "unknown",
+			suites: []string{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "not_found"},
+			err:    `unexpected TLS cipher suite "not_found"`,
+		},
+		{
+			name:   "RC4",
+			suites: []string{"TLS_RSA_WITH_RC4_128_SHA"},
+			err:    `insecure TLS cipher suite "TLS_RSA_WITH_RC4_128_SHA"`,
+		},
+		{
+			name:   "3DES",
+			suites: []string{"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"},
+			err:    `insecure TLS cipher suite "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"`,
+		},
+		{
+			name:   "CBC-SHA256",
+			suites: []string{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256"},
+			err:    `insecure TLS cipher suite "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256"`,
+		},
+		{
+			name:   "RSA key exchange",
+			suites: []string{"TLS_RSA_WITH_AES_128_GCM_SHA256"},
+			err:    `insecure TLS cipher suite "TLS_RSA_WITH_AES_128_GCM_SHA256"`,
+		},
+		{
+			name:   "TLS 1.3",
+			suites: []string{"TLS_AES_128_GCM_SHA256"},
+			err:    `TLS 1.3 cipher suite "TLS_AES_128_GCM_SHA256" is not configurable`,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &tls.Config{}
+			err := UpdateCipherSuites(cfg, tc.suites)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+				assert.Nil(t, cfg.CipherSuites, "a rejected list leaves the config unchanged")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, cfg.CipherSuites)
+		})
+	}
+}
+
+// An alias whose suite Go lists as insecure is reported as insecure. The
+// test edits the package tables, so it must not run in parallel.
+func TestCipherSuiteAliasClassification(t *testing.T) {
+	const alias = "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+	canonical := cipherSuiteAliases[alias]
+	id := cipherSuites[canonical]
+	delete(cipherSuites, alias)
+	delete(cipherSuites, canonical)
+	insecureCipherSuites[canonical] = true
+	t.Cleanup(func() {
+		cipherSuites[alias] = id
+		cipherSuites[canonical] = id
+		delete(insecureCipherSuites, canonical)
+	})
+
+	_, err := cipherSuiteID(alias)
+	assert.EqualError(t, err, `insecure TLS cipher suite "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"`)
+}
+
+func TestUpdateCipherSuitesAlreadySet(t *testing.T) {
+	t.Parallel()
+
 	cfg := &tls.Config{}
-	assert.NoError(t, UpdateCipherSuites(cfg, []string{}))
+	suites := []string{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"}
+	require.NoError(t, UpdateCipherSuites(cfg, suites))
 
-	err := UpdateCipherSuites(cfg, []string{"not_found"})
-	require.Error(t, err)
-	assert.Equal(t, "unexpected TLS cipher suite \"not_found\"", err.Error())
+	err := UpdateCipherSuites(cfg, []string{"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"})
+	require.EqualError(t, err, "TLSInfo.CipherSuites is already specified (given [TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384])")
+	assert.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, cfg.CipherSuites)
 
-	err = UpdateCipherSuites(cfg, []string{"TLS_RSA_WITH_RC4_128_SHA"})
-	assert.NoError(t, err)
-
-	err = UpdateCipherSuites(cfg, []string{"TLS_RSA_WITH_RC4_128_SHA"})
-	require.Error(t, err)
-	assert.Equal(t, "TLSInfo.CipherSuites is already specified (given [TLS_RSA_WITH_RC4_128_SHA])", err.Error())
+	// An empty list is a no-op even when the config is already set.
+	require.NoError(t, UpdateCipherSuites(cfg, nil))
+	assert.Equal(t, []uint16{tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}, cfg.CipherSuites)
 }

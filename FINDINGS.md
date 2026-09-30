@@ -44,10 +44,6 @@ byte-exact test.
 | P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
 | P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
-| P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
-| P-073 | pkg/appinit/config                      | `config.go` `CloudWatch`                                                 | `add_tags`/`replace_tags` parsed but unused; `AwsEndpoint` untagged; "wait on exist" typo                                                    | docs        | LOW      | Needs Approval |
-| P-074 | pkg/tlsconfig                           | `cipher_suites.go`                                                       | Modernization: derive cipher names from `tls.CipherSuites()` and reject insecure ones                                                        | correctness | LOW      | Needs Approval |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
 | P-083 | pkg/retriable                           | `retriable.go` `New`                                                     | `WithTransport` in options silently drops `ClientConfig.TLS`                                                                                 | security    | LOW      | Needs Approval |
 | P-084 | restserver, gserver                     | `server.go` `NewMux`, `serve.go` `configureHandlers`                     | HTTP metrics miss identity 401s, gserver 429s and gserver CORS preflights                                                                    | correctness | LOW      | Needs Approval |
@@ -98,14 +94,7 @@ byte-exact test.
 ### P-035 Coverage below CI gate
 
 - Evidence: B06 verification (2026-09-28), `go test -coverpkg=./... -coverprofile=<file> ./...` followed by `go tool cover -func=<file>`, measured 83.5% total; CI `MIN_TESTCOV` is 90. This remains queued in B24.
-- Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `pkg/appinit/config`, `metricskey`, `tests/testutils`) and the paths named in this file.
-
-### P-067 to P-074 remaining LOW items
-
-- P-067: `ctx: context.Background()` and `c.ctx.Done()` in `Close` cancels nothing.
-- P-068: `_ = pprof.StartCPUProfile(cpuf)`; closer keeps the file name, not the handle.
-- P-073: `AdditionalTags`/`ReplaceTags` unused; `AwsEndpoint` has no tags; `Flags.WaitOnExit` help typo.
-- P-074: hand-maintained cipher map including RC4/3DES (the `pkg/transport` keepalive portion was fixed in B15).
+- Fix: add tests for the untested packages (`pkg/crlcache`, `pkg/streamctx`, `metricskey`, `tests/testutils`) and the paths named in this file.
 
 ### P-076 gRPC-Web gzip ignores quality values
 
@@ -144,6 +133,5 @@ byte-exact test.
 
 ## Notes on items needing approval
 
-- P-073, P-074: public type behavior or config surface.
 - P-083: changes which TLS configuration wins, or rejects a combination that is accepted today.
 - P-084: changes which responses the HTTP metrics count and the `role` label of rejected requests.

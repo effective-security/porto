@@ -166,7 +166,10 @@ type TLSInfo struct {
 	// OCSPFile specifies location of the OCSP response
 	OCSPFile string `json:"ocsp,omitempty" yaml:"ocsp,omitempty"`
 
-	// CipherSuites optionally restricts the TLS cipher suites (by name)
+	// CipherSuites optionally restricts the enabled TLS 1.2 cipher suites, by
+	// crypto/tls name. The order is ignored: Go picks the preferred mutually
+	// supported suite itself. Names Go lists as insecure and TLS 1.3 suites
+	// (not configurable in Go) are rejected.
 	CipherSuites []string `json:"cipher_suites,omitempty" yaml:"cipher_suites,omitempty"`
 
 	// ClientCertAuth, when true, requires and verifies a client certificate;
