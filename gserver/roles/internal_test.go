@@ -73,6 +73,33 @@ func Test_dumpDM(t *testing.T) {
 	}
 }
 
+func Test_dumpDMRedactsCredentials(t *testing.T) {
+	t.Parallel()
+
+	md := metadata.Pairs(
+		"authorization", "Bearer secret-token",
+		"proxy-authorization", "Basic secret-proxy",
+		"cookie", "auth_token=secret-cookie",
+		"dpop", "secret-proof",
+		"x-csrf-token", "secret-csrf",
+		"x-correlation-id", "c1",
+	)
+	vals := dumpDM(md)
+	require.Len(t, vals, 2*md.Len())
+	got := map[any]any{}
+	for i := 0; i < len(vals); i += 2 {
+		got[vals[i]] = vals[i+1]
+	}
+	assert.Equal(t, map[any]any{
+		"authorization":       redactedValue,
+		"proxy-authorization": redactedValue,
+		"cookie":              redactedValue,
+		"dpop":                redactedValue,
+		"x-csrf-token":        redactedValue,
+		"x-correlation-id":    "c1",
+	}, got)
+}
+
 func TestParseSTSTokenExpiration(t *testing.T) {
 	exp, amzDate, amzExpiry, err := ParseSTSTokenExpiration("https://sts.us-west-2.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAWG7G5M3OC4MROMXA%2F20240824%2Fus-west-2%2Fsts%2Faws4_request&X-Amz-Date=20240824T113458Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=56d8506ba47302a7af22f592960317c8465e6bb4af882ebf607ad7d3fe423126")
 	require.NoError(t, err)

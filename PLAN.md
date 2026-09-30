@@ -434,14 +434,88 @@ predate B17 and are recorded as P-084 and P-085 (B28). `Test_Authz` now
 asserts the exact metrics of each request (two subtests passed on
 counters left by earlier ones).
 
+## Completed B19 decision — caller credentials and cookie CSRF
+
+Cookie authentication requires the CSRF check on every path (P-013).
+`roles.New` returns `cookies: csrf is required when auth is set` when JWT is
+enabled with `cookies.auth` but no `cookies.csrf`; HTTP previously ignored
+the auth cookie then without notice. With JWT disabled the cookie settings
+are unused and still accepted. gRPC and gRPC-Web calls authenticated by the
+auth cookie need `x-csrf-token` metadata (the `X-CSRF-Token` header for
+gRPC-Web, now `header.XCSRFToken`) equal to the CSRF cookie in the `cookie`
+metadata; every RPC is a POST, so the check is never skipped. A failed
+check falls through to the TLS certificate or guest and never returns an
+error, even in `Strict`, as on HTTP. Both paths share `checkCSRF`, which
+ignores surrounding spaces on both values and whose errors no longer
+contain either value (P-009). With `debug_logs`, the gRPC metadata dump now
+redacts `authorization`, `proxy-authorization`, `cookie`, `dpop` and
+`x-csrf-token` values, which it logged in full.
+
+STS failures caused by the presigned URL are cached (P-010): 4xx except
+408, 429 and the throttling codes `Throttling`, `ThrottlingException` and
+`RequestLimitExceeded` (STS throttles with HTTP 400, so the approved "4xx
+except 429" alone would have cached throttling; the code is read from the
+JSON or XML error body), and an undecodable 200 body. They are kept for 30s
+in a separate 100-entry LRU, so bad tokens cannot evict successful lookups,
+and return `cached STS lookup failure: <error>`. `InvalidClientTokenId` is
+cached, so a token signed with an access key that IAM has not yet
+propagated is rejected for up to 30s. Transport errors, timeouts, 408, 429,
+throttling and 5xx are not cached. Concurrent lookups of one uncached URL
+share one STS call made with the context of the request that started it,
+so a reset request still cancels its call and no lookup outlives its
+request. This replaces the first approved design, a detached lookup under
+`context.WithoutCancel`, after the review showed that clients resetting
+streams could then keep unbounded STS calls running; the user confirmed
+the change. Clients with deadlines shorter than STS latency still never
+fill the cache, as before. A waiter returns its own context error if that
+ends first, and a live waiter makes the next call when the shared one
+failed after its request's context ended. A panicking lookup releases its
+waiters with an error and the panic continues on its request. The review
+found that transport and URL parse errors (`*url.Error`) carried the full
+presigned URL, a bearer credential, into errors and logs; only their cause
+is kept now, with the host.
+
+`perRPCCredential` reads the token, DPoP signer and provider under one lock
+(P-014) and refreshes an expired token with one `GetCallerIdentity` call
+shared by concurrent RPCs, made with the context of the RPC that started it.
+A waiter whose context ends first returns its context error; a live waiter
+makes the next call when the shared one failed after its RPC's context
+ended, or when `WithCallerIdentity` replaced the provider meanwhile (the
+running call's result is then discarded, also for its own RPC). Unlike
+`pkg/retriable`, which retries on any context-typed error, only the end of
+the calling RPC's context triggers the retry. Waiters take the shared
+call's token even when it expires within a minute. The signer is read after
+the refresh, as before, so a provider that installs the signer bound to the
+new token with `WithDPoP` gets proofs from that key on the refreshing RPC
+and on the RPCs that shared its result. A panicking provider
+releases the waiters with an error and the panic continues. Provider errors
+are wrapped (`unable to get caller identity: ...`), a nil token is an error
+instead of a panic, and the stored token, including one set with
+`UpdateAuthToken`, is a copy. `bundle.NewWithMode` returns an error (P-015):
+the grpclb and RLS balancers call it, and a copy that ignored the mode
+would send the bundle's token to the balancer. grpclb logs the error and
+dials its balancer with the same fallback credentials as with the nil
+bundle; RLS now fails with this error instead of the missing transport
+security error of `grpc.NewClient`. Porto itself does not call it.
+
+The review found that each `roles.New` leaks the cleanup goroutine of the
+successful-lookup cache (P-086, B29) and that `pkg/retriable` `callerToken`
+has the provider-panic gap fixed here (P-087, B30).
+
+Migration: set `cookies.csrf` wherever `cookies.auth` is set with JWT.
+gRPC and gRPC-Web clients that authenticate with the auth cookie must send
+the CSRF cookie and `X-CSRF-Token` (`x-csrf-token` metadata) with its value;
+cross-origin browser clients also add it to `cors.allowed_headers`.
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B19 — Caller credentials and role handling | P3       | `gserver/credentials`, `gserver/roles`: synchronize credential refresh, repair `NewWithMode`, remove CSRF values from logs, add bounded negative STS caching, and enforce cookie CSRF consistently.                                                                   | P-009, P-010, P-013, P-014, P-015                                           | Cookie/CSRF contract                                  |
 | B21 — App initialization                   | P3       | `pkg/appinit`, `pkg/appinit/config`: cancel the CloudWatch runner, handle CPU profile start/close errors, and resolve unused CloudWatch config fields and help text.                                                                                                  | P-067, P-068, P-073                                                         | Config-field behavior                                 |
 | B23 — TLS cipher names                     | P3       | `pkg/tlsconfig`: derive supported cipher names from Go's TLS API and reject insecure suites.                                                                                                                                                                          | P-074 (tlsconfig portion)                                                   | Cipher/config compatibility                           |
 | B24 — Coverage gate                        | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until total coverage exceeds the 90% CI gate.                                                                                                                                   | P-035                                                                       | None                                                  |
 | B27 — Retriable TLS config precedence      | P3       | `pkg/retriable`: keep `ClientConfig.TLS` when an option replaces the transport in `New`, or reject the combination.                                                                                                                                                   | P-083                                                                       | TLS/transport precedence                              |
 | B28 — HTTP metrics coverage                | P3       | `restserver`, `gserver`, `restserver/telemetry`: count responses produced before the metrics handler (identity 401, rate-limit 429, gserver preflights) and keep the `io.ReaderFrom` fast path through `ResponseCapture`.                                             | P-084, P-085                                                                | Metric coverage and `role` label                      |
+| B29 — Roles provider lifetime              | P3       | `gserver/roles`: stop leaking the successful-lookup cache goroutine per `New`, without an API change if possible.                                                                                                                                                     | P-086                                                                       | None                                                  |
+| B30 — Retriable refresh panic              | P3       | `pkg/retriable`: release caller-identity refresh waiters when the provider panics.                                                                                                                                                                                    | P-087                                                                       | None                                                  |
 
 ## Execution rules
 

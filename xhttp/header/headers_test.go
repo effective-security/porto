@@ -28,6 +28,7 @@ func Test_Headers(t *testing.T) {
 	assert.Equal(t, "User-Agent", header.UserAgent)
 	assert.Equal(t, "X-HostName", header.XHostname)
 	assert.Equal(t, "X-CLIENT-HOSTNAME", header.XClientHostname)
+	assert.Equal(t, "X-CSRF-Token", header.XCSRFToken)
 	assert.Equal(t, "X-CLIENT-IP", header.XClientIP)
 	assert.Equal(t, "X-Correlation-ID", header.XCorrelationID)
 	assert.Equal(t, "X-Device-ID", header.XDeviceID)

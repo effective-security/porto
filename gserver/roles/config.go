@@ -34,14 +34,17 @@ func (i *IdentityMap) GetCookiesConfig() CookiesConfig {
 }
 
 // CookiesConfig configures cookie-based JWT authentication, used when no
-// Authorization header is present and JWT is enabled.
+// Authorization header (or gRPC "authorization" metadata) is present and JWT
+// is enabled.
 type CookiesConfig struct {
 	// Auth specifies the name of the cookie to be used for JWT authentication.
 	// If empty, the auth cookie is not used.
 	Auth string `json:"auth" yaml:"auth"`
-	// CSRF specifies the name of the cookie to be used for CSRF protection
-	// (double-submit with the X-CSRF-Token header on unsafe methods).
-	// If empty, cookie authentication over HTTP is disabled.
+	// CSRF specifies the name of the cookie to be used for CSRF protection:
+	// the X-CSRF-Token header (x-csrf-token gRPC metadata) must equal it on
+	// unsafe HTTP methods and on every gRPC and gRPC-Web call. It is
+	// required when Auth is set and JWT is enabled; New returns an error
+	// otherwise.
 	CSRF string `json:"csrf" yaml:"csrf"`
 	// Domain specifies the domain of the cookie to be used for authentication and CSRF protection.
 	// If empty, the cookie domain is not set.

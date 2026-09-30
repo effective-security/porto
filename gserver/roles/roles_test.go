@@ -276,6 +276,135 @@ func Test_JWT_CookieAuth(t *testing.T) {
 	})
 }
 
+func TestNewCookieAuthRequiresCSRF(t *testing.T) {
+	t.Parallel()
+
+	_, err := roles.New(&roles.IdentityMap{
+		Cookies: roles.CookiesConfig{
+			Auth: "auth_token",
+		},
+		JWT: roles.JWTIdentityMap{
+			Enabled: true,
+		},
+	}, mockJWT{})
+	require.EqualError(t, err, "cookies: csrf is required when auth is set")
+
+	// the auth cookie is only used with JWT
+	p, err := roles.New(&roles.IdentityMap{
+		Cookies: roles.CookiesConfig{
+			Auth: "auth_token",
+		},
+	}, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, p)
+}
+
+func Test_JWT_CookieAuthGRPC(t *testing.T) {
+	t.Parallel()
+
+	claims := jwt.MapClaims{
+		"sub":    "12234",
+		"email":  "denis@trusty.com",
+		"tenant": "t12341234",
+	}
+	cfg := roles.IdentityMap{
+		Cookies: roles.CookiesConfig{
+			Auth: "auth_token",
+			CSRF: "csrf_token",
+		},
+		JWT: roles.JWTIdentityMap{
+			SubjectClaim:             "email",
+			RoleClaim:                "email",
+			Enabled:                  true,
+			DefaultAuthenticatedRole: "jwt_authenticated",
+		},
+	}
+	strictCfg := cfg
+	strictCfg.Strict = true
+
+	for _, tc := range []struct {
+		name   string
+		strict bool
+		md     metadata.MD
+		role   string
+		method identity.AuthMethod
+	}{
+		{
+			name: "csrf_match",
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123; csrf_token=abc",
+				"x-csrf-token", "abc",
+			),
+			role:   "jwt_authenticated",
+			method: identity.MethodJWTCookie,
+		},
+		{
+			name: "cookies_in_separate_entries",
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123",
+				"cookie", "csrf_token=abc",
+				"x-csrf-token", "abc",
+			),
+			role:   "jwt_authenticated",
+			method: identity.MethodJWTCookie,
+		},
+		{
+			name: "missing_csrf_metadata",
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123; csrf_token=abc",
+			),
+			role:   identity.GuestRoleName,
+			method: identity.MethodNone,
+		},
+		{
+			name: "missing_csrf_cookie",
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123",
+				"x-csrf-token", "abc",
+			),
+			role:   identity.GuestRoleName,
+			method: identity.MethodNone,
+		},
+		{
+			name: "csrf_mismatch",
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123; csrf_token=abc",
+				"x-csrf-token", "other",
+			),
+			role:   identity.GuestRoleName,
+			method: identity.MethodNone,
+		},
+		{
+			name:   "strict_csrf_mismatch_falls_back_to_guest",
+			strict: true,
+			md: metadata.Pairs(
+				"cookie", "auth_token=AccessToken123; csrf_token=abc",
+				"x-csrf-token", "other",
+			),
+			role:   identity.GuestRoleName,
+			method: identity.MethodNone,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := cfg
+			if tc.strict {
+				c = strictCfg
+			}
+			p, err := roles.New(&c, mockJWT{claims: claims, atClaims: claims})
+			require.NoError(t, err)
+
+			ctx := metadata.NewIncomingContext(context.Background(), tc.md)
+			assert.True(t, p.ApplicableForContext(ctx))
+			id, err := p.IdentityFromContext(ctx, "/test")
+			require.NoError(t, err)
+			assert.Equal(t, tc.role, id.Role())
+			assert.Equal(t, tc.method, id.AuthMethod())
+		})
+	}
+}
+
 func Test_DPoP(t *testing.T) {
 	xlog.SetGlobalLogLevel(xlog.DEBUG)
 

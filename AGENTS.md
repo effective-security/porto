@@ -132,6 +132,7 @@ Do not start by grepping the tree.
 - `make test` : test entire project (needs Docker for Redis-backed tests)
 - `make testshort` : tests with `-test.short`
 - `make lint` : gofmt, go vet, govulncheck, golangci-lint
+- `make covtest` : coverage run and console report
 - `make covtest coverage` : coverage run and HTML report
 - `make docs` : regenerate the gomarkdoc API reference under `Documentation/api/`
 - `make all` : clean, tools, generate, covtest

@@ -1,6 +1,7 @@
 package roles
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,27 +35,45 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 		r := newPost()
 		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: tok})
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "missing X-CSRF-Token header")
+		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "missing X-CSRF-Token")
 	})
 
 	t.Run("missing_csrf_cookie", func(t *testing.T) {
 		r := newPost()
-		r.Header.Set(csrfHeaderName, tok)
+		r.Header.Set(header.XCSRFToken, tok)
 		r.Header.Set("Origin", "https://example.com")
 		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "missing CSRF cookie")
 	})
 
 	t.Run("csrf_mismatch", func(t *testing.T) {
 		r := newPost()
-		r.Header.Set(csrfHeaderName, tok)
-		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: "other"})
+		r.Header.Set(header.XCSRFToken, tok)
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: "other-token-value"})
 		r.Header.Set("Origin", "https://example.com")
-		assert.EqualError(t, enforceCSRFCookieAndHeader(r, "csrf_token"), "CSRF token mismatch: passed 'same-token-value', expected 'other'")
+		err := enforceCSRFCookieAndHeader(r, "csrf_token")
+		// neither token value may reach the error text, which is logged
+		assert.EqualError(t, err, "CSRF token mismatch")
+		assert.NotContains(t, fmt.Sprintf("%+v", err), tok)
+		assert.NotContains(t, fmt.Sprintf("%+v", err), "other-token-value")
+	})
+
+	t.Run("csrf_match_ignores_surrounding_spaces", func(t *testing.T) {
+		r := newPost()
+		r.Header.Set(header.XCSRFToken, " "+tok+" ")
+		r.Header.Set(header.Cookie, `csrf_token=" `+tok+`"`)
+		assert.NoError(t, enforceCSRFCookieAndHeader(r, "csrf_token"))
+	})
+
+	t.Run("csrf_match", func(t *testing.T) {
+		r := newPost()
+		r.Header.Set(header.XCSRFToken, tok)
+		r.AddCookie(&http.Cookie{Name: "csrf_token", Value: tok})
+		assert.NoError(t, enforceCSRFCookieAndHeader(r, "csrf_token"))
 	})
 	/*
 		t.Run("origin_matches_host", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Origin", "https://example.com")
 			require.NoError(t, enforceCSRFCookieAndHeader(r))
@@ -62,7 +81,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("origin_host_mismatch", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Origin", "https://evil.example")
 			assert.EqualError(t, enforceCSRFCookieAndHeader(r), "cross-site request not allowed")
@@ -70,7 +89,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("invalid_origin_url", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Origin", "://")
 			assert.EqualError(t, enforceCSRFCookieAndHeader(r), "cross-site request not allowed")
@@ -78,7 +97,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("no_origin_referer_matches", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Referer", "https://example.com/page")
 			require.NoError(t, enforceCSRFCookieAndHeader(r))
@@ -86,7 +105,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("no_origin_referer_mismatch", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Referer", "https://evil.example/page")
 			assert.EqualError(t, enforceCSRFCookieAndHeader(r), "cross-site request not allowed")
@@ -94,7 +113,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("invalid_referer_when_origin_absent", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Referer", "://bad")
 			assert.EqualError(t, enforceCSRFCookieAndHeader(r), "cross-site request not allowed")
@@ -102,7 +121,7 @@ func Test_enforceCSRFCookieAndHeader(t *testing.T) {
 
 		t.Run("origin_present_skips_referer_check_even_if_bad_referer", func(t *testing.T) {
 			r := newPost()
-			r.Header.Set(csrfHeaderName, tok)
+			r.Header.Set(header.XCSRFToken, tok)
 			r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: tok})
 			r.Header.Set("Origin", "https://example.com")
 			r.Header.Set("Referer", "https://evil.example/page")

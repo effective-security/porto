@@ -11,13 +11,6 @@ Introduce one opt-in setting (a trusted proxy CIDR list, or a
 `TrustProxyHeaders` flag) shared by both servers, default off, and key the
 rate limiter on `RemoteAddr` unless it is set. Retires P-007, P-018.
 
-## 3. gRPC-Web CORS parity with REST
-
-v0.41 routes gRPC-Web origin checks through `rs/cors` matching, honors
-`enabled`, merges `exposed_headers` and returns 403 on a disallowed origin
-(formerly P-002, P-011, P-012). Remaining: cookie-authenticated gRPC calls
-skip the CSRF check that HTTP cookie auth requires. Retires P-013.
-
 ## 4. Replace archived gRPC middleware
 
 `github.com/grpc-ecosystem/go-grpc-middleware` v1 and

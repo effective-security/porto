@@ -41,11 +41,6 @@ byte-exact test.
 | ----- | --------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------- | -------------- |
 | P-001 | (module)                                | `go.mod` `google.golang.org/grpc v1.84.0`                                | GO-2026-6443: gRPC server panic via missing authority/Host headers                                                                           | security    | HIGH     | Fixed          |
 | P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Fixed          |
-| P-009 | gserver/roles                           | `roles.go` `enforceCSRFCookieAndHeader`                                  | CSRF cookie and header values written into error text and logs                                                                               | security    | LOW      | Open           |
-| P-010 | gserver/roles                           | `roles.go` `provider.awsIdentity`                                        | Failed STS lookups are not negatively cached; each bad token repeats the outbound call                                                       | performance | LOW      | Open           |
-| P-013 | gserver/roles                           | `roles.go` `IdentityFromContext`                                         | Cookie auth over gRPC skips the CSRF check; HTTP cookie auth silently requires `cookies.csrf`                                                | security    | LOW      | Needs Approval |
-| P-014 | gserver/credentials                     | `credentials.go` `perRPCCredential.GetRequestMetadata`                   | Unsynchronized reads of `callerIdentity`/`dpopSigner`; thundering-herd token refresh                                                         | race        | LOW      | Open           |
-| P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
 | P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
 | P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
@@ -57,6 +52,8 @@ byte-exact test.
 | P-083 | pkg/retriable                           | `retriable.go` `New`                                                     | `WithTransport` in options silently drops `ClientConfig.TLS`                                                                                 | security    | LOW      | Needs Approval |
 | P-084 | restserver, gserver                     | `server.go` `NewMux`, `serve.go` `configureHandlers`                     | HTTP metrics miss identity 401s, gserver 429s and gserver CORS preflights                                                                    | correctness | LOW      | Needs Approval |
 | P-085 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | `ResponseCapture` hides `io.ReaderFrom`, disabling the sendfile path                                                                         | performance | LOW      | Open           |
+| P-086 | gserver/roles                           | `roles.go` `New`                                                         | Each `New` leaks the `awsCache` cleanup goroutine; `IdentityProvider` has no `Close`                                                         | performance | LOW      | Open           |
+| P-087 | pkg/retriable                           | `retriable.go` `Client.callerToken`                                      | A panicking `CallerIdentity` leaves the token refresh pending forever                                                                        | bug         | LOW      | Open           |
 
 ## Details
 
@@ -77,32 +74,6 @@ byte-exact test.
   The default limiter's `X-Rate-Limit-Request-Remote-Addr` response header
   now carries that client IP instead of the socket peer's `host:port`, and a
   request without a client IP is not limited.
-
-### P-009 CSRF values in error text
-
-- Evidence: `errors.Errorf("CSRF token mismatch: passed '%s', expected '%s'", headerToken, c.Value)`; the error string is logged.
-- Impact: CSRF cookie values leak to logs.
-- Fix: drop the values from the message.
-
-### P-010 STS lookup failures not cached
-
-- Evidence: `awsIdentity` only caches successful lookups (`p.awsCache.Add` after decoding); the LRU is 100 entries keyed by the full URL.
-- Impact: repeated bad tokens each cost an outbound STS call (now bounded by a 10s timeout and 64 KiB body).
-- Fix: negatively cache failures for a short TTL.
-
-### P-013 Cookie auth CSRF asymmetry
-
-- Evidence: HTTP path accepts the auth cookie only when `Cookies.CSRF != ""`; the gRPC path (`md["cookie"]`) accepts it with no CSRF check.
-- Fix: validate in `New` that `Cookies.Auth` requires `Cookies.CSRF`; check `x-csrf-token` metadata on the gRPC path.
-
-### P-014 `perRPCCredential` races and thundering herd
-
-- Evidence: `rc.callerIdentity` and `rc.dpopSigner` are read without `authTokenMu` while `WithCallerIdentity`/`WithDPoP` write under it; every concurrent RPC with an expired token calls `GetCallerIdentity`.
-- Fix: read under `RLock`; use `singleflight` for the refresh.
-
-### P-015 `NewWithMode` returns `(nil, nil)`
-
-- Fix: return an error, or return the receiver.
 
 ### P-017 Empty client IP with private-only `X-Forwarded-For`
 
@@ -159,9 +130,20 @@ byte-exact test.
 - Evidence: found by the B17 review (2026-09-29). `ResponseCapture` does not implement `io.ReaderFrom`, so `io.Copy` into a response (for example `http.ServeContent` and `http.FileServer`) behind `restserver` or `gserver` uses a buffered copy instead of `*http.response`'s `ReadFrom` (sendfile on Linux, for plaintext listeners only; TLS connections have no sendfile path). Two captures sit in every chain.
 - Fix: add `ReadFrom(src io.Reader) (int64, error)` that counts the bytes and delegates to the delegate's `io.ReaderFrom` when it has one, else `io.Copy` with a writer that only exposes `Write`.
 
+### P-086 `roles.New` leaks an LRU cleanup goroutine
+
+- Evidence: found by the B19 review (2026-09-30). `expirable.NewLRU` with a TTL starts a goroutine that runs until the cache's done channel is closed, and golang-lru v2 never closes it. `IdentityProvider` has no `Close`, so every `roles.New` call (one per `gserver.Start`) keeps that goroutine and the cache for the life of the process.
+- Impact: processes that create providers repeatedly (tests, restarts of embedded servers) accumulate goroutines and cached identities.
+- Fix: keep the successful lookups in an `lru.Cache` with a per-entry expiry, as `awsFailures` does since B19, or add `Close` to `IdentityProvider`.
+
+### P-087 `retriable` token refresh wedged by a provider panic
+
+- Evidence: found by the B19 review (2026-09-30). `Client.callerToken` sets `c.refresh` before calling `GetCallerIdentity` and clears it and closes `done` only on a normal return. When the provider panics and the caller recovers (a request made from an HTTP or gRPC handler), `c.refresh` stays set, and every later request waits on it until its context ends.
+- Impact: after one recovered provider panic, every request of the client fails with its context error (or hangs without a deadline) until `WithCallerIdentity` is called again.
+- Fix: complete the refresh in a `defer`, releasing the waiters with an error and letting the panic continue, as `gserver/credentials` `leadRefresh` does since B19.
+
 ## Notes on items needing approval
 
-- P-013: changes observable auth behavior; tests assert the current strings.
 - P-073, P-074: public type behavior or config surface.
 - P-083: changes which TLS configuration wins, or rejects a combination that is accepted today.
 - P-084: changes which responses the HTTP metrics count and the `role` label of rejected requests.

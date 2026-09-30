@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -26,6 +28,7 @@ import (
 	"github.com/effective-security/xpki/jwt"
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/gigawattio/awsarn"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -62,6 +65,15 @@ const (
 	awsTokenType    = "AWS4"
 	bearerTokenType = "Bearer"
 	dpopTokenType   = "DPoP"
+
+	// awsCacheSize bounds the successful and the failed STS lookup caches.
+	awsCacheSize = 100
+	// awsFailureTTL is how long an STS rejection of a presigned URL is
+	// remembered, so a repeated bad token does not repeat the outbound call.
+	awsFailureTTL = 30 * time.Second
+
+	// redactedValue replaces credential values in debug logs.
+	redactedValue = "[REDACTED]"
 )
 
 // IdentityProvider extracts the caller identity from HTTP requests and gRPC
@@ -93,22 +105,58 @@ type provider struct {
 	awsRoles  map[string]string
 	jwt       jwt.Parser
 
-	awsCache *expirable.LRU[string, *CallerIdentity]
+	// sts is the client for STS lookups; tests replace it.
+	sts *http.Client
+	// awsCache holds successful lookups by presigned URL and awsFailures the
+	// cacheable failures; awsLookups holds the running lookups, guarded by
+	// lookupMu.
+	awsCache    *expirable.LRU[string, *CallerIdentity]
+	awsFailures *lru.Cache[string, awsFailure]
+	lookupMu    sync.Mutex
+	awsLookups  map[string]*awsLookup
+}
+
+// awsFailure is a cached STS rejection of a presigned URL, valid until expires.
+type awsFailure struct {
+	err     error
+	expires time.Time
+}
+
+// awsLookup is one running STS lookup of a presigned URL; done is closed
+// after ci, err and canceled are set.
+type awsLookup struct {
+	done chan struct{}
+	ci   *CallerIdentity
+	err  error
+	// canceled is set when the context of the request that made the lookup ended.
+	canceled bool
 }
 
 // New returns an IdentityProvider for the given map. jwt is required when
-// JWT or DPoP is enabled and may be nil otherwise. Missing claim names
-// default to DefaultSubjectClaim, DefaultRoleClaim and DefaultTenantClaim.
+// JWT or DPoP is enabled and may be nil otherwise; cookies.csrf is required
+// when JWT is enabled with cookies.auth. Missing claim names default to
+// DefaultSubjectClaim, DefaultRoleClaim and DefaultTenantClaim.
 // The provider is safe for concurrent use.
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
+	if config.JWT.Enabled && config.Cookies.Auth != "" && config.Cookies.CSRF == "" {
+		return nil, errors.New("cookies: csrf is required when auth is set")
+	}
+	awsFailures, err := lru.New[string, awsFailure](awsCacheSize)
+	if err != nil {
+		return nil, errors.WithMessage(err, "unable to create AWS failure cache")
+	}
+	// FINDINGS P-086: the cleanup goroutine of the expirable awsCache is never stopped.
 	prov := &provider{
-		config:    *config,
-		dpopRoles: make(map[string]string),
-		jwtRoles:  make(map[string]string),
-		tlsRoles:  make(map[string]string),
-		awsRoles:  make(map[string]string),
-		jwt:       jwt,
-		awsCache:  expirable.NewLRU[string, *CallerIdentity](100, nil, tcredentials.CacheTTL),
+		config:      *config,
+		dpopRoles:   make(map[string]string),
+		jwtRoles:    make(map[string]string),
+		tlsRoles:    make(map[string]string),
+		awsRoles:    make(map[string]string),
+		jwt:         jwt,
+		sts:         stsHTTPClient,
+		awsCache:    expirable.NewLRU[string, *CallerIdentity](awsCacheSize, nil, tcredentials.CacheTTL),
+		awsFailures: awsFailures,
+		awsLookups:  make(map[string]*awsLookup),
 	}
 
 	if config.AWS.Enabled {
@@ -181,14 +229,14 @@ func (p *provider) ApplicableForRequest(r *http.Request) bool {
 // ApplicableForContext implements IdentityProvider.
 func (p *provider) ApplicableForContext(ctx context.Context) bool {
 	md, ok := metadata.FromIncomingContext(ctx)
-	authorization := ok && len(md["authorization"]) > 0
+	authorization := ok && len(md.Get(tcredentials.TokenFieldNameGRPC)) > 0
 
 	if authorization && (p.config.AWS.Enabled || p.config.DPoP.Enabled || p.config.JWT.Enabled) {
 		return true
 	}
 
 	if p.config.JWT.Enabled && p.config.Cookies.Auth != "" {
-		cookies := md.Get("cookie")
+		cookies := md.Get(header.Cookie)
 		if len(cookies) > 0 {
 			token, err := extractCookie(cookies, p.config.Cookies.Auth)
 			if err == nil && token != "" {
@@ -342,23 +390,42 @@ func getPeerCertAndCount(r *http.Request) int {
 	return 0
 }
 
+// sensitiveMetadata lists the metadata keys whose values dumpDM redacts.
+var sensitiveMetadata = []string{
+	strings.ToLower(tcredentials.TokenFieldNameGRPC),
+	strings.ToLower(header.ProxyAuthorization),
+	strings.ToLower(header.Cookie),
+	strings.ToLower(header.DPoP),
+	strings.ToLower(header.XCSRFToken),
+}
+
+// dumpDM returns the first value of each metadata key as key-value pairs
+// for debug logs, with credential values redacted.
 func dumpDM(md metadata.MD) []any {
 	var res []any
 	for k, v := range md {
 		if len(v) > 0 {
-			res = append(res, k, v[0])
+			val := v[0]
+			if slices.Contains(sensitiveMetadata, strings.ToLower(k)) {
+				val = redactedValue
+			}
+			res = append(res, k, val)
 		}
 	}
 	return res
 }
 
 // IdentityFromContext implements IdentityProvider. It reads the
-// "authorization", "dpop" and "cookie" incoming metadata keys and the peer
-// TLS state; SkipAuthPaths is not consulted.
+// "authorization", "dpop", "cookie" and "x-csrf-token" incoming metadata
+// keys and the peer TLS state; SkipAuthPaths is not consulted. Cookie auth
+// requires the CSRF double-submit check on every call.
 func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok && len(md[tcredentials.TokenFieldNameGRPC]) > 0 {
-		token, typ := tokenType(md[tcredentials.TokenFieldNameGRPC][0])
+	// a context without metadata has a nil MD, whose Get returns nil
+	md, _ := metadata.FromIncomingContext(ctx)
+	authorization := md.Get(tcredentials.TokenFieldNameGRPC)
+	cookies := md.Get(header.Cookie)
+	if len(authorization) > 0 {
+		token, typ := tokenType(authorization[0])
 
 		if p.config.DebugLogs {
 			logger.ContextKV(ctx, xlog.DEBUG,
@@ -379,10 +446,10 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "awsIdentity", "err", err.Error())
 		}
 
-		dhdr := md["dpop"]
+		dhdr := md.Get(header.DPoP)
 		if token != "" && p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, dpopTokenType) && len(dhdr) > 0 {
-			id, err := p.dpopIdentity(ctx, dhdr[0], "POST", uri, token, dpopTokenType)
+			id, err := p.dpopIdentity(ctx, dhdr[0], http.MethodPost, uri, token, dpopTokenType)
 			if err == nil {
 				return id, nil
 			} else if p.config.Strict {
@@ -401,19 +468,13 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 			logger.ContextKV(ctx, xlog.DEBUG, "reason", "jwtIdentity", "err", err.Error())
 		}
 		logger.ContextKV(ctx, xlog.DEBUG, "reason", "no_token_found")
-	} else if ok && p.config.JWT.Enabled && p.config.Cookies.Auth != "" && len(md["cookie"]) > 0 {
-		cookies := md.Get("cookie")
+	} else if p.config.JWT.Enabled && p.config.Cookies.Auth != "" && len(cookies) > 0 {
 		cookie, err := extractCookie(cookies, p.config.Cookies.Auth)
 		if err == nil && cookie != "" {
-			token, typ := tokenType(cookie)
-			// logger.ContextKV(ctx, xlog.DEBUG,
-			// 	"cookie_set", "true",
-			// 	"uri", uri,
-			// 	"type", typ,
-			// 	"token", xslices.StringUpto(token, 12),
-			// )
-
-			if token != "" {
+			// Every RPC is a POST, so cookie auth always needs the CSRF check.
+			if err := enforceCSRFMetadata(md, cookies, p.config.Cookies.CSRF); err != nil {
+				logger.ContextKV(ctx, xlog.DEBUG, "reason", "enforceCSRFMetadata", "err", err.Error())
+			} else if token, typ := tokenType(cookie); token != "" {
 				id, err := p.jwtIdentity(ctx, token, typ, identity.MethodJWTCookie)
 				if err == nil {
 					return id, nil
@@ -452,13 +513,9 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 	return identity.GuestIdentityForContext(ctx, uri)
 }
 
-const (
-	csrfHeaderName = "X-CSRF-Token"
-)
-
 // enforceCSRFCookieAndHeader validates CSRF for unsafe HTTP methods when requests
 // are authenticated via cookies (i.e., no Authorization header). It implements
-// the "double submit cookie" pattern and basic Origin/Referer host checks.
+// the "double submit cookie" pattern.
 func enforceCSRFCookieAndHeader(r *http.Request, csrfCookieName string) error {
 	if csrfCookieName == "" {
 		return nil
@@ -475,16 +532,12 @@ func enforceCSRFCookieAndHeader(r *http.Request, csrfCookieName string) error {
 	}
 
 	// 1) Double-submit cookie check: X-CSRF-Token header must match csrf_token cookie
-	headerToken := strings.TrimSpace(r.Header.Get(csrfHeaderName))
-	if headerToken == "" {
-		return errors.New("missing X-CSRF-Token header")
+	cookieToken := ""
+	if c, err := r.Cookie(csrfCookieName); err == nil {
+		cookieToken = c.Value
 	}
-	c, err := r.Cookie(csrfCookieName)
-	if err != nil || c == nil || strings.TrimSpace(c.Value) == "" {
-		return errors.New("missing CSRF cookie")
-	}
-	if subtle.ConstantTimeCompare([]byte(headerToken), []byte(c.Value)) != 1 {
-		return errors.Errorf("CSRF token mismatch: passed '%s', expected '%s'", headerToken, c.Value)
+	if err := checkCSRF(r.Header.Get(header.XCSRFToken), cookieToken); err != nil {
+		return err
 	}
 
 	/*
@@ -511,6 +564,37 @@ func enforceCSRFCookieAndHeader(r *http.Request, csrfCookieName string) error {
 			return errors.New("cross-site request not allowed")
 		}
 	*/
+	return nil
+}
+
+// enforceCSRFMetadata applies the double-submit check to a gRPC call
+// authenticated with the auth cookie: the x-csrf-token metadata must match
+// the csrfCookieName cookie in cookies.
+func enforceCSRFMetadata(md metadata.MD, cookies []string, csrfCookieName string) error {
+	headerToken := ""
+	if vals := md.Get(header.XCSRFToken); len(vals) > 0 {
+		headerToken = vals[0]
+	}
+	// a missing cookie leaves cookieToken empty, which checkCSRF rejects
+	cookieToken, _ := extractCookie(cookies, csrfCookieName)
+	return checkCSRF(headerToken, cookieToken)
+}
+
+// checkCSRF compares the X-CSRF-Token value with the CSRF cookie value in
+// constant time, ignoring surrounding spaces. The error never contains
+// either value.
+func checkCSRF(headerToken, cookieToken string) error {
+	headerToken = strings.TrimSpace(headerToken)
+	if headerToken == "" {
+		return errors.New("missing X-CSRF-Token")
+	}
+	cookieToken = strings.TrimSpace(cookieToken)
+	if cookieToken == "" {
+		return errors.New("missing CSRF cookie")
+	}
+	if subtle.ConstantTimeCompare([]byte(headerToken), []byte(cookieToken)) != 1 {
+		return errors.New("CSRF token mismatch")
+	}
 	return nil
 }
 
@@ -564,58 +648,9 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	if err != nil {
 		return nil, errors.WithMessage(err, "invalid AWS4 token")
 	}
-	url := string(u)
-	ci, ok := p.awsCache.Get(url)
-	if !ok {
-		expires, amzDate, amzExpiry, err := ParseSTSTokenExpiration(url)
-		if err != nil {
-			return nil, errors.WithMessage(err, "failed to parse AWS4 token")
-		}
-
-		if err := ValidateSTSPresignedURL(url); err != nil {
-			return nil, errors.WithMessage(err, "invalid AWS4 token")
-		}
-
-		r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return nil, errors.WithMessage(err, "invalid AWS4 token")
-		}
-		r.Header.Set("Accept", "application/json")
-		resp, err := stsHTTPClient.Do(r)
-		if err != nil {
-			return nil, errors.WithMessage(err, "unable to get Caller Identity from AWS")
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
-		if err != nil {
-			return nil, errors.WithMessage(err, "failed to decode AWS response")
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			// the presigned URL is a bearer credential; log only its host
-			logger.ContextKV(ctx, xlog.WARNING,
-				"host", r.URL.Host,
-				"status", resp.StatusCode,
-				"amz_date", amzDate,
-				"amz_expiry", amzExpiry,
-				"expires", tcredentials.TimeISO8601(*expires),
-				"now", tcredentials.TimeISO8601(now),
-				"body", string(body))
-			return nil, errors.Errorf("failed to get Caller Identity from AWS: %s", resp.Status)
-		}
-
-		ci = new(CallerIdentity)
-		err = json.Unmarshal(body, &ci)
-		if err != nil {
-			logger.KV(xlog.ERROR,
-				"body", string(body),
-				"err", err.Error(),
-			)
-			return nil, errors.WithMessage(err, "failed to decode AWS response")
-		}
-		ci.Expires = *expires
-		p.awsCache.Add(url, ci)
+	ci, err := p.awsCallerIdentity(ctx, string(u))
+	if err != nil {
+		return nil, err
 	}
 
 	if ci.Expires.Before(time.Now().UTC()) {
@@ -658,6 +693,198 @@ func (p *provider) awsIdentity(ctx context.Context, auth, tokenType string) (ide
 	return identity.NewIdentity(role, subj, callerIdentity.Account, claims, auth, tokenType, identity.MethodAWS), nil
 }
 
+// awsCallerIdentity returns the STS caller identity for a presigned URL
+// from the caches, or from one STS lookup that concurrent requests with the
+// same URL share. The lookup runs with the context of the request that
+// started it; a waiter returns its own context error if that ends first,
+// and makes the next lookup when the shared one failed after its request's
+// context ended.
+func (p *provider) awsCallerIdentity(ctx context.Context, presignedURL string) (*CallerIdentity, error) {
+	if ci, found, err := p.cachedAWS(presignedURL); found {
+		return ci, err
+	}
+
+	expires, amzDate, amzExpiry, err := ParseSTSTokenExpiration(presignedURL)
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to parse AWS4 token")
+	}
+	if err := ValidateSTSPresignedURL(presignedURL); err != nil {
+		return nil, errors.WithMessage(err, "invalid AWS4 token")
+	}
+
+	for {
+		p.lookupMu.Lock()
+		// a lookup that ended after the check above has filled the caches:
+		// results are cached before the lookup is removed
+		if ci, found, err := p.cachedAWS(presignedURL); found {
+			p.lookupMu.Unlock()
+			return ci, err
+		}
+		if l := p.awsLookups[presignedURL]; l != nil {
+			p.lookupMu.Unlock()
+			select {
+			case <-l.done:
+				if err := ctx.Err(); err != nil {
+					return nil, errors.WithMessage(err, "unable to get Caller Identity from AWS")
+				}
+				if l.err != nil && l.canceled {
+					continue
+				}
+				return l.ci, l.err
+			case <-ctx.Done():
+				return nil, errors.WithMessage(ctx.Err(), "unable to get Caller Identity from AWS")
+			}
+		}
+		l := &awsLookup{done: make(chan struct{})}
+		p.awsLookups[presignedURL] = l
+		p.lookupMu.Unlock()
+		return p.leadAWSLookup(ctx, l, presignedURL, expires, amzDate, amzExpiry)
+	}
+}
+
+// leadAWSLookup makes the STS lookup of l and publishes its result to the
+// waiters. If the lookup panics, the waiters are released with an error and
+// the panic continues on the request that made it.
+func (p *provider) leadAWSLookup(ctx context.Context, l *awsLookup, presignedURL string, expires *time.Time, amzDate, amzExpiry string) (ci *CallerIdentity, err error) {
+	panicked := true
+	defer func() {
+		if panicked {
+			err = errors.New("STS lookup panicked")
+		}
+		p.lookupMu.Lock()
+		delete(p.awsLookups, presignedURL)
+		l.ci = ci
+		l.err = err
+		l.canceled = ctx.Err() != nil
+		close(l.done)
+		p.lookupMu.Unlock()
+	}()
+	ci, err = p.lookupAWS(ctx, presignedURL, expires, amzDate, amzExpiry)
+	panicked = false
+	return ci, err
+}
+
+// cachedAWS returns the cached lookup result for presignedURL; found is
+// false when neither cache holds a current entry.
+func (p *provider) cachedAWS(presignedURL string) (ci *CallerIdentity, found bool, err error) {
+	if ci, ok := p.awsCache.Get(presignedURL); ok {
+		return ci, true, nil
+	}
+	// an expired failure stays until a new lookup replaces it or it is evicted
+	if f, ok := p.awsFailures.Get(presignedURL); ok && time.Now().Before(f.expires) {
+		return nil, true, errors.WithMessage(f.err, "cached STS lookup failure")
+	}
+	return nil, false, nil
+}
+
+// lookupAWS calls STS with the presigned URL and caches the result. Only
+// failures caused by the URL itself are cached (see cacheableSTSFailure and
+// an undecodable response); transport errors, timeouts and transient
+// responses are not.
+func (p *provider) lookupAWS(ctx context.Context, presignedURL string, expires *time.Time, amzDate, amzExpiry string) (*CallerIdentity, error) {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, presignedURL, nil)
+	if err != nil {
+		return nil, errors.WithMessage(withoutURL(err), "invalid AWS4 token")
+	}
+	r.Header.Set(header.Accept, header.ApplicationJSON)
+	resp, err := p.sts.Do(r)
+	if err != nil {
+		return nil, errors.Wrapf(withoutURL(err), "unable to get Caller Identity from AWS host %s", r.URL.Host)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSTSResponseBytes))
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to decode AWS response")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// the presigned URL is a bearer credential; log only its host
+		logger.ContextKV(ctx, xlog.WARNING,
+			"host", r.URL.Host,
+			"status", resp.StatusCode,
+			"amz_date", amzDate,
+			"amz_expiry", amzExpiry,
+			"expires", tcredentials.TimeISO8601(*expires),
+			"now", tcredentials.TimeISO8601(time.Now().UTC()),
+			"body", string(body))
+		err := errors.Errorf("failed to get Caller Identity from AWS: %s", resp.Status)
+		if cacheableSTSFailure(resp.StatusCode, body) {
+			p.addAWSFailure(presignedURL, err)
+		}
+		return nil, err
+	}
+
+	ci := new(CallerIdentity)
+	if err := json.Unmarshal(body, ci); err != nil {
+		logger.KV(xlog.ERROR,
+			"body", string(body),
+			"err", err.Error(),
+		)
+		err = errors.WithMessage(err, "failed to decode AWS response")
+		p.addAWSFailure(presignedURL, err)
+		return nil, err
+	}
+	ci.Expires = *expires
+	p.awsCache.Add(presignedURL, ci)
+	return ci, nil
+}
+
+// withoutURL returns the cause of a *url.Error, whose text holds the URL:
+// a presigned URL is a bearer credential and must not reach errors or logs.
+func withoutURL(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
+}
+
+// addAWSFailure caches err for presignedURL for awsFailureTTL.
+func (p *provider) addAWSFailure(presignedURL string, err error) {
+	p.awsFailures.Add(presignedURL, awsFailure{
+		err:     err,
+		expires: time.Now().Add(awsFailureTTL),
+	})
+}
+
+// transientSTSErrorCodes are STS error codes that do not depend on the
+// presigned URL. STS reports throttling with HTTP 400.
+var transientSTSErrorCodes = []string{
+	"Throttling",
+	"ThrottlingException",
+	"RequestLimitExceeded",
+}
+
+// cacheableSTSFailure reports whether an STS error response rejects the
+// presigned URL itself: a 4xx status other than 408 and 429 whose error
+// code is not in transientSTSErrorCodes.
+func cacheableSTSFailure(status int, body []byte) bool {
+	if status < http.StatusBadRequest || status >= http.StatusInternalServerError ||
+		status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {
+		return false
+	}
+	return !slices.Contains(transientSTSErrorCodes, stsErrorCode(body))
+}
+
+// stsErrorCode returns the error code of an STS error response, in the JSON
+// form that Accept: application/json selects or in the XML form, or "" when
+// the body has neither.
+func stsErrorCode(body []byte) string {
+	var res struct {
+		Error struct {
+			Code string `json:"Code" xml:"Code"`
+		} `json:"Error" xml:"Error"`
+	}
+	if json.Unmarshal(body, &res) == nil && res.Error.Code != "" {
+		return res.Error.Code
+	}
+	if xml.Unmarshal(body, &res) == nil {
+		return res.Error.Code
+	}
+	return ""
+}
+
 const (
 	// stsRequestTimeout bounds the outbound GetCallerIdentity call so a slow
 	// STS endpoint cannot stall request authentication indefinitely.
@@ -685,7 +912,7 @@ var stsHTTPClient = &http.Client{Timeout: stsRequestTimeout}
 func ValidateSTSPresignedURL(presignedURL string) error {
 	u, err := url.Parse(presignedURL)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse presigned URL")
+		return errors.WithMessage(withoutURL(err), "failed to parse presigned URL")
 	}
 	if u.Scheme != "https" {
 		return errors.Errorf("presigned URL must use https, got %q", u.Scheme)
@@ -744,7 +971,7 @@ func isSTSHost(host string) bool {
 func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error) {
 	u, err := url.Parse(presignedURL)
 	if err != nil {
-		return nil, "", "", errors.Wrapf(err, "failed to parse presigned URL")
+		return nil, "", "", errors.WithMessage(withoutURL(err), "failed to parse presigned URL")
 	}
 	q := u.Query()
 	// The date and time format must follow the ISO 8601 standard, and must be formatted with the "yyyyMMddTHHmmssZ" format
