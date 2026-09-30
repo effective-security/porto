@@ -47,9 +47,10 @@ type TLSInfo struct {
 	// limits.DefaultHandshakeTimeout; a negative duration disables the deadline.
 	HandshakeTimeout time.Duration
 
-	// CipherSuites is a list of supported cipher suites.
-	// If empty, Go auto-populates it by default.
-	// Note that cipher suites are prioritized in the given order.
+	// CipherSuites optionally restricts the enabled TLS 1.2 cipher suites, by
+	// crypto/tls name; if empty, Go uses its default list. The order is
+	// ignored: Go picks the preferred mutually supported suite itself.
+	// tlsconfig.UpdateCipherSuites rejects insecure and TLS 1.3 names.
 	CipherSuites []string
 
 	tlsCfg      *tls.Config

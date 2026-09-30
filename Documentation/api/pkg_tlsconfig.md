@@ -13,7 +13,7 @@ Entry points:
 - NewServerTLSFromFiles / NewClientTLSFromFiles build a tls.Config with MinVersion TLS 1.2 and ALPN "h2","http/1.1" from cert, key and optional CA bundle files. An optional "\<cert basename\>.ocsp" file next to the certificate is loaded as an OCSP staple if it is valid and not expired.
 - KeypairReloader polls the cert/key files' modification times on a ticker and reloads them \(also forced once per hour\). Use GetKeypairFunc as tls.Config.GetCertificate on servers and GetClientCertificateFunc as tls.Config.GetClientCertificate on clients.
 - NewHTTPTransportWithReloader returns an http.RoundTripper whose client certificate is swapped in on reload.
-- UpdateCipherSuites maps cipher suite names to tls.Config.CipherSuites.
+- UpdateCipherSuites maps cipher suite names to tls.Config.CipherSuites. The names come from tls.CipherSuites; suites in tls.InsecureCipherSuites and TLS 1.3 suites \(not configurable in Go\) are rejected.
 
 Server example:
 
@@ -50,7 +50,7 @@ An expired certificate is rejected during reload. If the current certificate lat
 - [func LoadX509KeyPairWithOCSP\(certFile, keyFile string\) \(\*tls.Certificate, error\)](<#LoadX509KeyPairWithOCSP>)
 - [func NewClientTLSFromFiles\(certFile, keyFile, rootsFile string\) \(\*tls.Config, error\)](<#NewClientTLSFromFiles>)
 - [func NewServerTLSFromFiles\(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType\) \(\*tls.Config, error\)](<#NewServerTLSFromFiles>)
-- [func UpdateCipherSuites\(tls \*tls.Config, ss \[\]string\) error](<#UpdateCipherSuites>)
+- [func UpdateCipherSuites\(cfg \*tls.Config, ss \[\]string\) error](<#UpdateCipherSuites>)
 - [func X509KeyPair\(certPEMBlock, keyPEMBlock \[\]byte\) \(\*tls.Certificate, error\)](<#X509KeyPair>)
 - [func X509KeyPairWithOCSP\(certPEMBlock, keyPEMBlock, ocspStaple \[\]byte\) \(\*tls.Certificate, error\)](<#X509KeyPairWithOCSP>)
 - [type HTTPTransport](<#HTTPTransport>)
@@ -73,13 +73,13 @@ An expired certificate is rejected during reload. If the current certificate lat
 
 
 <a name="GetCipherSuite"></a>
-## func [GetCipherSuite](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L55>)
+## func [GetCipherSuite](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L69>)
 
 ```go
 func GetCipherSuite(s string) (uint16, bool)
 ```
 
-GetCipherSuite returns the ID for a cipher suite name such as "TLS\_ECDHE\_RSA\_WITH\_AES\_128\_GCM\_SHA256" and whether the name is known.
+GetCipherSuite returns the ID for a cipher suite name such as "TLS\_ECDHE\_RSA\_WITH\_AES\_128\_GCM\_SHA256" and whether UpdateCipherSuites accepts it: the name must be a TLS 1.0\-1.2 suite that crypto/tls implements and does not list in tls.InsecureCipherSuites.
 
 <a name="LoadX509KeyPairWithOCSP"></a>
 ## func [LoadX509KeyPairWithOCSP](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tls.go#L34>)
@@ -109,13 +109,13 @@ func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientau
 NewServerTLSFromFiles builds a server tls.Config \(MinVersion TLS 1.2, ALPN h2/http1.1\) from PEM files. certFile and keyFile are required; an OCSP staple is loaded from "\<cert basename\>.ocsp" if present. rootsFile \(optional\) is used as both RootCAs and ClientCAs; caFile \(optional\) overrides ClientCAs. When both are empty the OS roots are used and client certificates cannot be verified. clientauthType is applied as\-is. CA files must contain at least one valid certificate. The returned config has no GetCertificate; pair it with KeypairReloader for rotation.
 
 <a name="UpdateCipherSuites"></a>
-## func [UpdateCipherSuites](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L63>)
+## func [UpdateCipherSuites](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L98>)
 
 ```go
-func UpdateCipherSuites(tls *tls.Config, ss []string) error
+func UpdateCipherSuites(cfg *tls.Config, ss []string) error
 ```
 
-UpdateCipherSuites sets tls.CipherSuites from names, preserving order. An empty list is a no\-op. It returns an error if CipherSuites is already set or a name is unknown; names are not filtered for security.
+UpdateCipherSuites sets cfg.CipherSuites, the enabled TLS 1.0\-1.2 suites, from names. It restricts which suites can be negotiated, not their preference: Go ignores the order of tls.Config.CipherSuites, and PreferServerCipherSuites has no effect. An empty list is a no\-op. Names are checked like GetCipherSuite; it returns an error, leaving cfg unchanged, if CipherSuites is already set or a name is unknown, insecure or a TLS 1.3 suite \(TLS 1.3 suites are not configurable in Go\).
 
 <a name="X509KeyPair"></a>
 ## func [X509KeyPair](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tls.go#L59>)

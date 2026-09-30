@@ -23,12 +23,13 @@ metrics:
     expiration: 5m
   cloudwatch:
     aws_region: us-west-2
+    aws_endpoint: http://localhost:4566   # optional, e.g. an emulator
     namespace: MyService
     publish_interval: 1m
     with_sample_count: true
 ```
 
-The "cloudwatch" key has no omitempty tag and is always emitted on marshal. CloudWatch.AwsEndpoint has no tags and therefore uses the encoder's default key \("AwsEndpoint" in JSON, "awsendpoint" in YAML\).
+The "cloudwatch" key has no omitempty tag and is always emitted on marshal.
 
 ## Index
 
@@ -39,30 +40,24 @@ The "cloudwatch" key has no omitempty tag and is always emitted on marshal. Clou
 
 
 <a name="CloudWatch"></a>
-## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L64-L87>)
+## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L63-L80>)
 
-CloudWatch configures the CloudWatch sink. AdditionalTags and ReplaceTags are parsed but not currently applied by appinit.Metrics.
+CloudWatch configures the CloudWatch sink.
 
 ```go
 type CloudWatch struct {
     // AwsRegion where the service is deployed.
     AwsRegion string `json:"aws_region" yaml:"aws_region"`
 
-    // AwsEndpoint is the optional AWS endpoint to use
-    AwsEndpoint string
+    // AwsEndpoint optionally overrides the CloudWatch endpoint URL, for
+    // example to publish to a local CloudWatch emulator.
+    AwsEndpoint string `json:"aws_endpoint,omitempty" yaml:"aws_endpoint,omitempty"`
 
     // Namespace specifies CloudWatch namespace to push metrics and logs to.
     Namespace string `json:"namespace" yaml:"namespace"`
 
     // PublishInterval specifies the publish interval.
     PublishInterval time.Duration `json:"publish_interval" yaml:"publish_interval"`
-
-    // AdditionalTags specifies additional tags/labels to send to CloudWatch
-    AdditionalTags map[string]string `json:"add_tags" yaml:"add_tags"`
-
-    // ReplaceTags tags with the provided label.
-    // This allows for aggregating metrics across dimensions so we can set CloudWatch Alarms on the metrics
-    ReplaceTags map[string]string `json:"replace_tags" yaml:"replace_tags"`
 
     // WithSampleCount specifies whether to include the sample count in the metric
     // it adds _count, _avg , _sum

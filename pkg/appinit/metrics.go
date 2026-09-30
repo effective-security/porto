@@ -32,7 +32,10 @@ var (
 // binds synchronously and serves promhttp with bounded HTTP read deadlines.
 // Bind errors are returned; unexpected serve errors are logged. The returned
 // closer stops the HTTP endpoint, including active connections.
-// CloudWatch starts a publishing goroutine; the returned closer flushes it.
+// CloudWatch starts a publishing goroutine; the returned closer stops it and
+// waits for its final publish. With a Prometheus or CloudWatch sink,
+// EnableRuntimeMetrics starts a runtime stats collector; the returned closer
+// signals it to stop.
 // GlobalTags accepts "service", "cluster_id" and "node" (from $NODE_NAME).
 // describe lists the caller's metric descriptors, merged with metricskey.Metrics
 // for Prometheus help text. It returns an error if a sink is already
@@ -147,9 +150,6 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 			}
 			cwSink = newCWSink
 			sinks = append(sinks, cwSink)
-			closers = append(closers, &contextCloser{
-				ctx: context.Background(),
-			})
 		}
 		// "inmem", "inmemory" and "" need no sink; validateMetricsProviders
 		// has already rejected unknown providers.
@@ -163,8 +163,15 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 	}
 
 	if sink != nil {
-		if _, err = metrics.NewGlobal(mcfg, sink); err != nil {
+		var global *metrics.Metrics
+		if global, err = metrics.NewGlobal(mcfg, sink); err != nil {
 			return nil, errors.WithMessage(err, "failed to initialize global metrics")
+		}
+		if cfg.EnableRuntimeMetrics {
+			// Signal the runtime collector to stop before the CloudWatch
+			// runner publishes the last interval; Close does not wait for
+			// the collector to exit.
+			closers = append(closers, runtimeStatsCloser{metrics: global})
 		}
 		pmetricskey.StatsVersion.SetGauge(float64(commitNumber))
 	}
@@ -183,7 +190,7 @@ func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, c
 
 	// Start background work only after every fallible step has succeeded.
 	if newCWSink != nil {
-		go newCWSink.Run(context.Background())
+		closers = append(closers, startCloudWatch(newCWSink))
 	}
 	if endpoint != nil {
 		endpoint.start()
@@ -232,22 +239,50 @@ func (c metricsClosers) Close() error {
 	return err
 }
 
-// contextCloser flushes the CloudWatch sink on Close.
-type contextCloser struct {
-	ctx context.Context
+// cloudWatchRunner owns the goroutine running the CloudWatch sink's
+// publishing loop.
+type cloudWatchRunner struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
-// Close flushes the CloudWatch sink; it does not stop its Run goroutine.
-func (c *contextCloser) Close() error {
-	if cwSink != nil {
-		err := cwSink.Flush(context.Background())
-		if err != nil {
-			logger.KV(xlog.ERROR, "reason", "metrics_flush", "err", err.Error())
-		}
-		logger.ContextKV(c.ctx, xlog.TRACE, "status", "sink_flushed")
+// startCloudWatch runs sink.Run on a new goroutine until Close.
+func startCloudWatch(sink *cloudwatch.Sink) *cloudWatchRunner {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &cloudWatchRunner{
+		cancel: cancel,
+		done:   make(chan struct{}),
 	}
-	logger.ContextKV(c.ctx, xlog.TRACE, "status", "metrics_closed")
+	go func() {
+		defer close(r.done)
+		sink.Run(ctx)
+	}()
+	return r
+}
 
-	c.ctx.Done()
+// Close cancels the publishing loop and waits for Run to return. Run
+// publishes the metrics of the last interval before it returns, bounded by
+// the sink's shutdown timeout, and logs a failed publish. The metrics of an
+// interval are lost when the cancellation aborts a periodic publish in
+// flight, or meets a tick that Run has not handled yet (Run then publishes
+// with the cancelled context). When Run already stopped on expired or
+// missing credentials, Close returns at once without publishing. Close is
+// idempotent and safe for concurrent use; it always returns nil.
+func (r *cloudWatchRunner) Close() error {
+	r.cancel()
+	<-r.done
+	return nil
+}
+
+// runtimeStatsCloser stops the runtime stats collector of the global
+// metrics instance; emission through it keeps working.
+type runtimeStatsCloser struct {
+	metrics *metrics.Metrics
+}
+
+// Close signals the collector to stop without waiting for it to exit; it is
+// idempotent and always returns nil.
+func (c runtimeStatsCloser) Close() error {
+	c.metrics.Close()
 	return nil
 }

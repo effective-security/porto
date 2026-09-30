@@ -4,7 +4,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"runtime/pprof"
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/ctl"
@@ -46,7 +45,7 @@ type Flags struct {
 	Region          string `help:"Override region value"`
 	Cluster         string `help:"Override cluster value"`
 
-	WaitOnExit int `help:"Number of seconds to wait on exist"`
+	WaitOnExit int `help:"Number of seconds to wait on exit"`
 }
 
 const (
@@ -110,21 +109,34 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error) {
 	return closer, nil
 }
 
-// CPUProfiler starts a CPU profile written to file and returns a closer that
-// stops it. It returns a nil closer and nil error when file is empty or
-// "/dev/null". The profile file handle is not closed by the closer.
+// CPUProfiler starts the process CPU profile written to file and returns a
+// closer that stops it and closes the file. It returns a nil closer and nil
+// error when file is empty or "/dev/null". It returns an error when the file
+// cannot be created or a CPU profile is already running in the process; a
+// profile started by an earlier CPUProfiler call is detected before file is
+// created, one started otherwise after, and the created file is then removed;
+// concurrent calls fail as already running until the removal completes.
 func CPUProfiler(file string) (io.Closer, error) {
-	// create CPU Profiler
-	if file != "" && file != nullDevName {
-		cpuf, err := os.Create(file)
-		if err != nil {
-			return nil, errors.WithMessage(err, "unable to create CPU profile")
-		}
-
-		logger.KV(xlog.INFO, "starting_cpu_profiling", file)
-
-		_ = pprof.StartCPUProfile(cpuf)
-		return &cpuProfileCloser{file: file}, nil
+	if file == "" || file == nullDevName {
+		return nil, nil
 	}
-	return nil, nil
+	if !cpuProfileRunning.CompareAndSwap(false, true) {
+		return nil, errors.New("CPU profile already running")
+	}
+	cpuf, err := os.Create(file)
+	if err != nil {
+		cpuProfileRunning.Store(false)
+		return nil, errors.WithMessage(err, "unable to create CPU profile")
+	}
+	closer, err := startCPUProfile(cpuf)
+	if err != nil {
+		// Clear the flag only after the removal, or a concurrent call could
+		// start a profile on file and have its output removed here.
+		err = errors.CombineErrors(err,
+			errors.WithMessage(removeCPUProfile(file), "unable to remove CPU profile"))
+		cpuProfileRunning.Store(false)
+		return nil, err
+	}
+	logger.KV(xlog.INFO, "starting_cpu_profiling", file)
+	return closer, nil
 }

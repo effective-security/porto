@@ -1,17 +1,25 @@
 package appinit
 
 import (
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	metricsProm "github.com/effective-security/metrics/prometheus"
+	pmetricskey "github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/pkg/appinit/config"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/limits"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -102,6 +110,122 @@ func TestMetricsFailureReleasesCloudWatchSink(t *testing.T) {
 	assert.Nil(t, closer)
 	assert.Nil(t, cwSink, "failed initialization must not keep the CloudWatch sink")
 	assert.Nil(t, promSink)
+}
+
+// cloudWatchEndpoint is a fake CloudWatch endpoint that records the bodies
+// of PutMetricData requests.
+type cloudWatchEndpoint struct {
+	mu     sync.Mutex
+	bodies []string
+}
+
+func (e *cloudWatchEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var body io.Reader = r.Body
+	if r.Header.Get(header.ContentEncoding) == header.Gzip {
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		body = gz
+	}
+	b, err := io.ReadAll(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/operation/PutMetricData") {
+		e.mu.Lock()
+		e.bodies = append(e.bodies, string(b))
+		e.mu.Unlock()
+	}
+	// The SDK accepts an empty PutMetricData response.
+	w.WriteHeader(http.StatusOK)
+}
+
+func (e *cloudWatchEndpoint) published() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.bodies)
+}
+
+// isolateAWSEnv gives the CloudWatch client static test credentials and no
+// shared AWS configuration.
+func isolateAWSEnv(t *testing.T) {
+	t.Helper()
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", missing)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", missing)
+	t.Setenv("AWS_USE_FIPS_ENDPOINT", "false")
+	t.Setenv("AWS_USE_DUALSTACK_ENDPOINT", "false")
+}
+
+const (
+	cloudWatchRunFrame = "cloudwatch.(*Sink).Run("
+	collectStatsFrame  = "metrics.(*Metrics).collectStats("
+)
+
+// goroutinesIn counts the goroutines whose stack contains frame.
+func goroutinesIn(frame string) int {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return strings.Count(string(buf[:n]), frame)
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+// Close stops the CloudWatch publishing goroutine and returns after its
+// final publish (P-067), and stops the runtime stats collector.
+func TestMetricsCloudWatchCloseStopsRun(t *testing.T) {
+	isolatePrometheus(t)
+	isolateAWSEnv(t)
+	endpoint := &cloudWatchEndpoint{}
+	srv := httptest.NewServer(endpoint)
+	defer srv.Close()
+
+	runs, collectors := goroutinesIn(cloudWatchRunFrame), goroutinesIn(collectStatsFrame)
+	closer, err := Metrics(&config.Metrics{
+		Provider:             "cloudwatch",
+		EnableRuntimeMetrics: true,
+		CloudWatch: &config.CloudWatch{
+			AwsRegion:   "us-west-2",
+			AwsEndpoint: srv.URL,
+			Namespace:   "porto-appinit-test",
+			// The interval never elapses, so only the shutdown flush publishes.
+			PublishInterval: time.Hour,
+		},
+	}, "test", "test", "v1", 1, nil)
+	require.NoError(t, err)
+	require.NotNil(t, closer)
+	require.Eventually(t, func() bool {
+		return goroutinesIn(cloudWatchRunFrame) == runs+1 && goroutinesIn(collectStatsFrame) == collectors+1
+	}, 5*time.Second, time.Millisecond, "Run and the runtime stats collector start")
+	assert.Empty(t, endpoint.published())
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() { assert.NoError(t, closer.Close()) })
+	}
+	wg.Wait()
+	// Close waits for Run to return, not for the collector to exit.
+	assert.Equal(t, runs, goroutinesIn(cloudWatchRunFrame), "Close stops Run")
+	assert.Eventually(t, func() bool {
+		return goroutinesIn(collectStatsFrame) == collectors
+	}, 5*time.Second, time.Millisecond, "Close stops the runtime stats collector")
+	published := endpoint.published()
+	require.Len(t, published, 1, "Close waits for the final publish")
+	assert.Contains(t, published[0], "porto-appinit-test")
+	assert.Contains(t, published[0], pmetricskey.StatsVersion.Name, "Metrics sets the version gauge")
+
+	require.NoError(t, closer.Close())
+	assert.Len(t, endpoint.published(), 1, "a repeated Close publishes nothing")
 }
 
 func TestMetricsRejectsProviderBeforeBinding(t *testing.T) {

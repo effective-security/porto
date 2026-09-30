@@ -15,70 +15,105 @@
 package tlsconfig
 
 import (
+	"cmp"
 	"crypto/tls"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 )
 
-// cipherSuites maps TLS 1.0-1.2 cipher suite names to their IDs, including
-// suites Go now lists as insecure (RC4, 3DES, CBC-SHA256). TLS 1.3 suites are
-// not configurable in Go and are absent.
-var cipherSuites = map[string]uint16{
-	"TLS_RSA_WITH_RC4_128_SHA":                      tls.TLS_RSA_WITH_RC4_128_SHA,
-	"TLS_RSA_WITH_3DES_EDE_CBC_SHA":                 tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-	"TLS_RSA_WITH_AES_128_CBC_SHA":                  tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-	"TLS_RSA_WITH_AES_256_CBC_SHA":                  tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-	"TLS_RSA_WITH_AES_128_CBC_SHA256":               tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
-	"TLS_RSA_WITH_AES_128_GCM_SHA256":               tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-	"TLS_RSA_WITH_AES_256_GCM_SHA384":               tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-	"TLS_ECDHE_ECDSA_WITH_RC4_128_SHA":              tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA,
-	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA":          tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-	"TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA":          tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-	"TLS_ECDHE_RSA_WITH_RC4_128_SHA":                tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA,
-	"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA":           tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
-	"TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA":            tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-	"TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA":            tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256":       tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
-	"TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256":         tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
-	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":         tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256":       tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-	"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384":         tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-	"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":       tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-	"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":          tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305":        tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-	"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":   tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256": tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+// cipherSuiteAliases maps the crypto/tls alias constant names, which
+// tls.CipherSuites does not report, to the names it reports.
+var cipherSuiteAliases = map[string]string{
+	"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305":   "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305": "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+}
+
+// The cipher suite tables are derived from the Go release the binary is
+// built with, so a suite Go moves to tls.InsecureCipherSuites is rejected
+// after a toolchain upgrade.
+var (
+	// cipherSuites maps the names of the configurable suites (those
+	// tls.CipherSuites lists for TLS 1.0-1.2, plus cipherSuiteAliases) to
+	// their IDs.
+	cipherSuites = map[string]uint16{}
+	// tls13CipherSuites holds the TLS 1.3 suite names; Go ignores them in
+	// tls.Config.CipherSuites.
+	tls13CipherSuites = map[string]bool{}
+	// insecureCipherSuites holds the names in tls.InsecureCipherSuites.
+	insecureCipherSuites = map[string]bool{}
+)
+
+func init() {
+	for _, cs := range tls.CipherSuites() {
+		if slices.ContainsFunc(cs.SupportedVersions, func(v uint16) bool { return v < tls.VersionTLS13 }) {
+			cipherSuites[cs.Name] = cs.ID
+		} else {
+			tls13CipherSuites[cs.Name] = true
+		}
+	}
+	for alias, name := range cipherSuiteAliases {
+		if id, ok := cipherSuites[name]; ok {
+			cipherSuites[alias] = id
+		}
+	}
+	for _, cs := range tls.InsecureCipherSuites() {
+		insecureCipherSuites[cs.Name] = true
+	}
 }
 
 // GetCipherSuite returns the ID for a cipher suite name such as
-// "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" and whether the name is known.
+// "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" and whether UpdateCipherSuites
+// accepts it: the name must be a TLS 1.0-1.2 suite that crypto/tls
+// implements and does not list in tls.InsecureCipherSuites.
 func GetCipherSuite(s string) (uint16, bool) {
 	v, ok := cipherSuites[s]
 	return v, ok
 }
 
-// UpdateCipherSuites sets tls.CipherSuites from names, preserving order.
-// An empty list is a no-op. It returns an error if CipherSuites is already
-// set or a name is unknown; names are not filtered for security.
-func UpdateCipherSuites(tls *tls.Config, ss []string) error {
+// cipherSuiteID returns the ID of an accepted suite, or an error saying why
+// the name is rejected. An alias is classified by the name it stands for.
+func cipherSuiteID(name string) (uint16, error) {
+	if id, ok := cipherSuites[name]; ok {
+		return id, nil
+	}
+	canonical := cmp.Or(cipherSuiteAliases[name], name)
+	switch {
+	case insecureCipherSuites[canonical]:
+		return 0, errors.Errorf("insecure TLS cipher suite %q", name)
+	case tls13CipherSuites[canonical]:
+		return 0, errors.Errorf("TLS 1.3 cipher suite %q is not configurable", name)
+	default:
+		return 0, errors.Errorf("unexpected TLS cipher suite %q", name)
+	}
+}
+
+// UpdateCipherSuites sets cfg.CipherSuites, the enabled TLS 1.0-1.2 suites,
+// from names. It restricts which suites can be negotiated, not their
+// preference: Go ignores the order of tls.Config.CipherSuites, and
+// PreferServerCipherSuites has no effect. An empty list is a no-op.
+// Names are checked like GetCipherSuite; it returns an error, leaving cfg
+// unchanged, if CipherSuites is already set or a name is unknown, insecure
+// or a TLS 1.3 suite (TLS 1.3 suites are not configurable in Go).
+func UpdateCipherSuites(cfg *tls.Config, ss []string) error {
 	if len(ss) == 0 {
-		// noting to update
+		// nothing to update
 		return nil
 	}
 
-	if len(tls.CipherSuites) > 0 {
+	if len(cfg.CipherSuites) > 0 {
 		return errors.Errorf("TLSInfo.CipherSuites is already specified (given %v)", ss)
 	}
 
 	cs := make([]uint16, len(ss))
 	for i, s := range ss {
-		var ok bool
-		cs[i], ok = GetCipherSuite(s)
-		if !ok {
-			return errors.Errorf("unexpected TLS cipher suite %q", s)
+		id, err := cipherSuiteID(s)
+		if err != nil {
+			return err
 		}
+		cs[i] = id
 	}
-	tls.CipherSuites = cs
+	cfg.CipherSuites = cs
 
 	return nil
 }

@@ -36,7 +36,7 @@ if mc != nil {
 }
 ```
 
-Metrics and Logs mutate process\-global state \(xlog formatter, the global metrics sink, the default Prometheus registry\) and are meant to be called once per process. Metrics also registers an xlog error hook that counts logged errors in metricskey.HealthLogErrors. Prometheus binds synchronously, returns bind errors to the caller, and uses bounded HTTP read deadlines. Closing the metrics closer stops its endpoint.
+Metrics and Logs mutate process\-global state \(xlog formatter, the global metrics sink, the default Prometheus registry\) and are meant to be called once per process. Metrics also registers an xlog error hook that counts logged errors in metricskey.HealthLogErrors. Prometheus binds synchronously, returns bind errors to the caller, and uses bounded HTTP read deadlines. Closing the metrics closer stops its endpoint, the runtime stats collector and the CloudWatch publisher, after the publisher's final publish.
 
 ## Index
 
@@ -48,16 +48,16 @@ Metrics and Logs mutate process\-global state \(xlog formatter, the global metri
 
 
 <a name="CPUProfiler"></a>
-## func [CPUProfiler](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L116>)
+## func [CPUProfiler](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L119>)
 
 ```go
 func CPUProfiler(file string) (io.Closer, error)
 ```
 
-CPUProfiler starts a CPU profile written to file and returns a closer that stops it. It returns a nil closer and nil error when file is empty or "/dev/null". The profile file handle is not closed by the closer.
+CPUProfiler starts the process CPU profile written to file and returns a closer that stops it and closes the file. It returns a nil closer and nil error when file is empty or "/dev/null". It returns an error when the file cannot be created or a CPU profile is already running in the process; a profile started by an earlier CPUProfiler call is detected before file is created, one started otherwise after, and the created file is then removed; concurrent calls fail as already running until the removal completes.
 
 <a name="Logs"></a>
-## func [Logs](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L61>)
+## func [Logs](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L60>)
 
 ```go
 func Logs(flags *LogConfig, serviceName string) (io.Closer, error)
@@ -66,16 +66,16 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error)
 Logs configures the process\-global xlog formatter from flags and logs a "service\_starting" line with os.Args. When LogDir is set, log rotation is initialized under LogDir/\<serviceName\>.log and the returned closer must be closed at shutdown; otherwise the closer is nil. LogDir "/dev/null" discards all output.
 
 <a name="Metrics"></a>
-## func [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/metrics.go#L40>)
+## func [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/metrics.go#L43>)
 
 ```go
 func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (closer io.Closer, err error)
 ```
 
-Metrics initializes the global metrics pipeline from cfg. Provider is a comma\-separated list of "prometheus", "cloudwatch" and "inmem"; an empty provider or Disabled=true is a no\-op returning \(nil, nil\). Prometheus registers with the default registry and, when Prometheus.Addr is set, binds synchronously and serves promhttp with bounded HTTP read deadlines. Bind errors are returned; unexpected serve errors are logged. The returned closer stops the HTTP endpoint, including active connections. CloudWatch starts a publishing goroutine; the returned closer flushes it. GlobalTags accepts "service", "cluster\_id" and "node" \(from $NODE\_NAME\). describe lists the caller's metric descriptors, merged with metricskey.Metrics for Prometheus help text. It returns an error if a sink is already initialized or a provider is unknown.
+Metrics initializes the global metrics pipeline from cfg. Provider is a comma\-separated list of "prometheus", "cloudwatch" and "inmem"; an empty provider or Disabled=true is a no\-op returning \(nil, nil\). Prometheus registers with the default registry and, when Prometheus.Addr is set, binds synchronously and serves promhttp with bounded HTTP read deadlines. Bind errors are returned; unexpected serve errors are logged. The returned closer stops the HTTP endpoint, including active connections. CloudWatch starts a publishing goroutine; the returned closer stops it and waits for its final publish. With a Prometheus or CloudWatch sink, EnableRuntimeMetrics starts a runtime stats collector; the returned closer signals it to stop. GlobalTags accepts "service", "cluster\_id" and "node" \(from $NODE\_NAME\). describe lists the caller's metric descriptors, merged with metricskey.Metrics for Prometheus help text. It returns an error if a sink is already initialized or a provider is unknown.
 
 <a name="Flags"></a>
-## type [Flags](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L33-L50>)
+## type [Flags](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L32-L49>)
 
 Flags holds the command line flags shared by services \(kong tags\): config file paths, CPU profiling output, dry\-run, client TLS files and environment/service/region/cluster overrides.
 
@@ -96,12 +96,12 @@ type Flags struct {
     Region          string `help:"Override region value"`
     Cluster         string `help:"Override cluster value"`
 
-    WaitOnExit int `help:"Number of seconds to wait on exist"`
+    WaitOnExit int `help:"Number of seconds to wait on exit"`
 }
 ```
 
 <a name="LogConfig"></a>
-## type [LogConfig](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L21-L28>)
+## type [LogConfig](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L20-L27>)
 
 LogConfig holds the logging command line flags consumed by Logs. The help tags are for kong. Precedence: LogDir \(file rotation\) \> "/dev/null" \(discard\) \> LogStackdriver \> LogJSON \> LogPretty \> plain text.
 

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/effective-security/x/guid"
 	"github.com/effective-security/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,19 +56,14 @@ func TestLogs(t *testing.T) {
 }
 
 func TestCPUProfiler(t *testing.T) {
-	closer, err := CPUProfiler("")
-	require.NoError(t, err)
+	for _, file := range []string{"", nullDevName} {
+		closer, err := CPUProfiler(file)
+		require.NoError(t, err)
+		assert.Nil(t, closer, file)
+	}
+
+	closer, err := CPUProfiler(t.TempDir())
+	require.ErrorContains(t, err, "unable to create CPU profile")
 	assert.Nil(t, closer)
-
-	cpuf := filepath.Join(os.TempDir(), "proto-test", "profiler")
-	_ = os.MkdirAll(cpuf, os.ModePerm)
-	defer os.Remove(cpuf)
-
-	_, err = CPUProfiler(cpuf)
-	assert.Error(t, err)
-
-	closer, err = CPUProfiler(filepath.Join(cpuf, guid.MustCreate()))
-	require.NoError(t, err)
-	require.NotNil(t, closer)
-	closer.Close()
+	assert.False(t, cpuProfileRunning.Load(), "a failed call frees the profile slot")
 }
