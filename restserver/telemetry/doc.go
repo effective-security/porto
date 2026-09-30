@@ -7,6 +7,9 @@
 //	h = telemetry.NewRequestMetrics(h)
 //
 // Metrics are emitted through porto/metricskey (HTTPReqPerf, HTTPReqByRole)
-// keyed by method, status and URL path. LoggerSkipPath entries are also
+// keyed by method, status and route template. The restserver Router records
+// the template of the route it dispatches to with SetRoute; requests without
+// one are labelled UnknownRoute, and non-standard methods OtherMethod, so no
+// label value is copied from the request. LoggerSkipPath entries are also
 // reused by restserver/authz to suppress access logs; see ShouldSkip.
 package telemetry

@@ -540,7 +540,8 @@ func (server *HTTPServer) NewMux() http.Handler {
 		time.Millisecond,
 		logger)
 
-	// metrics wrapper
+	// metrics wrapper; responses of the identity handler outside it are
+	// not counted (FINDINGS P-084)
 	httpHandler = telemetry.NewRequestMetrics(httpHandler)
 
 	// role/contextID wrapper

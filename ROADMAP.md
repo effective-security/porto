@@ -32,12 +32,6 @@ Metric names may change, so this needs a compatibility note.
 Guard task state with a mutex, fix `Stop`, then enable `RACE=true` in the
 CI `covtest` step so regressions are caught. Retires P-048, P-049, P-071.
 
-## 9. Route-template metric labels
-
-`telemetry.NewRequestMetrics` labels by raw path. Stash the registered
-httprouter pattern in the request context from `Router.Handle` and use it
-as the `uri` tag. Retires P-023.
-
 ## 10. Coverage and untested packages
 
 B06 verification measured 83.5% coverage against a 90% gate. `pkg/crlcache`,

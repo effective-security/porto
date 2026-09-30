@@ -139,7 +139,7 @@ func GetPort(bindAddr string) string
 GetPort returns the port from an HTTP bind address \("host:port" or ":port"\), or "443" when the address has no port, including a bare IPv6 literal.
 
 <a name="GetServerBaseURL"></a>
-## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L602>)
+## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L603>)
 
 ```go
 func GetServerBaseURL(s Server) *url.URL
@@ -148,7 +148,7 @@ func GetServerBaseURL(s Server) *url.URL
 GetServerBaseURL returns scheme://host:port for the server's own bind address, without consulting any request headers. IPv6 hosts are bracketed.
 
 <a name="GetServerURL"></a>
-## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L578>)
+## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L579>)
 
 ```go
 func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL
@@ -157,7 +157,7 @@ func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL
 GetServerURL returns the absolute URL for relativeEndpoint as seen by the client of request r. The scheme uses X\-Forwarded\-Proto only when the peer is trusted and the value is http or https; otherwise it uses s.Protocol\(\). The host from r.URL.Host, then r.Host, then the server's host:port.
 
 <a name="CORSOptions"></a>
-## type [CORSOptions](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L11-L49>)
+## type [CORSOptions](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L12-L50>)
 
 CORSOptions is a configuration container to setup the CORS middleware.
 
@@ -350,7 +350,7 @@ func (server *HTTPServer) PublicURL() string
 PublicURL returns the configured public URL \(Config.GetPublicURL\).
 
 <a name="HTTPServer.ServeHTTP"></a>
-### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L566>)
+### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L567>)
 
 ```go
 func (server *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request)
@@ -494,7 +494,7 @@ func (server *HTTPServer) WithTrustedProxies(trust *identity.TrustedProxies) *HT
 WithTrustedProxies permits forwarding headers only from socket peers in trust, built with identity.ParseTrustedProxies. Configure it before StartHTTP; nil or an empty policy trusts no proxy, which is the default.
 
 <a name="Handle"></a>
-## type [Handle](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L70>)
+## type [Handle](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L71>)
 
 Handle is a function that can be registered to a route to handle HTTP requests. Like http.HandlerFunc, but has a third parameter for the values of wildcards \(variables\).
 
@@ -515,7 +515,7 @@ type MuxFactory interface {
 ```
 
 <a name="Params"></a>
-## type [Params](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L54>)
+## type [Params](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L55>)
 
 Params is a Param\-slice, as returned by the router. The slice is ordered, the first URL parameter is also the first slice value. It is therefore safe to read values by the index.
 
@@ -524,7 +524,7 @@ type Params httprouter.Params
 ```
 
 <a name="Params.ByName"></a>
-### func \(Params\) [ByName](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L58>)
+### func \(Params\) [ByName](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L59>)
 
 ```go
 func (ps Params) ByName(name string) string
@@ -533,9 +533,9 @@ func (ps Params) ByName(name string) string
 ByName returns the value of the first Param which key matches the given name. If no matching Param is found, an empty string is returned.
 
 <a name="Router"></a>
-## type [Router](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L76-L96>)
+## type [Router](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L79-L99>)
 
-Router is the route registry handed to Service.Register. Paths use httprouter syntax \(":name" and "\*catchall" segments\); registering the same method and path twice panics, as does registering after Handler has been served \(httprouter is not safe for concurrent mutation\).
+Router is the route registry handed to Service.Register. Paths use httprouter syntax \(":name" and "\*catchall" segments\); registering the same method and path twice panics, as does registering after Handler has been served \(httprouter is not safe for concurrent mutation\). Before calling a handle, the Router records its registered path with telemetry.SetRoute, so request metrics are labelled by route template, not by URL path.
 
 ```go
 type Router interface {
@@ -562,7 +562,7 @@ type Router interface {
 ```
 
 <a name="NewRouter"></a>
-### func [NewRouter](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L105>)
+### func [NewRouter](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L108>)
 
 ```go
 func NewRouter(notfoundhandler http.HandlerFunc) Router
@@ -571,7 +571,7 @@ func NewRouter(notfoundhandler http.HandlerFunc) Router
 NewRouter returns a Router backed by httprouter with the given handler serving unmatched paths \(restserver uses a JSON 404 not\_found error\).
 
 <a name="NewRouterWithCORS"></a>
-### func [NewRouterWithCORS](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L119>)
+### func [NewRouterWithCORS](<https://github.com/effective-security/porto/blob/main/restserver/router.go#L122>)
 
 ```go
 func NewRouterWithCORS(notfoundhandler http.HandlerFunc, opt *CORSOptions) Router

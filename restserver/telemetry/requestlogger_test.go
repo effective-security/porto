@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -134,6 +136,44 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	logLine := tw.String()
 	// cid is random
 	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=GET path=\"/foo\" status=200 bytes=11 duration=0 remote=127.0.0.1 agent=no-agent\n", logLine)
+}
+
+func TestHttp_RequestLoggerGranularity(t *testing.T) {
+	durationRe := regexp.MustCompile(`duration=(\d+) `)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tcases := []struct {
+		granularity time.Duration
+		minDuration int64
+	}{
+		// Below one nanosecond the duration is logged in nanoseconds
+		// (previously a division by zero).
+		{0, int64(time.Millisecond)},
+		{-time.Second, int64(time.Millisecond)},
+		{time.Nanosecond, int64(time.Millisecond)},
+		{time.Microsecond, int64(time.Millisecond / time.Microsecond)},
+	}
+	for _, tc := range tcases {
+		tw := bytes.Buffer{}
+		writer := bufio.NewWriter(&tw)
+		xlog.SetFormatter(xlog.NewStringFormatter(writer))
+
+		lg := NewRequestLogger(handler, tc.granularity, logger)
+		w := httptest.NewRecorder()
+		require.NotPanics(t, func() {
+			lg.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/foo", nil))
+		}, tc.granularity)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		m := durationRe.FindStringSubmatch(tw.String())
+		require.Len(t, m, 2, tw.String())
+		d, err := strconv.ParseInt(m[1], 10, 64)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, d, tc.minDuration, tc.granularity)
+	}
 }
 
 func TestHttp_RequestLoggerWithSkip(t *testing.T) {

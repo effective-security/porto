@@ -85,6 +85,9 @@ jobs:
       - name: Prepare
         run: make vars tools generate
 
+      - name: Lint
+        run: make lint
+
       - name: UnitTest
         run: make build covtest
 

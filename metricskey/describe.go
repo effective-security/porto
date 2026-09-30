@@ -5,14 +5,16 @@ import "github.com/effective-security/metrics"
 // Descriptors of the metrics emitted by this repo.
 var (
 	// HTTPReqPerf samples HTTP request latency by verb, status and URI
-	// (restserver/telemetry).
+	// (restserver/telemetry). The uri tag is the matched route template or
+	// "unknown", and verb is "_OTHER" for non-standard methods.
 	HTTPReqPerf = metrics.Describe{
 		Name:         "http_requests_perf",
 		Type:         metrics.TypeSample,
 		RequiredTags: []string{"verb", "status", "uri"},
 		Help:         "provides quantiles for HTTP request.",
 	}
-	// HTTPReqByRole counts HTTP requests by verb, status, URI and caller role.
+	// HTTPReqByRole counts HTTP requests by verb, status, URI and caller
+	// role, with the same verb and uri tags as HTTPReqPerf.
 	HTTPReqByRole = metrics.Describe{
 		Name:         "http_requests_role",
 		Type:         metrics.TypeCounter,

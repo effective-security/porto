@@ -394,7 +394,8 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	}
 	handler = telemetry.NewRequestLogger(handler, time.Millisecond, logger, opts...)
 
-	// metrics wrapper
+	// metrics wrapper; responses of the identity, CORS and rate-limit
+	// handlers outside it are not counted (FINDINGS P-084)
 	handler = telemetry.NewRequestMetrics(handler)
 
 	// role/contextID wrapper
