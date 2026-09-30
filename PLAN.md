@@ -390,14 +390,58 @@ omits `X-CLIENT-HOSTNAME`/`X-CLIENT-IP` when they cannot be resolved
 body (the error text is truncated there) and returns a read error instead
 of the partial text; DEBUG dumps log the headers and that bounded body.
 
+## Completed B17 decision — HTTP telemetry labels and response writer
+
+Request metrics use bounded labels only (P-023). `uri` is the route
+template recorded with the new `telemetry.SetRoute(ctx, pattern)`: the
+`restserver` Router records the registered path of the route it dispatches
+to (for example `/v1/users/:id`, `/v1/files/*path`), so both `restserver`
+and `gserver` REST routes are labelled by template. Requests without a
+recorded route are labelled `unknown` (`telemetry.UnknownRoute`): unmatched
+paths and responses produced before or instead of a route handler, which
+includes authz 401/403 denials, readiness 503, `restserver` CORS
+preflights, httprouter's own 405, automatic `OPTIONS` and trailing-slash
+redirects, and `gserver` `WithMiddleware` handlers that answer requests
+themselves.
+`verb` keeps the 9 standard net/http methods and maps any other method to
+`_OTHER` (`telemetry.OtherMethod`, the OpenTelemetry convention). The 404
+special case is gone: every request records both `http_requests_perf` and
+`http_requests_role`, so a 404 from a matched route keeps its template and
+an unrouted 404 now also records a latency sample under `unknown`.
+`NewRequestMetrics` places the route holder in the request context (reusing
+an enclosing one); it is atomic because `http.TimeoutHandler` can leave the
+handler running after the metrics are recorded. Custom mux factories that
+add `NewRequestMetrics` get templates for `restserver.NewRouter` routes and
+`unknown` for other handlers unless those call `SetRoute` with the
+registered pattern. Dashboards and alerts that select raw paths, or
+401/403 by path, must move to templates or `unknown`.
+
+`ResponseCapture` implements `Unwrap` (P-024), so `http.ResponseController`
+deadlines, full duplex, flush and hijack reach the connection through the
+two captures in every chain, and implements `http.Hijacker` directly for
+WebSocket libraries that assert it; `Flush` and `Hijack` go through
+`http.ResponseController`, so a missing feature is a no-op flush or an
+error wrapping `http.ErrNotSupported`; the new `FlushError`, which
+`http.ResponseController.Flush` calls, returns the flush error that
+`Flush` must drop (previously it returned nil through the capture). Captured status
+and size exclude bytes written to a hijacked connection. `NewRequestLogger`
+clamps a granularity below 1ns to 1ns (P-031) instead of dividing by zero.
+
+The review found that responses produced outside the metrics handler
+(identity mapper 401s, `gserver` rate-limit 429s and CORS preflights) were
+never counted, and that `ResponseCapture` hides `io.ReaderFrom`; both
+predate B17 and are recorded as P-084 and P-085 (B28). `Test_Authz` now
+asserts the exact metrics of each request (two subtests passed on
+counters left by earlier ones).
+
 | Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
 | ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B17 — HTTP telemetry and response writer   | P2       | `restserver/telemetry`: use bounded route labels, expose the underlying writer for upgrades/controllers, and guard zero granularity.                                                                                                                                  | P-023, P-024, P-031                                                         | Metric label contract                                 |
 | B19 — Caller credentials and role handling | P3       | `gserver/credentials`, `gserver/roles`: synchronize credential refresh, repair `NewWithMode`, remove CSRF values from logs, add bounded negative STS caching, and enforce cookie CSRF consistently.                                                                   | P-009, P-010, P-013, P-014, P-015                                           | Cookie/CSRF contract                                  |
 | B21 — App initialization                   | P3       | `pkg/appinit`, `pkg/appinit/config`: cancel the CloudWatch runner, handle CPU profile start/close errors, and resolve unused CloudWatch config fields and help text.                                                                                                  | P-067, P-068, P-073                                                         | Config-field behavior                                 |
 | B23 — TLS cipher names                     | P3       | `pkg/tlsconfig`: derive supported cipher names from Go's TLS API and reject insecure suites.                                                                                                                                                                          | P-074 (tlsconfig portion)                                                   | Cipher/config compatibility                           |
 | B24 — Coverage gate                        | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until total coverage exceeds the 90% CI gate.                                                                                                                                   | P-035                                                                       | None                                                  |
 | B27 — Retriable TLS config precedence      | P3       | `pkg/retriable`: keep `ClientConfig.TLS` when an option replaces the transport in `New`, or reject the combination.                                                                                                                                                   | P-083                                                                       | TLS/transport precedence                              |
+| B28 — HTTP metrics coverage                | P3       | `restserver`, `gserver`, `restserver/telemetry`: count responses produced before the metrics handler (identity 401, rate-limit 429, gserver preflights) and keep the `io.ReaderFrom` fast path through `ResponseCapture`.                                             | P-084, P-085                                                                | Metric coverage and `role` label                      |
 
 ## Execution rules
 

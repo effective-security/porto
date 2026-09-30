@@ -3,6 +3,7 @@ package restserver
 import (
 	"net/http"
 
+	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/julienschmidt/httprouter"
 	"github.com/rs/cors"
 )
@@ -72,7 +73,9 @@ type Handle func(http.ResponseWriter, *http.Request, Params)
 // Router is the route registry handed to Service.Register. Paths use
 // httprouter syntax (":name" and "*catchall" segments); registering the same
 // method and path twice panics, as does registering after Handler has been
-// served (httprouter is not safe for concurrent mutation).
+// served (httprouter is not safe for concurrent mutation). Before calling a
+// handle, the Router records its registered path with telemetry.SetRoute,
+// so request metrics are labelled by route template, not by URL path.
 type Router interface {
 	// Handler returns the http.Handler serving the registered routes,
 	// wrapped with CORS when the router was created with NewRouterWithCORS.
@@ -146,8 +149,11 @@ func newCORS(opt *CORSOptions) *cors.Cors {
 	})
 }
 
-func proxyHandle(handle Handle) httprouter.Handle {
+// proxyHandle adapts handle to httprouter and records path, the registered
+// route template, for the request metrics.
+func proxyHandle(path string, handle Handle) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		telemetry.SetRoute(r.Context(), path)
 		handle(w, r, Params(p))
 	}
 }
@@ -162,42 +168,42 @@ func (p *proxy) Handler() http.Handler {
 
 // GET is a shortcut for router.Handle("GET", path, handle)
 func (p *proxy) GET(path string, handle Handle) {
-	p.router.Handle("GET", path, proxyHandle(handle))
+	p.router.Handle(http.MethodGet, path, proxyHandle(path, handle))
 }
 
 // HEAD is a shortcut for router.Handle("HEAD", path, handle)
 func (p *proxy) HEAD(path string, handle Handle) {
-	p.router.Handle("HEAD", path, proxyHandle(handle))
+	p.router.Handle(http.MethodHead, path, proxyHandle(path, handle))
 }
 
 // OPTIONS is a shortcut for router.Handle("OPTIONS", path, handle)
 func (p *proxy) OPTIONS(path string, handle Handle) {
-	p.router.Handle("OPTIONS", path, proxyHandle(handle))
+	p.router.Handle(http.MethodOptions, path, proxyHandle(path, handle))
 }
 
 // POST is a shortcut for router.Handle("POST", path, handle)
 func (p *proxy) POST(path string, handle Handle) {
-	p.router.Handle("POST", path, proxyHandle(handle))
+	p.router.Handle(http.MethodPost, path, proxyHandle(path, handle))
 }
 
 // PUT is a shortcut for router.Handle("PUT", path, handle)
 func (p *proxy) PUT(path string, handle Handle) {
-	p.router.Handle("PUT", path, proxyHandle(handle))
+	p.router.Handle(http.MethodPut, path, proxyHandle(path, handle))
 }
 
 // PATCH is a shortcut for router.Handle("PATCH", path, handle)
 func (p *proxy) PATCH(path string, handle Handle) {
-	p.router.Handle("PATCH", path, proxyHandle(handle))
+	p.router.Handle(http.MethodPatch, path, proxyHandle(path, handle))
 }
 
 // DELETE is a shortcut for router.Handle("DELETE", path, handle)
 func (p *proxy) DELETE(path string, handle Handle) {
-	p.router.Handle("DELETE", path, proxyHandle(handle))
+	p.router.Handle(http.MethodDelete, path, proxyHandle(path, handle))
 }
 
 // CONNECT is a shortcut for router.Handle("CONNECT", path, handle)
 func (p *proxy) CONNECT(path string, handle Handle) {
-	p.router.Handle("CONNECT", path, proxyHandle(handle))
+	p.router.Handle(http.MethodConnect, path, proxyHandle(path, handle))
 }
 
 // wrapAllowOriginRequestFunc adapts the CORSOptions.AllowOriginRequestFunc

@@ -59,11 +59,11 @@ type RequestLogger struct {
 }
 
 // NewRequestLogger creates a RequestLogger that chains to handler. The
-// logged duration is expressed in units of granularity (e.g. time.Millisecond),
-// which must be greater than zero. It panics if handler is nil and returns
-// handler unchanged (no logging) if logger is nil. The remote address logged
-// is identity.ClientIPFromRequest, which accepts forwarding headers only
-// from configured trusted proxies.
+// logged duration is expressed in units of granularity (e.g.
+// time.Millisecond); a zero or negative granularity logs nanoseconds. It
+// panics if handler is nil and returns handler unchanged (no logging) if
+// logger is nil. The remote address logged is identity.ClientIPFromRequest,
+// which accepts forwarding headers only from configured trusted proxies.
 func NewRequestLogger(
 	handler http.Handler,
 	granularity time.Duration,
@@ -79,7 +79,7 @@ func NewRequestLogger(
 	}
 
 	cfg := configuration{
-		granularity: int64(granularity),
+		granularity: max(1, int64(granularity)),
 		logger:      logger,
 	}
 

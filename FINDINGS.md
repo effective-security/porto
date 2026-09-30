@@ -48,9 +48,6 @@ byte-exact test.
 | P-015 | gserver/credentials                     | `credentials.go` `bundle.NewWithMode`                                    | Returns `(nil, nil)`, violating the `grpccredentials.Bundle` contract                                                                        | correctness | LOW      | Open           |
 | P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
 | P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
-| P-023 | restserver/telemetry                    | `request_metrics.go` `requestMetrics.ServeHTTP`                          | Unbounded metric label cardinality on raw URL path                                                                                           | performance | MEDIUM   | Needs Approval |
-| P-024 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | Hides `http.Hijacker`/`Unwrap` from downstream handlers                                                                                      | correctness | MEDIUM   | Open           |
-| P-031 | restserver/telemetry                    | `requestlogger.go` `RequestLogger.ServeHTTP`                             | Divide by zero when granularity is 0                                                                                                         | bug         | LOW      | Open           |
 | P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
 | P-067 | pkg/appinit                             | `metrics.go` `contextCloser.Close`                                       | CloudWatch `Run` goroutine is never cancelled                                                                                                | bug         | LOW      | Open           |
 | P-068 | pkg/appinit                             | `init.go` `CPUProfiler`                                                  | `StartCPUProfile` error ignored; profile file handle never closed                                                                            | bug         | LOW      | Open           |
@@ -58,6 +55,8 @@ byte-exact test.
 | P-074 | pkg/tlsconfig                           | `cipher_suites.go`                                                       | Modernization: derive cipher names from `tls.CipherSuites()` and reject insecure ones                                                        | correctness | LOW      | Needs Approval |
 | P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
 | P-083 | pkg/retriable                           | `retriable.go` `New`                                                     | `WithTransport` in options silently drops `ClientConfig.TLS`                                                                                 | security    | LOW      | Needs Approval |
+| P-084 | restserver, gserver                     | `server.go` `NewMux`, `serve.go` `configureHandlers`                     | HTTP metrics miss identity 401s, gserver 429s and gserver CORS preflights                                                                    | correctness | LOW      | Needs Approval |
+| P-085 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | `ResponseCapture` hides `io.ReaderFrom`, disabling the sendfile path                                                                         | performance | LOW      | Open           |
 
 ## Details
 
@@ -125,21 +124,6 @@ byte-exact test.
   gRPC client IP extraction reject untrusted or malformed forwarding data;
   URL schemes accept only trusted `http` or `https` values.
 
-### P-023 Metric label cardinality
-
-- Evidence: `HTTPReqPerf.MeasureSince(start, method, status, r.URL.Path)` uses the raw path; only 404s collapse to `unknown`.
-- Fix: label with the matched route template or add a path-normalizer option.
-
-### P-024 `ResponseCapture` lacks `Unwrap`/`Hijack`
-
-- Evidence: implements only `Header/Write/WriteHeader/Flush`; inserted twice in every chain.
-- Impact: WebSocket upgrades and `http.ResponseController` deadlines are impossible behind restserver.
-- Fix: add `Unwrap() http.ResponseWriter`; make `Flush` conditional on the delegate.
-
-### P-031 Granularity divide by zero
-
-- Fix: clamp to `max(1, int64(granularity))` in `NewRequestLogger`.
-
 ### P-035 Coverage below CI gate
 
 - Evidence: B06 verification (2026-09-28), `go test -coverpkg=./... -coverprofile=<file> ./...` followed by `go tool cover -func=<file>`, measured 83.5% total; CI `MIN_TESTCOV` is 90. This remains queued in B24.
@@ -164,9 +148,20 @@ byte-exact test.
 - Impact: a caller that combines a TLS config file with a custom transport trusts more CAs than configured, without an error.
 - Fix (needs a decision): apply `cfg.TLS` to the final transport after the options unless an option called `WithTLS` (failing closed on a non-`*http.Transport`), or return an error when an option replaces the transport of a config with `TLS`.
 
+### P-084 Responses produced outside the metrics handler are not counted
+
+- Evidence: found by the B17 review (2026-09-29). `telemetry.NewRequestMetrics` sits inside `identity.NewContextHandler` in both servers, and in `gserver` also inside the CORS handler and the rate limiter. An identity mapper error (for example `restserver` `Test_Authz` `must_have_TLS`, 401), a `gserver` rate-limit 429 and a `gserver` CORS preflight are answered before the metrics handler runs, so `http_requests_perf` and `http_requests_role` never count them. `restserver` counts its preflights (CORS is inside metrics there), so the two servers differ.
+- Impact: dashboards miss authentication failures and throttling, which are the responses an operator most wants to see.
+- Fix (needs a decision): move the metrics handler outside identity, CORS and the rate limiter and carry the role back to it (for example in a per-request holder like the route holder, set by `identity.NewContextHandler`), because `NewContextHandler` stores the identity on a new request that an outer handler never sees, so without that every request would be labelled `guest`; or add a separate counter for responses produced before the metrics handler.
+
+### P-085 `ResponseCapture` hides `io.ReaderFrom`
+
+- Evidence: found by the B17 review (2026-09-29). `ResponseCapture` does not implement `io.ReaderFrom`, so `io.Copy` into a response (for example `http.ServeContent` and `http.FileServer`) behind `restserver` or `gserver` uses a buffered copy instead of `*http.response`'s `ReadFrom` (sendfile on Linux, for plaintext listeners only; TLS connections have no sendfile path). Two captures sit in every chain.
+- Fix: add `ReadFrom(src io.Reader) (int64, error)` that counts the bytes and delegates to the delegate's `io.ReaderFrom` when it has one, else `io.Copy` with a writer that only exposes `Write`.
+
 ## Notes on items needing approval
 
 - P-013: changes observable auth behavior; tests assert the current strings.
-- P-023: changes metric label semantics for dashboards.
 - P-073, P-074: public type behavior or config surface.
 - P-083: changes which TLS configuration wins, or rejects a combination that is accepted today.
+- P-084: changes which responses the HTTP metrics count and the `role` label of rejected requests.
