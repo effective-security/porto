@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -104,6 +105,60 @@ func TestAWSIdentityCachesSuccess(t *testing.T) {
 		assert.Equal(t, testAWSArn, id.Claims()["aws_arn"])
 	}
 	assert.Equal(t, int32(1), sts.calls.Load())
+}
+
+// TestAWSIdentitySuccessExpires runs in a synctest bubble, which also checks
+// that New starts no goroutine that outlives the provider's use: synctest.Test
+// panics with "blocked goroutines remain" when one is left (the cleanup
+// goroutine of the expirable LRU used before, formerly P-086), which fails
+// the whole test binary.
+func TestAWSIdentitySuccessExpires(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		sts := &stsTransport{respond: stsResponse(http.StatusOK, testAWSBody)}
+		p := newAWSProvider(t, sts)
+		token, _ := awsToken("expiring")
+		lookup := func() {
+			t.Helper()
+			id, err := p.awsIdentity(t.Context(), token, awsTokenType)
+			require.NoError(t, err)
+			assert.Equal(t, "deployer", id.Role())
+		}
+
+		lookup()
+		time.Sleep(tcredentials.CacheTTL - time.Second)
+		lookup()
+		assert.Equal(t, int32(1), sts.calls.Load(), "a success is cached for CacheTTL")
+
+		time.Sleep(2 * time.Second)
+		lookup()
+		assert.Equal(t, int32(2), sts.calls.Load(), "an expired success makes a new lookup")
+		lookup()
+		assert.Equal(t, int32(2), sts.calls.Load(), "the new lookup is cached")
+	})
+}
+
+// TestAWSIdentitySuccessWithoutTTL checks that a CacheTTL that is not
+// positive keeps successes until they are evicted, as the expirable LRU did.
+func TestAWSIdentitySuccessWithoutTTL(t *testing.T) {
+	t.Parallel()
+
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		sts := &stsTransport{respond: stsResponse(http.StatusOK, testAWSBody)}
+		p := newAWSProvider(t, sts)
+		p.awsTTL = ttl
+		token, presignedURL := awsToken("no-ttl")
+		for range 3 {
+			id, err := p.awsIdentity(t.Context(), token, awsTokenType)
+			require.NoError(t, err)
+			assert.Equal(t, "deployer", id.Role())
+		}
+		assert.Equal(t, int32(1), sts.calls.Load(), ttl)
+		s, ok := p.awsCache.Get(presignedURL)
+		require.True(t, ok)
+		assert.True(t, s.expires.IsZero(), ttl)
+	}
 }
 
 func TestAWSIdentityFailureCache(t *testing.T) {

@@ -56,6 +56,9 @@
 // WithDNSServer install modified copies of an *http.Transport; on any other
 // http.RoundTripper they cannot apply their setting, so New and every
 // request return an error until WithTransport replaces the transport.
+// New applies ClientConfig.TLS after the options, so it also applies to a
+// transport set with WithTransport, unless a later WithTLS option sets the
+// TLS configuration.
 //
 // Concurrency: the With*/Add*/Set* methods are synchronized, and a request
 // uses the configuration current when it starts. Direct changes to the

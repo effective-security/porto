@@ -655,9 +655,9 @@ func Test_Authz(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get(header.XCorrelationID))
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 
-		// The identity mapper error is answered outside the metrics
-		// handler, so nothing is recorded (FINDINGS P-084).
-		assertRecorded(t, before, map[string]int{})
+		// The identity mapper error is answered inside the outer metrics
+		// handler, before the role is known: counted as guest.
+		assertRecorded(t, before, request("verb=GET;status=401;uri=unknown", "guest"))
 	})
 
 	server, _ := startServer(true, identityMapperFromCN)

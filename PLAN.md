@@ -257,11 +257,12 @@ relative keys without a leading slash that round-trip through `Get`:
 cache providers skip names that no key maps to and list the key `""` only
 for an empty pattern. The memory provider ports the Redis matcher (`*` and
 `?` match `/`; ranges compare unsigned bytes, so ranges mixing bytes
->= 0x80 with ASCII can differ from Redis builds with signed `char`), skips
-expired entries and returns an empty, non-nil slice. Callers that parsed
-prefixed names from memory or proxy `Keys`, or the leading `/` from Redis
-`Keys` under a prefix without a trailing slash, must use the relative keys;
-data written through escaping `..` keys is no longer reachable by them.
+
+> = 0x80 with ASCII can differ from Redis builds with signed `char`), skips
+> expired entries and returns an empty, non-nil slice. Callers that parsed
+> prefixed names from memory or proxy `Keys`, or the leading `/` from Redis
+> `Keys` under a prefix without a trailing slash, must use the relative keys;
+> data written through escaping `..` keys is no longer reachable by them.
 
 ## Completed B15 decision — TLS listener and policy
 
@@ -552,13 +553,77 @@ Migration: rename the CloudWatch `awsendpoint`/`AwsEndpoint` key to
 `aws_endpoint`; delete `add_tags`/`replace_tags`; remove insecure and
 TLS 1.3 names from `cipher_suites`.
 
-| Batch                                      | Priority | Scope and intended result                                                                                                                                                                                                                                             | Findings                                                                    | Decision                                              |
-| ------------------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| B24 — Coverage gate                        | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until total coverage exceeds the 90% CI gate.                                                                                                                                   | P-035                                                                       | None                                                  |
-| B27 — Retriable TLS config precedence      | P3       | `pkg/retriable`: keep `ClientConfig.TLS` when an option replaces the transport in `New`, or reject the combination.                                                                                                                                                   | P-083                                                                       | TLS/transport precedence                              |
-| B28 — HTTP metrics coverage                | P3       | `restserver`, `gserver`, `restserver/telemetry`: count responses produced before the metrics handler (identity 401, rate-limit 429, gserver preflights) and keep the `io.ReaderFrom` fast path through `ResponseCapture`.                                             | P-084, P-085                                                                | Metric coverage and `role` label                      |
-| B29 — Roles provider lifetime              | P3       | `gserver/roles`: stop leaking the successful-lookup cache goroutine per `New`, without an API change if possible.                                                                                                                                                     | P-086                                                                       | None                                                  |
-| B30 — Retriable refresh panic              | P3       | `pkg/retriable`: release caller-identity refresh waiters when the provider panics.                                                                                                                                                                                    | P-087                                                                       | None                                                  |
+## Completed B27, B28, B29 and B30 decision — client TLS precedence, HTTP metrics coverage, provider and refresh lifetimes
+
+B27 (P-083, user decision: apply `ClientConfig.TLS` last). `retriable.New`
+applies `ClientConfig.TLS` with `WithTLS` after the options, to the
+transport they leave, so `New(cfg, WithTransport(t))` uses a clone of `t`
+with the configured certificate and trusted CA; the supplied transport is
+not changed. A `WithTLS` option takes precedence only when no later
+`WithTransport` replaced it (`Client.tlsSet`, set by `WithTLS` and cleared
+by `WithTransport`), so the final transport always carries a TLS
+configuration when the config has one. A `WithTransport` transport that is
+not an `*http.Transport` makes `New` fail closed with the existing
+`unable to apply TLS configuration: transport is <type>, not
+*http.Transport`. Options now run before the TLS files are applied, which
+does not change the result of `WithDNSServer` (the clone keeps both).
+
+B28 (P-084, user decision: outermost metrics with a nested role handoff,
+guest role; P-085). Both servers place `telemetry.NewRequestMetrics`
+outside `identity.NewContextHandler` (in `gserver` also outside CORS) and a
+second one inside it. A `NewRequestMetrics` that finds the label holder of
+an enclosing one records nothing and stores the role of its request's
+identity there (`identity.FromContext`), so every request is recorded once,
+by the outermost handler, with the mapped role; this also ends the double
+count of nested metrics handlers, and adds no API. Responses produced
+before the identity is known (identity mapper 401s in both servers,
+`gserver` CORS preflights) are counted with the guest role and
+`uri="unknown"`. The `gserver` rate limiter answers a rejection through
+its own `NewRequestMetrics` handler, so its 429s (guest, `unknown`) are
+counted too, including those of gRPC and gRPC-Web calls on TLS listeners,
+which reach the limiter before `grpcHandlerFunc`; responses of the gRPC
+server itself stay outside the HTTP metrics. The explicit
+`headers_ip_lookups` variant now calls `tollbooth.LimitByRequest` instead
+of `tollbooth.LimitHandler`, with the same response. `ResponseCapture`
+implements `io.ReaderFrom`: it counts the bytes and calls the delegate's
+`ReadFrom` when it has one, else copies through its `Write`, and returns
+the delegate's error unwrapped like `Write`. Serving an 8 MiB file with
+`http.ServeFile` through the telemetry chain on a plain TCP server
+(`BenchmarkResponseCapture_ServeFile`, 6 runs of 200 requests, 16 cores)
+went from about 3.3 GB/s and 41 KB/op to about 4.8 GB/s and 8.9 KB/op.
+Migration: HTTP metrics now include identity 401s, `gserver` preflights and
+429s; custom mux factories that nest `NewRequestMetrics` get one sample per
+request, and need a `NewRequestMetrics` on each side of the identity
+handler to count its rejections.
+
+B29 (P-086). `gserver/roles` keeps successful STS lookups in a plain
+100-entry `lru.Cache` with a per-entry expiry (`CacheTTL` read by `New`,
+checked on read, like the failure cache), instead of an expirable LRU whose
+cleanup goroutine was never stopped. `New` starts no goroutine, so
+`IdentityProvider` needs no `Close` and the API is unchanged; an expired
+entry stays until it is replaced or evicted. `TestAWSIdentitySuccessExpires`
+runs in a `testing/synctest` bubble, which fails on the old cache ("blocked
+goroutines remain").
+
+B30 (P-087). `retriable` `callerToken` completes its refresh in
+`leadRefresh`/`finishRefresh`, as `gserver/credentials` does since B19: a
+panicking provider releases the waiting requests with
+`caller identity provider panicked`, the panic continues on the request
+that made the call, and the next request calls the provider again.
+
+The review found that B29 turned a `CacheTTL` that is not positive into "no
+caching" (the expirable LRU never expired such entries); successes are now
+kept without expiry then, as before. It also found that
+`WithTransport((*http.Transport)(nil))` combined with `ClientConfig.TLS`
+now panicked in `New` (previously at the first request); `WithTransport`
+now treats a nil `*http.Transport` as nil, selecting `http.DefaultTransport`.
+The response of a panicking REST handler is still not counted by the HTTP
+metrics; that predates B28 and is recorded as P-091 (B31).
+
+| Batch               | Priority | Scope and intended result                                                                                                          | Findings | Decision |
+| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
+| B24 — Coverage gate | P3       | Module tests: add behavior-focused tests for the untested packages and affected paths until each package coverage exceeds the 90%. | P-035    | None     |
+| B31 — Panic metrics | P3       | `restserver/telemetry`, `gserver`: count the response of a panicking REST handler (500) in the HTTP metrics and let the panic continue. | P-091    | None     |
 
 ## Execution rules
 

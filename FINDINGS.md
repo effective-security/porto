@@ -37,19 +37,14 @@ byte-exact test.
 
 ## Index
 
-| ID    | Package                                 | Location                                                                 | Title                                                                                                                                        | Type        | Severity | Status         |
-| ----- | --------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------- | -------------- |
-| P-001 | (module)                                | `go.mod` `google.golang.org/grpc v1.84.0`                                | GO-2026-6443: gRPC server panic via missing authority/Host headers                                                                           | security    | HIGH     | Fixed          |
-| P-007 | gserver                                 | `serve.go` `configureRateLimiter`                                        | Rate limiter keys on client-controlled `X-Forwarded-For` by default                                                                          | security    | MEDIUM   | Fixed          |
-| P-017 | xhttp/identity                          | `realip.go` `ClientIPFromRequest`                                        | Returns "" when `X-Forwarded-For` holds only private addresses                                                                               | bug         | MEDIUM   | Fixed          |
-| P-018 | xhttp/identity, restserver              | `realip.go`, `ctx.go`, `server.go` `GetServerURL`                        | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client                                                                  | security    | MEDIUM   | Fixed          |
-| P-035 | (module)                                | `.github/workflows/unittest.yml`, `coverage.out`                         | Total coverage 83.5% is below the 90% CI gate                                                                                                | docs        | LOW      | Open           |
-| P-076 | gserver                                 | `serve.go` `serveCtx.grpcHandlerFunc`                                    | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`                                                                  | correctness | LOW      | Open           |
-| P-083 | pkg/retriable                           | `retriable.go` `New`                                                     | `WithTransport` in options silently drops `ClientConfig.TLS`                                                                                 | security    | LOW      | Needs Approval |
-| P-084 | restserver, gserver                     | `server.go` `NewMux`, `serve.go` `configureHandlers`                     | HTTP metrics miss identity 401s, gserver 429s and gserver CORS preflights                                                                    | correctness | LOW      | Needs Approval |
-| P-085 | restserver/telemetry                    | `response_capture.go` `ResponseCapture`                                  | `ResponseCapture` hides `io.ReaderFrom`, disabling the sendfile path                                                                         | performance | LOW      | Open           |
-| P-086 | gserver/roles                           | `roles.go` `New`                                                         | Each `New` leaks the `awsCache` cleanup goroutine; `IdentityProvider` has no `Close`                                                         | performance | LOW      | Open           |
-| P-087 | pkg/retriable                           | `retriable.go` `Client.callerToken`                                      | A panicking `CallerIdentity` leaves the token refresh pending forever                                                                        | bug         | LOW      | Open           |
+| ID    | Package                       | Location                                           | Title                                                                       | Type        | Severity | Status |
+| ----- | ----------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------- | ----------- | -------- | ------ |
+| P-007 | gserver                       | `serve.go` `configureRateLimiter`                  | Rate limiter keys on client-controlled `X-Forwarded-For` by default         | security    | MEDIUM   | Fixed  |
+| P-017 | xhttp/identity                | `realip.go` `ClientIPFromRequest`                  | Returns "" when `X-Forwarded-For` holds only private addresses              | bug         | MEDIUM   | Fixed  |
+| P-018 | xhttp/identity, restserver    | `realip.go`, `ctx.go`, `server.go` `GetServerURL`  | `X-Forwarded-For`, `X-Real-Ip`, `X-Forwarded-Proto` trusted from any client | security    | MEDIUM   | Fixed  |
+| P-035 | (module)                      | `.github/workflows/unittest.yml`, `coverage.out`   | Total coverage 83.5% is below the 90% CI gate                               | docs        | LOW      | Open   |
+| P-076 | gserver                       | `serve.go` `serveCtx.grpcHandlerFunc`              | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0` | correctness | LOW      | Open   |
+| P-091 | gserver, restserver/telemetry | `serve.go` `grpcHandlerFunc`, `request_metrics.go` | A panicking REST handler is never counted by the HTTP metrics               | correctness | LOW      | Open   |
 
 ## Details
 
@@ -102,36 +97,8 @@ byte-exact test.
 - Impact: a client that refuses gzip still gets a gzip-encoded gRPC-Web body.
 - Fix: export the negotiation from `xhttp/marshal` (for example `marshal.AcceptsGzip(http.Header)`) and call it here; `gserver` may import `xhttp/*`.
 
-### P-083 `WithTransport` option drops `ClientConfig.TLS`
+### P-091 Panicking REST handlers are not counted
 
-- Evidence: found by the B16 review (2026-09-29). `New` applies `cfg.TLS` as a `WithTLS` option before the caller's options, so `New(ClientConfig{TLS: ...}, WithTransport(t))` returns no error and a client whose transport has none of the configured TLS settings: the configured trusted CA silently becomes the system roots and the client certificate is not sent. The B16 fail-closed rule covers only `WithTLS`/`WithDNSServer` applied to a non-`*http.Transport`.
-- Impact: a caller that combines a TLS config file with a custom transport trusts more CAs than configured, without an error.
-- Fix (needs a decision): apply `cfg.TLS` to the final transport after the options unless an option called `WithTLS` (failing closed on a non-`*http.Transport`), or return an error when an option replaces the transport of a config with `TLS`.
-
-### P-084 Responses produced outside the metrics handler are not counted
-
-- Evidence: found by the B17 review (2026-09-29). `telemetry.NewRequestMetrics` sits inside `identity.NewContextHandler` in both servers, and in `gserver` also inside the CORS handler and the rate limiter. An identity mapper error (for example `restserver` `Test_Authz` `must_have_TLS`, 401), a `gserver` rate-limit 429 and a `gserver` CORS preflight are answered before the metrics handler runs, so `http_requests_perf` and `http_requests_role` never count them. `restserver` counts its preflights (CORS is inside metrics there), so the two servers differ.
-- Impact: dashboards miss authentication failures and throttling, which are the responses an operator most wants to see.
-- Fix (needs a decision): move the metrics handler outside identity, CORS and the rate limiter and carry the role back to it (for example in a per-request holder like the route holder, set by `identity.NewContextHandler`), because `NewContextHandler` stores the identity on a new request that an outer handler never sees, so without that every request would be labelled `guest`; or add a separate counter for responses produced before the metrics handler.
-
-### P-085 `ResponseCapture` hides `io.ReaderFrom`
-
-- Evidence: found by the B17 review (2026-09-29). `ResponseCapture` does not implement `io.ReaderFrom`, so `io.Copy` into a response (for example `http.ServeContent` and `http.FileServer`) behind `restserver` or `gserver` uses a buffered copy instead of `*http.response`'s `ReadFrom` (sendfile on Linux, for plaintext listeners only; TLS connections have no sendfile path). Two captures sit in every chain.
-- Fix: add `ReadFrom(src io.Reader) (int64, error)` that counts the bytes and delegates to the delegate's `io.ReaderFrom` when it has one, else `io.Copy` with a writer that only exposes `Write`.
-
-### P-086 `roles.New` leaks an LRU cleanup goroutine
-
-- Evidence: found by the B19 review (2026-09-30). `expirable.NewLRU` with a TTL starts a goroutine that runs until the cache's done channel is closed, and golang-lru v2 never closes it. `IdentityProvider` has no `Close`, so every `roles.New` call (one per `gserver.Start`) keeps that goroutine and the cache for the life of the process.
-- Impact: processes that create providers repeatedly (tests, restarts of embedded servers) accumulate goroutines and cached identities.
-- Fix: keep the successful lookups in an `lru.Cache` with a per-entry expiry, as `awsFailures` does since B19, or add `Close` to `IdentityProvider`.
-
-### P-087 `retriable` token refresh wedged by a provider panic
-
-- Evidence: found by the B19 review (2026-09-30). `Client.callerToken` sets `c.refresh` before calling `GetCallerIdentity` and clears it and closes `done` only on a normal return. When the provider panics and the caller recovers (a request made from an HTTP or gRPC handler), `c.refresh` stays set, and every later request waits on it until its context ends.
-- Impact: after one recovered provider panic, every request of the client fails with its context error (or hangs without a deadline) until `WithCallerIdentity` is called again.
-- Fix: complete the refresh in a `defer`, releasing the waiters with an error and letting the panic continue, as `gserver/credentials` `leadRefresh` does since B19.
-
-## Notes on items needing approval
-
-- P-083: changes which TLS configuration wins, or rejects a combination that is accepted today.
-- P-084: changes which responses the HTTP metrics count and the `role` label of rejected requests.
+- Evidence: found by the B28 review (2026-09-30). `telemetry.NewRequestMetrics` records after the wrapped handler returns, not in a `defer`, so a panic skips the recording. On `gserver` TLS listeners the recover in `grpcHandlerFunc` answers the REST request with 500 outside `configureHandlers`, and the response is not counted (a scratch test with a panicking route got a 500 and no metrics); on `restserver` and the `gserver` plaintext listener, net/http recovers the panic and aborts the connection, which is not counted either.
+- Impact: dashboards miss the 500s of crashing handlers, like the early responses P-084 fixed.
+- Fix: record in a `defer` of the outermost `NewRequestMetrics` and let the panic continue: a status of 500 when nothing was written yet (or the captured status), skipping `http.ErrAbortHandler`, which is a deliberate abort.

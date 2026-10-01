@@ -440,6 +440,205 @@ func TestCallerIdentityRefreshAfterFirstCallerCanceled(t *testing.T) {
 	assert.Equal(t, int32(2), identity.calls.Load())
 }
 
+type panickingIdentity struct {
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (ci *panickingIdentity) GetCallerIdentity(context.Context) (*credentials.Token, error) {
+	if ci.calls.Add(1) == 1 {
+		close(ci.started)
+		<-ci.release
+		panic("provider panic")
+	}
+	return &credentials.Token{
+		TokenType:   "Bearer",
+		AccessToken: "test-token",
+	}, nil
+}
+
+// TestCallerIdentityRefreshProviderPanic checks that a panicking provider
+// releases the requests waiting for its refresh (formerly P-087).
+func TestCallerIdentityRefreshProviderPanic(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer test-token", r.Header.Get(header.Authorization))
+	}))
+	defer server.Close()
+	identity := &panickingIdentity{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(identity.release) }) }
+	defer release()
+	client, err := New(ClientConfig{}, WithCallerIdentity(identity))
+	require.NoError(t, err)
+	send := func(ctx context.Context) error {
+		req := httptest.NewRequest(http.MethodGet, server.URL+"/", nil).WithContext(ctx)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	}
+
+	recovered := make(chan any, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		_ = send(context.Background())
+	}()
+	<-identity.started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	waiterCtx := &doneSignalContext{Context: ctx, entered: make(chan struct{})}
+	waiterResult := make(chan error, 1)
+	go func() { waiterResult <- send(waiterCtx) }()
+	select {
+	case <-waiterCtx.entered:
+	case <-ctx.Done():
+		t.Fatal("waiter did not reach the refresh wait")
+	}
+	release()
+
+	assert.Equal(t, "provider panic", <-recovered, "the panic must continue on the leading request")
+	err = <-waiterResult
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, "caller identity provider panicked", err.Error())
+
+	// the next request makes a new call instead of waiting for the lost one
+	require.NoError(t, send(ctx))
+	assert.Equal(t, int32(2), identity.calls.Load())
+}
+
+// TestCallerIdentityRefreshSupersededByPanic replaces the provider while
+// the old one refreshes, then lets the old one panic: the panic must not
+// release or overwrite the refresh of the new provider.
+func TestCallerIdentityRefreshSupersededByPanic(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, r.Header.Get(header.Authorization))
+	}))
+	defer server.Close()
+	old := &panickingIdentity{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(old.release) }) }
+	defer release()
+	client, err := New(ClientConfig{}, WithCallerIdentity(old))
+	require.NoError(t, err)
+	send := func() error {
+		req := httptest.NewRequest(http.MethodGet, server.URL+"/", nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	}
+
+	recovered := make(chan any, 1)
+	go func() {
+		defer func() { recovered <- recover() }()
+		_ = send()
+	}()
+	<-old.started
+
+	replacement := &countingIdentity{}
+	client.WithCallerIdentity(replacement)
+	require.NoError(t, send())
+	release()
+	assert.Equal(t, "provider panic", <-recovered)
+
+	require.NoError(t, send())
+	assert.Equal(t, int32(1), replacement.calls.Load())
+	assert.Equal(t, int32(1), old.calls.Load())
+	client.lock.RLock()
+	assert.Nil(t, client.refresh)
+	assert.Equal(t, "test-token", client.token.AccessToken)
+	client.lock.RUnlock()
+	mu.Lock()
+	assert.Equal(t, []string{"Bearer test-token", "Bearer test-token"}, seen)
+	mu.Unlock()
+}
+
+// tokenIdentity returns its token.
+type tokenIdentity struct {
+	token string
+	calls atomic.Int32
+}
+
+func (ci *tokenIdentity) GetCallerIdentity(context.Context) (*credentials.Token, error) {
+	ci.calls.Add(1)
+	return &credentials.Token{
+		TokenType:   "Bearer",
+		AccessToken: ci.token,
+	}, nil
+}
+
+// TestCallerIdentityRefreshSuperseded replaces the provider while the old
+// one refreshes: the old provider's token is discarded, also for the request
+// that called it, which uses the new provider's token.
+func TestCallerIdentityRefreshSuperseded(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		seen = append(seen, r.Header.Get(header.Authorization))
+	}))
+	defer server.Close()
+	old := &blockingIdentity{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(old.release) }) }
+	defer release()
+	client, err := New(ClientConfig{}, WithCallerIdentity(old))
+	require.NoError(t, err)
+	send := func() error {
+		req := httptest.NewRequest(http.MethodGet, server.URL+"/", nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	}
+
+	leaderResult := make(chan error, 1)
+	go func() { leaderResult <- send() }()
+	<-old.started
+
+	replacement := &tokenIdentity{token: "new-token"}
+	client.WithCallerIdentity(replacement)
+	require.NoError(t, send())
+	release()
+	require.NoError(t, <-leaderResult)
+
+	assert.Equal(t, int32(1), old.calls.Load())
+	assert.Equal(t, int32(1), replacement.calls.Load())
+	client.lock.RLock()
+	assert.Nil(t, client.refresh)
+	assert.Equal(t, "new-token", client.token.AccessToken)
+	client.lock.RUnlock()
+	mu.Lock()
+	assert.Equal(t, []string{"Bearer new-token", "Bearer new-token"}, seen)
+	mu.Unlock()
+}
+
 func TestClientConcurrentHeaders(t *testing.T) {
 	t.Parallel()
 

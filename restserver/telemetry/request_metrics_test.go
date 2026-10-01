@@ -145,25 +145,58 @@ func Test_RequestMetrics(t *testing.T) {
 func Test_RequestMetricsNested(t *testing.T) {
 	im := newInmemMetrics(t)
 
-	// Both metrics handlers share one route holder, so the outer one also
-	// sees the route recorded behind the inner one; the last SetRoute wins.
+	// Both metrics handlers share one label holder, so the outer one sees
+	// the route recorded behind the inner one (the last SetRoute wins) and
+	// the role of the identity the inner one saw; only the outer records.
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		SetRoute(r.Context(), "/api/*rest")
 		SetRoute(r.Context(), usersRoute)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	rm := NewRequestMetrics(NewRequestMetrics(h))
+	withRole := func(role string, next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, identity.WithTestIdentity(r, identity.NewIdentity(role, "user", "", nil, "", "", identity.MethodNone)))
+		})
+	}
+	// identity rejects requests to /denied before the inner handler
+	reject := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/denied") {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	rm := NewRequestMetrics(reject(withRole("admin", NewRequestMetrics(h))))
 
-	w := httptest.NewRecorder()
-	rm.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/users/1", nil))
-	require.Equal(t, http.StatusNoContent, w.Code)
+	serve := func(h http.Handler, r *http.Request, status int) {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		require.Equal(t, status, w.Code)
+	}
+	serve(rm, httptest.NewRequest(http.MethodDelete, "/api/users/1", nil), http.StatusNoContent)
+	serve(rm, httptest.NewRequest(http.MethodGet, "/denied", nil), http.StatusUnauthorized)
+	// an identity outside the outer handler labels requests that never
+	// reach the inner one
+	serve(withRole("client", rm), httptest.NewRequest(http.MethodGet, "/denied", nil), http.StatusUnauthorized)
+	// an empty role reported by the inner handler is kept
+	serve(NewRequestMetrics(withRole("", NewRequestMetrics(h))),
+		httptest.NewRequest(http.MethodDelete, "/api/users/2", nil), http.StatusNoContent)
+	// three levels: the innermost role wins
+	serve(NewRequestMetrics(withRole("client", NewRequestMetrics(withRole("admin", NewRequestMetrics(h))))),
+		httptest.NewRequest(http.MethodDelete, "/api/users/3", nil), http.StatusNoContent)
 
 	samples, counters := metricCounts(im)
 	assert.Equal(t, map[string]int{
-		"test_http_requests_perf;verb=DELETE;status=204;uri=/users/:id": 2,
+		"test_http_requests_perf;verb=DELETE;status=204;uri=/users/:id": 3,
+		"test_http_requests_perf;verb=GET;status=401;uri=unknown":       2,
 	}, samples)
 	assert.Equal(t, map[string]int{
-		"test_http_requests_role;verb=DELETE;status=204;uri=/users/:id;role=guest": 2,
+		"test_http_requests_role;verb=DELETE;status=204;uri=/users/:id;role=admin": 2,
+		"test_http_requests_role;verb=DELETE;status=204;uri=/users/:id;role=":      1,
+		"test_http_requests_role;verb=GET;status=401;uri=unknown;role=guest":       1,
+		"test_http_requests_role;verb=GET;status=401;uri=unknown;role=client":      1,
 	}, counters)
 }
 
@@ -219,5 +252,5 @@ func Test_SetRouteWithoutMetrics(t *testing.T) {
 	assert.NotPanics(t, func() {
 		SetRoute(r.Context(), usersRoute)
 	})
-	assert.Nil(t, r.Context().Value(routeKey{}))
+	assert.Nil(t, r.Context().Value(labelsKey{}))
 }

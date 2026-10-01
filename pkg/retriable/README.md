@@ -125,8 +125,13 @@ other `http.RoundTripper` they cannot apply their setting: `New` returns the
 error, and after `New` every request fails with it until `WithTransport`
 replaces the transport. When a transport the client created is replaced, its
 idle connections are closed; a transport passed to `WithTransport` is never
-closed by the client. Note that a `WithTransport` option passed to `New`
-replaces the transport built from `ClientConfig.TLS` (FINDINGS P-083).
+closed by the client.
+
+`New` applies `ClientConfig.TLS` after the options, to the transport they
+leave, so `New(cfg, WithTransport(t))` uses a clone of `t` with the TLS
+configuration from the files; when `t` is not an `*http.Transport`, `New`
+returns the error. Only a `WithTLS` option that no later `WithTransport`
+replaced takes precedence over `ClientConfig.TLS`.
 
 `RequestURL` derives the host and request URI from the parsed URL and
 rejects URLs without a scheme, opaque URLs (`https:host/path`) and URLs with

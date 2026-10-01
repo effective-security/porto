@@ -2,8 +2,9 @@
 // Service implementations behind a single httprouter-based mux.
 //
 // The server assembles a fixed middleware chain around the router
-// (outermost first): trusted proxy policy, correlation ID, identity
-// mapping, request metrics, request logging, optional CORS (which answers
+// (outermost first): trusted proxy policy, correlation ID, request
+// metrics, identity mapping, a nested metrics handler that reports the
+// caller role to the outer one, request logging, optional CORS (which answers
 // preflights before authorization), optional path/role authorization
 // (restserver/authz), readiness gating (restserver/ready), and finally the
 // router. Custom chains can be supplied via WithMuxFactory; StartHTTP still

@@ -3,6 +3,7 @@ package retriable_test
 import (
 	"context"
 	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -806,6 +807,104 @@ func TestTransportSettersRejectOtherRoundTripper(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assert.Equal(t, int32(1), calls.Load())
+}
+
+// TestConfigTLSWithTransport checks that ClientConfig.TLS is applied to the
+// transport the options leave, including one set by WithTransport
+// (formerly P-083), unless a later WithTLS option sets the TLS configuration.
+func TestConfigTLSWithTransport(t *testing.T) {
+	t.Parallel()
+
+	const errUnknownCA = "certificate signed by unknown authority"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	caPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: server.Certificate().Raw,
+	})
+	require.NoError(t, os.WriteFile(caFile, caPEM, 0o600))
+	cfg := retriable.ClientConfig{
+		Host: server.URL,
+		TLS: &retriable.TLSInfo{
+			TrustedCAFile: caFile,
+		},
+	}
+	get := func(c *retriable.Client) error {
+		var res map[string]any
+		_, _, err := c.Get(context.Background(), "/", &res)
+		return err
+	}
+	var dials atomic.Int32
+	newTransport := func() *http.Transport {
+		return &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dials.Add(1)
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			},
+		}
+	}
+	systemRoots := &tls.Config{MinVersion: tls.VersionTLS12}
+
+	// the configured CA is trusted over a supplied transport, which is
+	// cloned with its other settings and not changed
+	supplied := newTransport()
+	c, err := retriable.New(cfg, retriable.WithTransport(supplied))
+	require.NoError(t, err)
+	require.NoError(t, get(c))
+	assert.Equal(t, int32(1), dials.Load())
+	assert.Nil(t, supplied.TLSClientConfig)
+	tr, ok := c.HTTPClient().Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.NotSame(t, supplied, tr)
+
+	// also after WithDNSServer and for a nil transport
+	c, err = retriable.New(cfg,
+		retriable.WithTransport(newTransport()),
+		retriable.WithDNSServer("127.0.0.1:53"),
+	)
+	require.NoError(t, err)
+	require.NoError(t, get(c))
+	c, err = retriable.New(cfg, retriable.WithTransport(nil))
+	require.NoError(t, err)
+	require.NoError(t, get(c))
+	// a nil *http.Transport selects http.DefaultTransport instead of panicking
+	c, err = retriable.New(cfg, retriable.WithTransport((*http.Transport)(nil)))
+	require.NoError(t, err)
+	require.NoError(t, get(c))
+	c, err = retriable.New(retriable.ClientConfig{Host: server.URL}, retriable.WithTransport((*http.Transport)(nil)))
+	require.NoError(t, err)
+	assert.Nil(t, c.HTTPClient().Transport)
+	require.ErrorContains(t, get(c), errUnknownCA)
+
+	// a WithTLS option after WithTransport takes precedence
+	c, err = retriable.New(cfg,
+		retriable.WithTransport(newTransport()),
+		retriable.WithTLS(systemRoots),
+	)
+	require.NoError(t, err)
+	require.ErrorContains(t, get(c), errUnknownCA)
+	c, err = retriable.New(cfg, retriable.WithTLS(systemRoots))
+	require.NoError(t, err)
+	require.ErrorContains(t, get(c), errUnknownCA)
+
+	// a WithTLS option that a later WithTransport replaced does not
+	c, err = retriable.New(cfg,
+		retriable.WithTLS(systemRoots),
+		retriable.WithTransport(newTransport()),
+	)
+	require.NoError(t, err)
+	require.NoError(t, get(c))
+
+	// another http.RoundTripper cannot take the configuration: fail closed
+	rt := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("unexpected request")
+	})
+	_, err = retriable.New(cfg, retriable.WithTransport(rt))
+	require.EqualError(t, err, "unable to apply TLS configuration: transport is retriable_test.roundTripperFunc, not *http.Transport")
 }
 
 func TestTransportSettersWithoutHTTPDefaultTransport(t *testing.T) {

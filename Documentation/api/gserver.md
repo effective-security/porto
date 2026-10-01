@@ -10,7 +10,7 @@ Package gserver implements a combined gRPC, gRPC\-Web and REST server that liste
 
 A Server is created with Start from a Config, a dig dependency container and a map of ServiceFactory functions. Each factory builds a Service; a Service that also implements RouteRegistrator gets its REST routes registered, and one that implements GRPCRegistrator gets its gRPC services registered. Plain HTTP/1.1 traffic is routed to the REST router, HTTP/2 "application/grpc" traffic to the gRPC server, and "application/grpc\-web\+proto" / "application/grpc\-web\-text" requests are translated to gRPC and their trailers are encoded into the gRPC\-Web response body.
 
-Every request passes through a fixed middleware chain: rate limiting \(optional\), correlation ID, CORS \(optional\), identity extraction \(roles.IdentityProvider built from Config.IdentityMap\), metrics, request logging, authorization \(restserver/authz built from Config.Authz\), and a readiness check. gRPC calls go through the equivalent interceptor chain, prefixed by a panic\-recovery interceptor and NewRequestValidationUnaryInterceptor.
+Every request passes through a fixed middleware chain: rate limiting \(optional; its rejections are counted by the request metrics\), correlation ID, request metrics, CORS \(optional\), identity extraction \(roles.IdentityProvider built from Config.IdentityMap\), a nested metrics handler that reports the caller role, request logging, authorization \(restserver/authz built from Config.Authz\), and a readiness check. gRPC calls go through the equivalent interceptor chain, prefixed by a panic\-recovery interceptor and NewRequestValidationUnaryInterceptor.
 
 Minimal usage:
 
@@ -104,7 +104,7 @@ var (
 ```
 
 <a name="NewRequestValidationUnaryInterceptor"></a>
-## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L747>)
+## func [NewRequestValidationUnaryInterceptor](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L770>)
 
 ```go
 func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor
@@ -836,7 +836,7 @@ func (info *TLSInfo) String() string
 String returns a loggable summary of the TLS file locations; safe on a nil receiver.
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L739-L742>)
+## type [Validator](<https://github.com/effective-security/porto/blob/main/gserver/serve.go#L762-L765>)
 
 Validator is implemented by request messages that can validate themselves; NewRequestValidationUnaryInterceptor calls it before the handler.
 

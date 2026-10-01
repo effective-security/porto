@@ -495,8 +495,10 @@ func (server *HTTPServer) StopHTTP() {
 // NewMux builds the default handler chain: a Router on which every
 // registered service has called Register, wrapped (innermost to outermost)
 // by the ready verifier, the authz handler when set, the CORS middleware
-// when configured, the request logger, request metrics, the identity context
-// handler, the body limiter, correlation ID handler and, outermost,
+// when configured, the request logger, a nested request metrics handler
+// that only reports the caller role, the identity context handler, the
+// request metrics handler that records every response (including identity
+// rejections), the body limiter, correlation ID handler and, outermost,
 // identity.NewTrustedProxyHandler with the WithTrustedProxies policy, which
 // resolves the client IP once for all of them. CORS sits outside authz so
 // that preflights are answered before authorization (they carry no
@@ -540,8 +542,8 @@ func (server *HTTPServer) NewMux() http.Handler {
 		time.Millisecond,
 		logger)
 
-	// metrics wrapper; responses of the identity handler outside it are
-	// not counted (FINDINGS P-084)
+	// reports the caller role to the metrics wrapper outside the identity
+	// handler, and records nothing itself
 	httpHandler = telemetry.NewRequestMetrics(httpHandler)
 
 	// role/contextID wrapper
@@ -550,6 +552,9 @@ func (server *HTTPServer) NewMux() http.Handler {
 	} else {
 		httpHandler = identity.NewContextHandler(httpHandler, identity.GuestIdentityMapper)
 	}
+
+	// metrics wrapper; also counts the identity handler's rejections
+	httpHandler = telemetry.NewRequestMetrics(httpHandler)
 
 	// Bound request bodies, then add correlationID
 	httpHandler = marshal.LimitRequestBody(httpHandler, server.maxRequestBody)
