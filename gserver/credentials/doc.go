@@ -6,8 +6,11 @@
 // The token can be set statically with Bundle.UpdateAuthToken, refreshed on
 // expiry through a CallerIdentity provider (Bundle.WithCallerIdentity, used for
 // AWS STS presigned tokens), and for "DPoP" tokens a proof header is signed per
-// call when a dpop.Signer is supplied with Bundle.WithDPoP. The setters are
-// safe to call while RPCs run, and concurrent RPCs that find the token
+// call when a dpop.Signer is supplied with Bundle.WithDPoP.
+// DPoP proofs bind POST to https://<authority><full method path>, using
+// grpc-go's HTTPS credential audience and the RequestInfo in the RPC context.
+// Missing or invalid audience/method information returns an error.
+// The setters are safe to call while RPCs run, and concurrent RPCs that find the token
 // expired share one provider call.
 //
 //	b := credentials.NewBundle(credentials.Config{TLSConfig: tlsCfg})

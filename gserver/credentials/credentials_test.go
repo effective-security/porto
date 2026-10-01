@@ -14,7 +14,18 @@ import (
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpccredentials "google.golang.org/grpc/credentials"
 )
+
+const (
+	testRPCMethod   = "/porto.test.Echo/Echo"
+	testRPCAudience = "https://api.example:8443/porto.test.Echo"
+	testRPCURI      = "https://api.example:8443" + testRPCMethod
+)
+
+func rpcContext() context.Context {
+	return grpccredentials.NewContextWithRequestInfo(context.Background(), grpccredentials.RequestInfo{Method: testRPCMethod})
+}
 
 func TestOauthAccess(t *testing.T) {
 	perRPS := credentials.NewOauthAccess("1234")
@@ -483,7 +494,7 @@ func TestPerRPCRefreshCopiesExpiry(t *testing.T) {
 	assert.Equal(t, int32(1), provider.calls.Load())
 }
 
-// testSigner returns "<method> <path>" as the DPoP proof, or err.
+// testSigner returns "<method> <URI>" as the DPoP proof, or err.
 type testSigner struct {
 	err error
 }
@@ -492,7 +503,7 @@ func (s testSigner) Sign(_ context.Context, method string, u *url.URL, _ any) (s
 	if s.err != nil {
 		return "", s.err
 	}
-	return method + " " + u.Path, nil
+	return method + " " + u.String(), nil
 }
 
 func (testSigner) JWKThumbprint() string { return "thumbprint" }
@@ -513,7 +524,7 @@ func TestPerRPCDPoP(t *testing.T) {
 			token: credentials.Token{TokenType: "DPoP", AccessToken: "token"},
 			md: map[string]string{
 				credentials.TokenFieldNameGRPC: "DPoP token",
-				"dpop":                         "POST ",
+				"dpop":                         "POST " + testRPCURI,
 			},
 		},
 		{
@@ -536,7 +547,7 @@ func TestPerRPCDPoP(t *testing.T) {
 			b := credentials.NewBundle(credentials.Config{})
 			b.UpdateAuthToken(tc.token)
 			b.WithDPoP(tc.signer)
-			md, err := b.PerRPCCredentials().GetRequestMetadata(context.Background())
+			md, err := b.PerRPCCredentials().GetRequestMetadata(rpcContext(), testRPCAudience)
 			if tc.err != "" {
 				require.EqualError(t, err, tc.err)
 				assert.ErrorIs(t, err, errSign)
@@ -609,13 +620,14 @@ func TestPerRPCRefreshUsesSignerInstalledByProvider(t *testing.T) {
 				}
 				b.WithCallerIdentity(provider)
 				rc := b.PerRPCCredentials()
+				ctx := rpcContext()
 
 				// the RPC that refreshes and the RPCs that share its result
 				const callers = 4
 				results := make(chan metadataResult, callers)
 				for range callers {
 					go func() {
-						md, err := rc.GetRequestMetadata(context.Background())
+						md, err := rc.GetRequestMetadata(ctx, testRPCAudience)
 						results <- metadataResult{md: md, err: err}
 					}()
 				}
@@ -627,7 +639,7 @@ func TestPerRPCRefreshUsesSignerInstalledByProvider(t *testing.T) {
 					assert.Equal(t, expected, res.md)
 				}
 
-				md, err := rc.GetRequestMetadata(context.Background())
+				md, err := rc.GetRequestMetadata(ctx, testRPCAudience)
 				require.NoError(t, err)
 				assert.Equal(t, expected, md)
 				assert.Equal(t, int32(1), provider.calls.Load())
@@ -650,6 +662,7 @@ func TestPerRPCConcurrentSetters(t *testing.T) {
 	expired := time.Now().Add(-time.Hour)
 	b := credentials.NewBundle(credentials.Config{})
 	rc := b.PerRPCCredentials()
+	ctx := rpcContext()
 
 	const iterations = 200
 	var wg sync.WaitGroup
@@ -667,7 +680,7 @@ func TestPerRPCConcurrentSetters(t *testing.T) {
 	for range 4 {
 		wg.Go(func() {
 			for range iterations {
-				_, err := rc.GetRequestMetadata(context.Background())
+				_, err := rc.GetRequestMetadata(ctx, testRPCAudience)
 				assert.NoError(t, err)
 			}
 		})

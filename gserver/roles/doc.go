@@ -11,6 +11,10 @@
 // subject, tenant and claims; unauthenticated requests receive the guest
 // identity.
 //
+// For gRPC, DPoP proofs sign POST with an absolute htu of
+// https://<incoming :authority><full method path>. Relative-path proofs
+// fail authentication. A proxy must preserve that authority and method path.
+//
 // The provider is wired into gserver via Config.IdentityMap, but can be used
 // directly with xhttp/identity:
 //

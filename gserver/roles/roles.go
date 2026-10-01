@@ -65,6 +65,13 @@ const (
 	bearerTokenType = "Bearer"
 	dpopTokenType   = "DPoP"
 
+	// schemeHTTPS is the scheme assumed for DPoP proof URIs and required for
+	// STS presigned URLs.
+	schemeHTTPS = "https"
+	// authorityDelimiters are the URI delimiters that cannot appear in a
+	// host[:port] authority.
+	authorityDelimiters = "/?#@"
+
 	// awsCacheSize bounds the successful and the failed STS lookup caches.
 	awsCacheSize = 100
 	// awsFailureTTL is how long an STS rejection of a presigned URL is
@@ -91,7 +98,8 @@ type IdentityProvider interface {
 	// carries credentials for an enabled method.
 	ApplicableForContext(ctx context.Context) bool
 	// IdentityFromContext returns the identity of the gRPC caller for the
-	// given method URI (used to verify DPoP proofs), or the guest identity.
+	// given full method path, or the guest identity. DPoP proofs must name
+	// POST https://<incoming :authority><full method path>.
 	IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error)
 }
 
@@ -354,7 +362,7 @@ func (p *provider) IdentityFromRequest(r *http.Request) (identity.Identity, erro
 		phdr := r.Header.Get(dpop.HTTPHeader)
 		u := r.URL
 		coreURL := url.URL{
-			Scheme: cmp.Or(u.Scheme, "https"),
+			Scheme: cmp.Or(u.Scheme, schemeHTTPS),
 			Host:   cmp.Or(u.Host, r.Host),
 			Path:   u.Path,
 		}
@@ -462,9 +470,11 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		dhdr := md.Get(header.DPoP)
 		if token != "" && p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, dpopTokenType) && len(dhdr) > 0 {
-			// FINDINGS P-092: uri is the relative method path, which
-			// dpop.VerifyClaims rejects.
-			id, err := p.dpopIdentity(ctx, dhdr[0], http.MethodPost, uri, token, dpopTokenType)
+			var id identity.Identity
+			proofURI, err := grpcDPoPURI(md, uri)
+			if err == nil {
+				id, err = p.dpopIdentity(ctx, dhdr[0], http.MethodPost, proofURI, token, dpopTokenType)
+			}
 			if err == nil {
 				return id, nil
 			} else if p.config.Strict {
@@ -611,6 +621,31 @@ func checkCSRF(headerToken, cookieToken string) error {
 		return errors.New("CSRF token mismatch")
 	}
 	return nil
+}
+
+// grpcDPoPURI returns the URI a gRPC DPoP proof must name in htu:
+// https://<incoming :authority><full method path>. :authority arrives
+// escaped (grpc-go sends an IPv6 zone as %25), so it is parsed, as the
+// client parses grpc-go's audience, instead of being copied into
+// url.URL.Host, which would escape it twice. It must be host[:port] only;
+// the method is set as the path after parsing.
+func grpcDPoPURI(md metadata.MD, method string) (string, error) {
+	authority := md.Get(header.Authority)
+	if len(authority) != 1 || authority[0] == "" {
+		return "", errors.New("dpop: exactly one non-empty :authority is required")
+	}
+	if strings.ContainsAny(authority[0], authorityDelimiters) {
+		return "", errors.New("dpop: :authority must be host[:port]")
+	}
+	u, err := url.Parse(schemeHTTPS + "://" + authority[0])
+	if err != nil {
+		return "", errors.WithMessage(err, "dpop: invalid :authority")
+	}
+	if u.Hostname() == "" {
+		return "", errors.New("dpop: authority must contain a hostname")
+	}
+	u.Path = method
+	return u.String(), nil
 }
 
 func (p *provider) dpopIdentity(ctx context.Context, phdr, method, uri string, auth, tokenType string) (identity.Identity, error) {
@@ -934,7 +969,7 @@ func ValidateSTSPresignedURL(presignedURL string) error {
 	if err != nil {
 		return errors.WithMessage(withoutURL(err), "failed to parse presigned URL")
 	}
-	if u.Scheme != "https" {
+	if u.Scheme != schemeHTTPS {
 		return errors.Errorf("presigned URL must use https, got %q", u.Scheme)
 	}
 	if u.User != nil {

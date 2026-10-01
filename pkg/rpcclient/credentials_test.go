@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/retriable"
 	"github.com/effective-security/porto/pkg/rpcclient"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xpki/jwt/dpop"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/assert"
@@ -159,22 +159,23 @@ func TestNewSignsDPoPProofWithStoredKey(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 
+	expectedURI := "https://" + srv.clientTLS.ServerName + healthCheckMethod
 	jtis := map[string]bool{}
 	for range 2 {
 		_, err = healthCheck(t.Context(), client.Conn(), "", client.Opts()...)
 		require.NoError(t, err)
 
 		md := srv.lastMD()
+		assert.Equal(t, []string{srv.clientTLS.ServerName}, md.Get(header.Authority))
 		assert.Equal(t, []string{"DPoP bound-token"}, md.Get(authorizationMD))
 		proofs := md.Get(dpopMD)
 		require.Len(t, proofs, 1)
 
 		claims := verifyProof(t, proofs[0], jkt)
 		assert.Equal(t, http.MethodPost, claims.Method)
-		// only the method is checked: gserver/credentials signs the bare
-		// method path as htu, which dpop.VerifyClaims rejects because it
-		// is not an absolute URI (FINDINGS P-092)
-		assert.True(t, strings.HasSuffix(claims.URI, healthCheckMethod), claims.URI)
+		assert.Equal(t, expectedURI, claims.URI)
+		_, err = dpop.VerifyClaims(dpop.VerifyConfig{}, proofs[0], http.MethodPost, expectedURI)
+		require.NoError(t, err)
 		require.NotEmpty(t, claims.ID)
 		assert.False(t, jtis[claims.ID], "proof reused for a second RPC")
 		jtis[claims.ID] = true
