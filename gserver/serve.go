@@ -338,30 +338,47 @@ func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
 	if len(cfg.Metods) > 0 {
 		lmt.SetMethods(cfg.Metods)
 	}
+
+	// reject answers a limited request like tollbooth.LimitHandler, inside
+	// its own metrics handler: the limiter runs before the one of
+	// configureHandlers, so its responses are counted here, with the guest
+	// role and UnknownRoute. On TLS listeners they include gRPC and gRPC-Web
+	// calls, whose other responses the HTTP metrics never see.
+	reject := telemetry.NewRequestMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lmt.ExecOnLimitReached(w, r)
+		if lmt.GetOverrideDefaultResponseWriter() {
+			return
+		}
+		w.Header().Add(header.ContentType, lmt.GetMessageContentType())
+		w.WriteHeader(lmt.GetStatusCode())
+		_, _ = w.Write([]byte(lmt.GetMessage()))
+	}))
+
 	if len(cfg.HeadersIPLookups) > 0 {
 		// Administrator override: tollbooth reads the named headers as sent.
 		lmt.SetIPLookups(cfg.HeadersIPLookups)
-		return tollbooth.LimitHandler(lmt, handler)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if httpErr := tollbooth.LimitByRequest(lmt, w, r); httpErr != nil {
+				reject.ServeHTTP(w, r)
+				return
+			}
+			handler.ServeHTTP(w, r)
+		})
 	}
 
 	// Default: key on the client IP resolved by the trusted proxy policy.
 	// tollbooth reads only RemoteAddr, so it checks a shallow copy whose
 	// RemoteAddr is the bare client IP; tollbooth also echoes that IP in
-	// X-Rate-Limit-Request-Remote-Addr. The handler and the OnLimitReached
-	// callback receive the original request. An empty IP is not limited.
+	// X-Rate-Limit-Request-Remote-Addr. The handler and reject receive the
+	// original request (reject's handler, and so tollbooth's OnLimitReached
+	// callback, which is unused here, sees it with the metrics labels in its
+	// context and the metrics ResponseCapture). An empty IP is not limited.
 	lmt.SetIPLookups([]string{rateLookupRemoteAddr})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limitReq := *r
 		limitReq.RemoteAddr = identity.ClientIPFromRequest(r)
 		if httpErr := tollbooth.LimitByRequest(lmt, w, &limitReq); httpErr != nil {
-			// Same response as tollbooth.LimitHandler.
-			lmt.ExecOnLimitReached(w, r)
-			if lmt.GetOverrideDefaultResponseWriter() {
-				return
-			}
-			w.Header().Add(header.ContentType, lmt.GetMessageContentType())
-			w.WriteHeader(httpErr.StatusCode)
-			_, _ = w.Write([]byte(httpErr.Message))
+			reject.ServeHTTP(w, r)
 			return
 		}
 		handler.ServeHTTP(w, r)
@@ -394,8 +411,8 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	}
 	handler = telemetry.NewRequestLogger(handler, time.Millisecond, logger, opts...)
 
-	// metrics wrapper; responses of the identity, CORS and rate-limit
-	// handlers outside it are not counted (FINDINGS P-084)
+	// reports the caller role to the metrics wrapper outside the identity
+	// handler, and records nothing itself
 	handler = telemetry.NewRequestMetrics(handler)
 
 	// role/contextID wrapper
@@ -405,6 +422,10 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 		logger.KV(xlog.NOTICE, "server", s.name, "CORS", "enabled")
 		handler = corsHandler(s.cfg.CORS, handler)
 	}
+
+	// metrics wrapper; also counts the identity rejections and CORS
+	// preflights (rate-limit rejections are counted by configureRateLimiter)
+	handler = telemetry.NewRequestMetrics(handler)
 
 	// Add correlationID
 	handler = correlation.NewHandler(handler)
@@ -575,6 +596,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// FINDINGS P-091: the 500 of a panicking REST handler is written
+		// here, outside the metrics handler of configureHandlers.
 		defer func() {
 			if rec := recover(); rec != nil {
 				logger.ContextKV(r.Context(), xlog.ERROR,

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bufio"
+	"io"
 	"net"
 	"net/http"
 
@@ -21,9 +22,10 @@ import (
 // and Hijack return an error wrapping http.ErrNotSupported (Hijack does on
 // HTTP/2), so asserting http.Hijacker does not prove that hijacking works.
 // Status and size cover only what is written through the ResponseCapture,
-// not what a handler writes to a hijacked connection. It does not
-// implement io.ReaderFrom, so io.Copy into it cannot use sendfile
-// (FINDINGS P-085).
+// not what a handler writes to a hijacked connection. ResponseCapture
+// implements io.ReaderFrom, so io.Copy into it (http.ServeContent,
+// http.FileServer) keeps the delegate's ReadFrom, which uses sendfile for
+// files on plain TCP connections.
 type ResponseCapture struct {
 	statusCode int
 	bodySize   uint64
@@ -64,6 +66,22 @@ func (r *ResponseCapture) Header() http.Header {
 func (r *ResponseCapture) Write(data []byte) (int, error) {
 	r.bodySize += uint64(len(data))
 	return r.delegate.Write(data)
+}
+
+// ReadFrom copies src to the response, as io.ReaderFrom, and counts the
+// bytes copied. It calls the delegate's ReadFrom when the delegate
+// implements io.ReaderFrom, and copies through its Write otherwise; like
+// Write, it returns the delegate's error as is.
+func (r *ResponseCapture) ReadFrom(src io.Reader) (int64, error) {
+	var n int64
+	var err error
+	if rf, ok := r.delegate.(io.ReaderFrom); ok {
+		n, err = rf.ReadFrom(src)
+	} else {
+		n, err = io.Copy(r.delegate, src)
+	}
+	r.bodySize += uint64(n)
+	return n, err
 }
 
 // WriteHeader sets the HTTP status code of the response

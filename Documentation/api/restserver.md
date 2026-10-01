@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/restserver"
 
 Package restserver provides an HTTP/HTTPS REST server that hosts a set of Service implementations behind a single httprouter\-based mux.
 
-The server assembles a fixed middleware chain around the router \(outermost first\): trusted proxy policy, correlation ID, identity mapping, request metrics, request logging, optional CORS \(which answers preflights before authorization\), optional path/role authorization \(restserver/authz\), readiness gating \(restserver/ready\), and finally the router. Custom chains can be supplied via WithMuxFactory; StartHTTP still applies the trusted proxy policy around them, and they must keep CORS outside authz themselves.
+The server assembles a fixed middleware chain around the router \(outermost first\): trusted proxy policy, correlation ID, request metrics, identity mapping, a nested metrics handler that reports the caller role to the outer one, request logging, optional CORS \(which answers preflights before authorization\), optional path/role authorization \(restserver/authz\), readiness gating \(restserver/ready\), and finally the router. Custom chains can be supplied via WithMuxFactory; StartHTTP still applies the trusted proxy policy around them, and they must keep CORS outside authz themselves.
 
 By default the socket peer supplies the client IP and scheme. WithTrustedProxies accepts forwarding headers from the proxies in a policy built with identity.ParseTrustedProxies; the client IP is resolved once per request by identity.NewTrustedProxyHandler.
 
@@ -139,7 +139,7 @@ func GetPort(bindAddr string) string
 GetPort returns the port from an HTTP bind address \("host:port" or ":port"\), or "443" when the address has no port, including a bare IPv6 literal.
 
 <a name="GetServerBaseURL"></a>
-## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L603>)
+## func [GetServerBaseURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L608>)
 
 ```go
 func GetServerBaseURL(s Server) *url.URL
@@ -148,7 +148,7 @@ func GetServerBaseURL(s Server) *url.URL
 GetServerBaseURL returns scheme://host:port for the server's own bind address, without consulting any request headers. IPv6 hosts are bracketed.
 
 <a name="GetServerURL"></a>
-## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L579>)
+## func [GetServerURL](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L584>)
 
 ```go
 func GetServerURL(s Server, r *http.Request, relativeEndpoint string) *url.URL
@@ -305,13 +305,13 @@ func (server *HTTPServer) Name() string
 Name returns the configured server name \(Config.GetServerName\).
 
 <a name="HTTPServer.NewMux"></a>
-### func \(\*HTTPServer\) [NewMux](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L507>)
+### func \(\*HTTPServer\) [NewMux](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L509>)
 
 ```go
 func (server *HTTPServer) NewMux() http.Handler
 ```
 
-NewMux builds the default handler chain: a Router on which every registered service has called Register, wrapped \(innermost to outermost\) by the ready verifier, the authz handler when set, the CORS middleware when configured, the request logger, request metrics, the identity context handler, the body limiter, correlation ID handler and, outermost, identity.NewTrustedProxyHandler with the WithTrustedProxies policy, which resolves the client IP once for all of them. CORS sits outside authz so that preflights are answered before authorization \(they carry no credentials\) and denied responses carry CORS headers; with OptionsPassthrough, OPTIONS requests are authorized like any other. It is called by StartHTTP through the MuxFactory; call it directly only in tests. It panics via the logger if the authz handler cannot be created.
+NewMux builds the default handler chain: a Router on which every registered service has called Register, wrapped \(innermost to outermost\) by the ready verifier, the authz handler when set, the CORS middleware when configured, the request logger, a nested request metrics handler that only reports the caller role, the identity context handler, the request metrics handler that records every response \(including identity rejections\), the body limiter, correlation ID handler and, outermost, identity.NewTrustedProxyHandler with the WithTrustedProxies policy, which resolves the client IP once for all of them. CORS sits outside authz so that preflights are answered before authorization \(they carry no credentials\) and denied responses carry CORS headers; with OptionsPassthrough, OPTIONS requests are authorized like any other. It is called by StartHTTP through the MuxFactory; call it directly only in tests. It panics via the logger if the authz handler cannot be created.
 
 <a name="HTTPServer.OnEvent"></a>
 ### func \(\*HTTPServer\) [OnEvent](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L262>)
@@ -350,7 +350,7 @@ func (server *HTTPServer) PublicURL() string
 PublicURL returns the configured public URL \(Config.GetPublicURL\).
 
 <a name="HTTPServer.ServeHTTP"></a>
-### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L567>)
+### func \(\*HTTPServer\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/server.go#L572>)
 
 ```go
 func (server *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request)

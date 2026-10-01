@@ -4,38 +4,53 @@ import (
 	"context"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/effective-security/porto/xhttp/identity"
 )
 
-// routeKey is the context key of the *route that NewRequestMetrics attaches
-// to each request.
-type routeKey struct{}
+// labelsKey is the context key of the *requestLabels that NewRequestMetrics
+// attaches to each request.
+type labelsKey struct{}
 
-// route holds the pattern of the route that served a request. The router
-// writes it while the handler chain runs, and the metrics handler reads it
-// after the chain returns; the pattern is atomic because a handler may keep
-// running on another goroutine after that (http.TimeoutHandler).
-type route struct {
-	pattern atomic.Pointer[string]
+// requestLabels holds the label values that handlers inside the metrics
+// handler report for a request: the pattern of the route that served it
+// and the caller role seen by a nested NewRequestMetrics. They are written
+// while the handler chain runs and read by the metrics handler after the
+// chain returns; they are atomic because a handler may keep running on
+// another goroutine after that (http.TimeoutHandler).
+type requestLabels struct {
+	route atomic.Pointer[string]
+	role  atomic.Pointer[string]
 }
 
-// withRoute returns r with a route holder in its context and the holder.
-// An existing holder is reused, so nested metrics handlers see the same
-// route.
-func withRoute(r *http.Request) (*http.Request, *route) {
+// withLabels returns r with a label holder in its context, the holder and
+// whether it was created here. An existing holder is reused, so nested
+// metrics handlers share it and only the outermost one records.
+func withLabels(r *http.Request) (*http.Request, *requestLabels, bool) {
 	ctx := r.Context()
-	if rt, ok := ctx.Value(routeKey{}).(*route); ok {
-		return r, rt
+	if l, ok := ctx.Value(labelsKey{}).(*requestLabels); ok {
+		return r, l, false
 	}
-	rt := &route{}
-	return r.WithContext(context.WithValue(ctx, routeKey{}, rt)), rt
+	l := &requestLabels{}
+	return r.WithContext(context.WithValue(ctx, labelsKey{}, l)), l, true
 }
 
-// load returns the recorded pattern, or "" when no route was recorded.
-func (rt *route) load() string {
-	if p := rt.pattern.Load(); p != nil {
+// routePattern returns the recorded route pattern, or "" when no route was
+// recorded.
+func (l *requestLabels) routePattern() string {
+	if p := l.route.Load(); p != nil {
 		return *p
 	}
 	return ""
+}
+
+// callerRole returns the role reported by a nested metrics handler, or the
+// role of the identity in ctx when none was reported.
+func (l *requestLabels) callerRole(ctx context.Context) string {
+	if role := l.role.Load(); role != nil {
+		return *role
+	}
+	return identity.FromContext(ctx).Identity().Role()
 }
 
 // SetRoute records pattern, the registered route template that matched the
@@ -46,7 +61,7 @@ func (rt *route) load() string {
 // registration, never from the request, so that the label stays bounded.
 // The last call wins; without an enclosing NewRequestMetrics it is a no-op.
 func SetRoute(ctx context.Context, pattern string) {
-	if rt, ok := ctx.Value(routeKey{}).(*route); ok {
-		rt.pattern.Store(&pattern)
+	if l, ok := ctx.Value(labelsKey{}).(*requestLabels); ok {
+		l.route.Store(&pattern)
 	}
 }

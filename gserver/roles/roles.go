@@ -29,7 +29,6 @@ import (
 	"github.com/effective-security/xpki/jwt/dpop"
 	"github.com/gigawattio/awsarn"
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -107,13 +106,23 @@ type provider struct {
 
 	// sts is the client for STS lookups; tests replace it.
 	sts *http.Client
-	// awsCache holds successful lookups by presigned URL and awsFailures the
-	// cacheable failures; awsLookups holds the running lookups, guarded by
-	// lookupMu.
-	awsCache    *expirable.LRU[string, *CallerIdentity]
+	// awsCache holds successful lookups by presigned URL for awsTTL (without
+	// expiry when it is not positive, as the expirable LRU used before) and
+	// awsFailures the cacheable failures; awsLookups holds the running
+	// lookups, guarded by lookupMu. Both caches expire entries on read, so
+	// the provider starts no goroutine and needs no Close.
+	awsCache    *lru.Cache[string, awsSuccess]
+	awsTTL      time.Duration
 	awsFailures *lru.Cache[string, awsFailure]
 	lookupMu    sync.Mutex
 	awsLookups  map[string]*awsLookup
+}
+
+// awsSuccess is a cached STS caller identity of a presigned URL, valid until
+// expires, or until evicted when expires is zero.
+type awsSuccess struct {
+	ci      *CallerIdentity
+	expires time.Time
 }
 
 // awsFailure is a cached STS rejection of a presigned URL, valid until expires.
@@ -141,11 +150,14 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 	if config.JWT.Enabled && config.Cookies.Auth != "" && config.Cookies.CSRF == "" {
 		return nil, errors.New("cookies: csrf is required when auth is set")
 	}
+	awsCache, err := lru.New[string, awsSuccess](awsCacheSize)
+	if err != nil {
+		return nil, errors.WithMessage(err, "unable to create AWS cache")
+	}
 	awsFailures, err := lru.New[string, awsFailure](awsCacheSize)
 	if err != nil {
 		return nil, errors.WithMessage(err, "unable to create AWS failure cache")
 	}
-	// FINDINGS P-086: the cleanup goroutine of the expirable awsCache is never stopped.
 	prov := &provider{
 		config:      *config,
 		dpopRoles:   make(map[string]string),
@@ -154,7 +166,8 @@ func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error) {
 		awsRoles:    make(map[string]string),
 		jwt:         jwt,
 		sts:         stsHTTPClient,
-		awsCache:    expirable.NewLRU[string, *CallerIdentity](awsCacheSize, nil, tcredentials.CacheTTL),
+		awsCache:    awsCache,
+		awsTTL:      tcredentials.CacheTTL,
 		awsFailures: awsFailures,
 		awsLookups:  make(map[string]*awsLookup),
 	}
@@ -767,11 +780,12 @@ func (p *provider) leadAWSLookup(ctx context.Context, l *awsLookup, presignedURL
 // cachedAWS returns the cached lookup result for presignedURL; found is
 // false when neither cache holds a current entry.
 func (p *provider) cachedAWS(presignedURL string) (ci *CallerIdentity, found bool, err error) {
-	if ci, ok := p.awsCache.Get(presignedURL); ok {
-		return ci, true, nil
+	now := time.Now()
+	// an expired entry stays until a new lookup replaces it or it is evicted
+	if s, ok := p.awsCache.Get(presignedURL); ok && (s.expires.IsZero() || now.Before(s.expires)) {
+		return s.ci, true, nil
 	}
-	// an expired failure stays until a new lookup replaces it or it is evicted
-	if f, ok := p.awsFailures.Get(presignedURL); ok && time.Now().Before(f.expires) {
+	if f, ok := p.awsFailures.Get(presignedURL); ok && now.Before(f.expires) {
 		return nil, true, errors.WithMessage(f.err, "cached STS lookup failure")
 	}
 	return nil, false, nil
@@ -826,7 +840,11 @@ func (p *provider) lookupAWS(ctx context.Context, presignedURL string, expires *
 		return nil, err
 	}
 	ci.Expires = *expires
-	p.awsCache.Add(presignedURL, ci)
+	s := awsSuccess{ci: ci}
+	if p.awsTTL > 0 {
+		s.expires = time.Now().Add(p.awsTTL)
+	}
+	p.awsCache.Add(presignedURL, s)
 	return ci, nil
 }
 

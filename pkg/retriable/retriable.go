@@ -222,7 +222,8 @@ type Policy struct {
 }
 
 // A ClientOption modifies the default behavior of Client.
-// Options are applied by New after the ClientConfig has been processed.
+// New applies the options after the host and request policy of the
+// ClientConfig, and before its TLS configuration (see New).
 type ClientOption interface {
 	applyOption(*Client)
 }
@@ -269,7 +270,10 @@ func WithTLS(tlsConfig *tls.Config) ClientOption {
 	})
 }
 
-// WithTransport is a ClientOption that specifies HTTP Transport configuration.
+// WithTransport is a ClientOption that specifies HTTP Transport configuration;
+// see Client.WithTransport. When cfg.TLS is set, New applies it (unless a
+// later WithTLS option sets one) to a clone of the transport; New returns
+// an error when that transport is not an *http.Transport.
 //
 //	retriable.New(cfg, retriable.WithTransport(t))
 //
@@ -379,6 +383,10 @@ type Client struct {
 	// or WithDNSServer, so its idle connections are closed when it is
 	// replaced; a transport passed to WithTransport belongs to the caller.
 	ownTransport bool
+	// tlsSet reports that WithTLS configured the current transport;
+	// WithTransport clears it. New applies ClientConfig.TLS only when it is
+	// false after the options.
+	tlsSet bool
 }
 
 type callerTokenRefresh struct {
@@ -393,20 +401,25 @@ func Default(host string) (*Client, error) {
 }
 
 // New creates a Client from cfg and applies opts on top of it.
-// cfg.TLS (if set) is loaded from files and cfg.Request (if set) overrides
-// the RequestTimeout and TotalRetryLimit of DefaultPolicy with its non-zero
-// values (see RequestPolicy).
+// cfg.Request (if set) overrides the RequestTimeout and TotalRetryLimit of
+// DefaultPolicy with its non-zero values (see RequestPolicy).
+// cfg.TLS (if set) is loaded from files and applied with WithTLS after opts,
+// to the transport they leave, so a transport set with WithTransport gets
+// it too; only a WithTLS option that no later WithTransport replaced takes
+// precedence over cfg.TLS.
 // It returns an error when the TLS files cannot be loaded, or when WithTLS
-// or WithDNSServer cannot change the transport: one set by WithTransport,
-// or http.DefaultTransport when none is set, that is not an *http.Transport.
+// (including the one for cfg.TLS) or WithDNSServer cannot change the
+// transport: one set by WithTransport, or http.DefaultTransport when none
+// is set, that is not an *http.Transport.
 func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 	dopts := []ClientOption{
 		WithHost(cfg.Host),
 	}
 
-	// FINDINGS P-083: a WithTransport in opts replaces this TLS config
+	var tlscfg *tls.Config
 	if cfg.TLS != nil {
-		tlscfg, err := tlsconfig.NewClientTLSFromFiles(
+		var err error
+		tlscfg, err = tlsconfig.NewClientTLSFromFiles(
 			cfg.TLS.CertFile,
 			cfg.TLS.KeyFile,
 			cfg.TLS.TrustedCAFile,
@@ -414,7 +427,6 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 		if err != nil {
 			return nil, errors.WithMessagef(err, "failed to load TLS config")
 		}
-		dopts = append(dopts, WithTLS(tlscfg))
 	}
 
 	if cfg.Request != nil {
@@ -437,6 +449,9 @@ func New(cfg ClientConfig, opts ...ClientOption) (*Client, error) {
 
 	for _, opt := range dopts {
 		opt.applyOption(c)
+	}
+	if c.configErr == nil && tlscfg != nil && !c.tlsSet {
+		c.WithTLS(tlscfg)
 	}
 	if c.configErr != nil {
 		return nil, c.configErr
@@ -569,6 +584,7 @@ func (c *Client) WithTLS(tlsConfig *tls.Config) *Client {
 	}
 	tr.TLSClientConfig = tlsConfig
 	c.replaceTransport(tr, true)
+	c.tlsSet = true
 	return c
 }
 
@@ -616,11 +632,21 @@ func (c *Client) transportClone(setting string) (*http.Transport, error) {
 // Call it before WithTLS or WithDNSServer, which install modified copies of
 // an *http.Transport. The idle connections of a transport that WithTLS or
 // WithDNSServer created are closed; the caller's transport is left as is.
+// In New, ClientConfig.TLS is applied after the options, so a transport set
+// by a WithTransport option is replaced by a clone with that TLS
+// configuration unless a later WithTLS option sets one (see New).
+// A nil transport, including a nil *http.Transport, selects
+// http.DefaultTransport.
 func (c *Client) WithTransport(transport http.RoundTripper) *Client {
+	if tr, ok := transport.(*http.Transport); ok && tr == nil {
+		// a typed nil would panic in Clone and in RoundTrip
+		transport = nil
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.replaceTransport(transport, false)
 	c.configErr = nil
+	c.tlsSet = false
 	return c
 }
 
@@ -966,6 +992,12 @@ func (c *Client) convertRequest(req *http.Request) (*Request, dpop.Signer, error
 	return r, signer, nil
 }
 
+// callerToken returns the caller identity token for a request, refreshing
+// it when it is missing or expired; the bool is false when no provider is
+// set. Concurrent requests share one refresh, made with the context of the
+// request that started it; a waiter returns its own context error if that
+// ends first, and makes the next call when the shared one failed with a
+// context error or WithCallerIdentity replaced the provider meanwhile.
 func (c *Client) callerToken(ctx context.Context) (credentials.Token, bool, error) {
 	for {
 		c.lock.RLock()
@@ -1016,37 +1048,67 @@ func (c *Client) callerToken(ctx context.Context) (credentials.Token, bool, erro
 		c.refresh = refresh
 		c.lock.Unlock()
 
-		// FINDINGS P-087: a panic in GetCallerIdentity leaves c.refresh set.
-		fresh, err := provider.GetCallerIdentity(ctx)
-		if err != nil {
-			err = errors.WithMessage(err, "unable to get caller identity")
-		} else if fresh == nil {
-			err = errors.New("caller identity returned no token")
-		} else {
-			token = *fresh
-			if fresh.Expires != nil {
-				expires := *fresh.Expires
-				token.Expires = &expires
-			}
-		}
-
-		c.lock.Lock()
-		if c.refresh != refresh {
-			c.lock.Unlock()
+		token, current, err := c.leadRefresh(ctx, provider, refresh)
+		if !current {
 			continue
 		}
-		if err == nil {
-			c.token = token
-		}
-		refresh.err = err
-		c.refresh = nil
-		close(refresh.done)
-		c.lock.Unlock()
 		if err != nil {
 			return credentials.Token{}, true, err
 		}
 		return token, true, nil
 	}
+}
+
+// leadRefresh makes the provider call of refresh and publishes its result
+// to the waiters. current is false when WithCallerIdentity superseded
+// refresh and the result was discarded. If the provider panics or calls
+// runtime.Goexit, the waiters are released with an error and the panic (or
+// Goexit) continues.
+func (c *Client) leadRefresh(ctx context.Context, provider credentials.CallerIdentity, refresh *callerTokenRefresh) (token credentials.Token, current bool, err error) {
+	panicked := true
+	defer func() {
+		if panicked {
+			c.finishRefresh(refresh, credentials.Token{}, errors.New("caller identity provider panicked"))
+		}
+	}()
+	token, err = fetchCallerToken(ctx, provider)
+	panicked = false
+	return token, c.finishRefresh(refresh, token, err), err
+}
+
+// finishRefresh stores the result of refresh and wakes its waiters. It
+// reports false, and changes nothing, when refresh was superseded.
+func (c *Client) finishRefresh(refresh *callerTokenRefresh, token credentials.Token, err error) bool {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if c.refresh != refresh {
+		return false
+	}
+	if err == nil {
+		c.token = token
+	}
+	refresh.err = err
+	c.refresh = nil
+	close(refresh.done)
+	return true
+}
+
+// fetchCallerToken calls provider and returns a copy of its token, so a
+// provider that keeps the pointer cannot change the stored token.
+func fetchCallerToken(ctx context.Context, provider credentials.CallerIdentity) (credentials.Token, error) {
+	fresh, err := provider.GetCallerIdentity(ctx)
+	if err != nil {
+		return credentials.Token{}, errors.WithMessage(err, "unable to get caller identity")
+	}
+	if fresh == nil {
+		return credentials.Token{}, errors.New("caller identity returned no token")
+	}
+	token := *fresh
+	if fresh.Expires != nil {
+		expires := *fresh.Expires
+		token.Expires = &expires
+	}
+	return token, nil
 }
 
 func callerTokenValid(token credentials.Token) bool {

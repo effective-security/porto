@@ -13,9 +13,9 @@ import (
 const (
 	// UnknownRoute is the uri label of requests without a recorded route:
 	// unmatched paths and requests answered before or instead of a route
-	// handler inside the metrics handler (authz denials, readiness, the
-	// restserver CORS preflights, the router's own 405, OPTIONS and
-	// redirect responses) or by middleware that does not call SetRoute.
+	// handler (identity rejections, rate limits, CORS preflights, authz
+	// denials, readiness, the router's own 405, OPTIONS and redirect
+	// responses) or by middleware that does not call SetRoute.
 	UnknownRoute = "unknown"
 	// OtherMethod is the verb label of requests whose method is not one of
 	// the standard net/http methods, as in the OpenTelemetry HTTP semantic
@@ -31,14 +31,28 @@ type requestMetrics struct {
 
 // NewRequestMetrics wraps h so that every request records
 // metricskey.HTTPReqPerf (latency) and metricskey.HTTPReqByRole (count)
-// labelled by method, status code, route and caller role (from
-// identity.FromRequest). No label value is copied from the request, so
-// callers cannot create unbounded series: the uri label is the route
-// template recorded with SetRoute (the restserver Router records its
-// registered path, for example "/v1/users/:id"), or UnknownRoute when no
-// route was recorded; the verb label is the request method when it is a
-// standard net/http method, or OtherMethod; the role label is whatever the
-// identity mapper returned, so it is bounded only if the mapper's roles are.
+// labelled by method, status code, route and caller role. No label value
+// is copied from the request, so callers cannot create unbounded series:
+// the uri label is the route template recorded with SetRoute (the
+// restserver Router records its registered path, for example
+// "/v1/users/:id"), or UnknownRoute when no route was recorded; the verb
+// label is the request method when it is a standard net/http method, or
+// OtherMethod; the role label is whatever the identity mapper returned, so
+// it is bounded only if the mapper's roles are.
+//
+// A NewRequestMetrics nested inside another records nothing: it reports
+// the role of the identity in its request (see identity.FromContext) to
+// the enclosing one, which records the request once. Place one outside
+// identity.NewContextHandler, so that its rejections are counted, and one
+// inside it for the role:
+//
+//	h = telemetry.NewRequestMetrics(h) // reports the role
+//	h = identity.NewContextHandler(h, mapper)
+//	h = telemetry.NewRequestMetrics(h) // records every response
+//
+// Without a nested handler, or when the request never reached it, the role
+// is the one of the identity in the outer request, which is the guest role
+// when none was stored.
 func NewRequestMetrics(h http.Handler) http.Handler {
 	rm := requestMetrics{
 		handler:       h,
@@ -77,15 +91,24 @@ func methodLabel(method string) string {
 }
 
 func (rm *requestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, labels, outer := withLabels(r)
+	if !outer {
+		// the enclosing metrics handler records the request with this role
+		role := identity.FromContext(r.Context()).Identity().Role()
+		labels.role.Store(&role)
+		rm.handler.ServeHTTP(w, r)
+		return
+	}
+
 	start := time.Now()
-	r, rt := withRoute(r)
 	rc := NewResponseCapture(w)
+	// FINDINGS P-091: a panic in the handler skips the recording.
 	rm.handler.ServeHTTP(rc, r)
 
-	role := identity.FromRequest(r).Identity().Role()
+	role := labels.callerRole(r.Context())
 	method := methodLabel(r.Method)
 	status := rm.statusCode(rc.StatusCode())
-	uri := cmp.Or(rt.load(), UnknownRoute)
+	uri := cmp.Or(labels.routePattern(), UnknownRoute)
 
 	metricskey.HTTPReqPerf.MeasureSince(start, method, status, uri)
 	metricskey.HTTPReqByRole.IncrCounter(1, method, status, uri, role)

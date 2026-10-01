@@ -12,11 +12,13 @@
 // trailers are encoded into the gRPC-Web response body.
 //
 // Every request passes through a fixed middleware chain: rate limiting
-// (optional), correlation ID, CORS (optional), identity extraction
-// (roles.IdentityProvider built from Config.IdentityMap), metrics, request
-// logging, authorization (restserver/authz built from Config.Authz), and a
-// readiness check. gRPC calls go through the equivalent interceptor chain,
-// prefixed by a panic-recovery interceptor and NewRequestValidationUnaryInterceptor.
+// (optional; its rejections are counted by the request metrics), correlation
+// ID, request metrics, CORS (optional), identity extraction
+// (roles.IdentityProvider built from Config.IdentityMap), a nested metrics
+// handler that reports the caller role, request logging, authorization
+// (restserver/authz built from Config.Authz), and a readiness check. gRPC
+// calls go through the equivalent interceptor chain, prefixed by a
+// panic-recovery interceptor and NewRequestValidationUnaryInterceptor.
 //
 // Minimal usage:
 //
