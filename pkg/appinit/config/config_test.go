@@ -28,7 +28,7 @@ func TestCloudWatchAwsEndpointKey(t *testing.T) {
 			expected: endpoint,
 		},
 		{
-			// The untagged field used the encoders' default keys before v0.41.
+			// The untagged field used the encoders' default keys before v1.0.
 			name: "legacy keys",
 			yaml: "awsendpoint: " + endpoint,
 			json: `{"AwsEndpoint":"` + endpoint + `"}`,
