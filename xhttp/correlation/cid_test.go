@@ -9,6 +9,7 @@ import (
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -184,3 +185,55 @@ func TestCorrelationIDHandler(t *testing.T) {
 		assert.Equal(t, "1234jsehdrlc", cid)
 	})
 }
+
+// TestInterceptorsRecoverPanics checks that both gRPC interceptors give the
+// handler a correlation ID and turn a handler panic into an error instead
+// of letting it reach the server. FINDINGS P-098: the error is a plain
+// error, which clients receive as codes.Unknown.
+func TestInterceptorsRecoverPanics(t *testing.T) {
+	t.Parallel()
+	const incomingID = "panic-test-1" // IDSize characters, kept whole
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(header.XCorrelationID, incomingID))
+
+	t.Run("unary", func(t *testing.T) {
+		t.Parallel()
+		unary := NewAuthUnaryInterceptor()
+		info := &grpc.UnaryServerInfo{FullMethod: "/test.Service/Panic"}
+		var seen string
+		var res any
+		var err error
+		require.NotPanics(t, func() {
+			res, err = unary(ctx, "req", info, func(ctx context.Context, _ any) (any, error) {
+				seen = ID(ctx)
+				panic("boom")
+			})
+		})
+		assert.Equal(t, incomingID, seen)
+		assert.Nil(t, res)
+		assert.EqualError(t, err, "unhandled exception")
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		t.Parallel()
+		stream := NewStreamServerInterceptor()
+		info := &grpc.StreamServerInfo{FullMethod: "/test.Service/PanicStream"}
+		var seen string
+		var err error
+		require.NotPanics(t, func() {
+			err = stream(nil, ctxStream{ctx: ctx}, info, func(_ any, ss grpc.ServerStream) error {
+				seen = ID(ss.Context())
+				panic("boom")
+			})
+		})
+		assert.Equal(t, incomingID, seen)
+		assert.EqualError(t, err, "unhandled exception")
+	})
+}
+
+// ctxStream is a grpc.ServerStream that only provides a context.
+type ctxStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (s ctxStream) Context() context.Context { return s.ctx }

@@ -53,6 +53,13 @@ type requestMetrics struct {
 // Without a nested handler, or when the request never reached it, the role
 // is the one of the identity in the outer request, which is the guest role
 // when none was stored.
+//
+// A request whose handler panics is recorded too, with the status already
+// sent (see ResponseCapture) or 500 when none was; the panic, including
+// http.ErrAbortHandler, is not recovered and continues to the server.
+// net/http then aborts the response, so the client of a handler that
+// panicked before sending a status sees no 500; gserver TLS listeners
+// answer it with 500.
 func NewRequestMetrics(h http.Handler) http.Handler {
 	rm := requestMetrics{
 		handler:       h,
@@ -102,14 +109,25 @@ func (rm *requestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	rc := NewResponseCapture(w)
-	// FINDINGS P-091: a panic in the handler skips the recording.
+	returned := false
+	// Deferred so that a panicking handler is counted too; the panic is not
+	// recovered and continues to the server.
+	defer func() {
+		statusCode := rc.StatusCode()
+		if !returned && !rc.wroteHeader {
+			// the handler panicked, or called runtime.Goexit, before
+			// sending a status
+			statusCode = http.StatusInternalServerError
+		}
+
+		role := labels.callerRole(r.Context())
+		method := methodLabel(r.Method)
+		status := rm.statusCode(statusCode)
+		uri := cmp.Or(labels.routePattern(), UnknownRoute)
+
+		metricskey.HTTPReqPerf.MeasureSince(start, method, status, uri)
+		metricskey.HTTPReqByRole.IncrCounter(1, method, status, uri, role)
+	}()
 	rm.handler.ServeHTTP(rc, r)
-
-	role := labels.callerRole(r.Context())
-	method := methodLabel(r.Method)
-	status := rm.statusCode(rc.StatusCode())
-	uri := cmp.Or(labels.routePattern(), UnknownRoute)
-
-	metricskey.HTTPReqPerf.MeasureSince(start, method, status, uri)
-	metricskey.HTTPReqByRole.IncrCounter(1, method, status, uri, role)
+	returned = true
 }

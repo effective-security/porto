@@ -155,6 +155,7 @@ var ErrNotFound = errors.New("not found")
 // IsNotFoundError reports whether err is (or wraps) ErrNotFound, or whose
 // message contains "not found".
 func IsNotFoundError(err error) bool {
+	// FINDINGS P-095: == and the message match are redundant or too broad.
 	return err != nil &&
 		(err == ErrNotFound || errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found"))
 }
@@ -360,6 +361,7 @@ func (c *RedisClient) Get(ctx context.Context, key string, v any) error {
 	err := val.Err()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
+			// FINDINGS P-095: the sentinel is not wrapped.
 			return ErrNotFound
 		}
 		return errors.Wrapf(err, "failed to get key: %s", key)
@@ -575,6 +577,7 @@ func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) erro
 func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bool, error) {
 	val, err := c.Client.SIsMember(ctx, c.Key(key), member).Result()
 	if err != nil {
+		// FINDINGS P-104: %s misformats a non-string member.
 		return false, errors.WithMessagef(err, "unable to check if member %s exists in set %s", member, key)
 	}
 	return val, nil
@@ -683,6 +686,7 @@ func (c *RedisClient) HGet(ctx context.Context, key string, field string) (strin
 	val, err := c.Client.HGet(ctx, c.Key(key), field).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
+			// FINDINGS P-095: the sentinel is not wrapped.
 			return "", ErrNotFound
 		}
 		return "", errors.WithMessagef(err, "unable to get field %s from hash %s", field, key)
@@ -779,6 +783,7 @@ return n
 // if the member exists. The go-redis error is returned unwrapped.
 func (c *RedisClient) ZAdd(ctx context.Context, key string, score float64, member string) error {
 	_, err := c.Client.ZAdd(ctx, c.Key(key), redis.Z{Score: score, Member: member}).Result()
+	// FINDINGS P-104: here and in ZIncrBy, ZRem and ZRemRangeByRank.
 	return err
 }
 

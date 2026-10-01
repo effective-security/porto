@@ -2,6 +2,7 @@ package gserver
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/tests/testutils"
 	"github.com/soheilhy/cmux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -263,5 +265,103 @@ func TestConfigureListenersUsesBackoff(t *testing.T) {
 		assert.IsType(t, &backoffListener{}, sctx.listener, addr)
 		require.NoError(t, sctx.listener.Close())
 		sctx.cancel()
+	}
+}
+
+// TestConfigureListenersSchemes checks how the listen URL schemes select
+// plaintext and TLS serving, the client certificate policy of
+// ClientCertAuth, and the configuration errors.
+func TestConfigureListenersSchemes(t *testing.T) {
+	t.Parallel()
+	required := true
+	requireClientCert := *lifecycleTLS
+	requireClientCert.ClientCertAuth = &required
+	missingCert := *lifecycleTLS
+	missingCert.CertFile = "testdata/missing-cert.pem"
+	addr := testutils.CreateBindAddr("127.0.0.1")
+
+	tests := []struct {
+		name    string
+		urls    []string
+		tls     *TLSInfo
+		wantErr string
+		// wantSecure and wantInsecure are the modes of the single address
+		wantSecure, wantInsecure bool
+		wantClientAuth           tls.ClientAuthType
+	}{
+		{
+			name:    "malformed URL",
+			urls:    []string{"http://[::1"},
+			wantErr: "missing ']' in host",
+		},
+		{
+			name:    "https without TLS",
+			urls:    []string{"https://127.0.0.1:0"},
+			wantErr: "TLS key/cert must be provided for the url https://127.0.0.1:0 with HTTPS scheme",
+		},
+		{
+			name:    "missing certificate",
+			urls:    []string{"https://127.0.0.1:0"},
+			tls:     &missingCert,
+			wantErr: "testdata/missing-cert.pem",
+		},
+		{
+			name:         "plaintext URL with TLS",
+			urls:         []string{"http://127.0.0.1:0"},
+			tls:          lifecycleTLS,
+			wantInsecure: true,
+		},
+		{
+			name:           "no scheme with TLS serves TLS",
+			urls:           []string{"//127.0.0.1:0"},
+			tls:            lifecycleTLS,
+			wantSecure:     true,
+			wantClientAuth: tls.VerifyClientCertIfGiven,
+		},
+		{
+			name:           "plaintext and TLS share an address",
+			urls:           []string{"http://" + addr, "https://" + addr},
+			tls:            lifecycleTLS,
+			wantSecure:     true,
+			wantInsecure:   true,
+			wantClientAuth: tls.VerifyClientCertIfGiven,
+		},
+		{
+			name:           "client certificate required",
+			urls:           []string{"https://127.0.0.1:0"},
+			tls:            &requireClientCert,
+			wantSecure:     true,
+			wantClientAuth: tls.RequireAndVerifyClientCert,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sctxs, tlsInfo, err := configureListeners(&Config{
+				ListenURLs: tt.urls,
+				ServerTLS:  tt.tls,
+			})
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Nil(t, sctxs)
+				assert.Nil(t, tlsInfo)
+				return
+			}
+			require.NoError(t, err)
+			if tlsInfo != nil {
+				defer tlsInfo.Close()
+			}
+			require.Len(t, sctxs, 1)
+			for _, sctx := range sctxs {
+				assert.Equal(t, tt.wantSecure, sctx.secure)
+				assert.Equal(t, tt.wantInsecure, sctx.insecure)
+				require.NoError(t, sctx.listener.Close())
+				sctx.cancel()
+			}
+			if tt.wantSecure {
+				require.NotNil(t, tlsInfo)
+				assert.Equal(t, tt.wantClientAuth, tlsInfo.ClientAuthType)
+			}
+		})
 	}
 }

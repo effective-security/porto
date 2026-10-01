@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -15,8 +16,17 @@ import (
 func ExampleServer() {
 	sigs := make(chan os.Signal, 2)
 
+	// A short temporary directory for the Unix socket (socket paths are
+	// limited to about 104 bytes), and any free port, so the example cannot
+	// collide with other tests; a deployment uses fixed addresses.
+	dir, err := os.MkdirTemp("", "gs")
+	if err != nil {
+		panic("unable to create a socket directory: " + err.Error())
+	}
+	defer os.RemoveAll(dir)
+
 	cfg := &gserver.Config{
-		ListenURLs: []string{"https://127.0.0.1:12345", "unix:///tmp/gserver_test.sock"},
+		ListenURLs: []string{"https://127.0.0.1:0", "unix://" + filepath.Join(dir, "gs.sock")},
 		Services:   []string{"test"},
 		KeepAlive: gserver.KeepAliveCfg{
 			MinTime:  time.Second,

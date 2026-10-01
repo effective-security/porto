@@ -16,7 +16,7 @@ h = identity.NewContextHandler(h, mapper)
 h = telemetry.NewRequestMetrics(h) // records every response
 ```
 
-A NewRequestMetrics nested inside another records nothing and passes the role of its request's identity to the outer one, so the outer handler also counts the responses of the identity handler \(as guest\).
+A NewRequestMetrics nested inside another records nothing and passes the role of its request's identity to the outer one, so the outer handler also counts the responses of the identity handler \(as guest\). The outer handler also records a request whose handler panics, with the status it had sent or 500, and lets the panic continue.
 
 Metrics are emitted through porto/metricskey \(HTTPReqPerf, HTTPReqByRole\) keyed by method, status and route template. The restserver Router records the template of the route it dispatches to with SetRoute; requests without one are labelled UnknownRoute, and non\-standard methods OtherMethod, so no label value is copied from the request. LoggerSkipPath entries are also reused by restserver/authz to suppress access logs; see ShouldSkip.
 
@@ -75,7 +75,7 @@ func NewRequestLogger(handler http.Handler, granularity time.Duration, logger xl
 NewRequestLogger creates a RequestLogger that chains to handler. The logged duration is expressed in units of granularity \(e.g. time.Millisecond\); a zero or negative granularity logs nanoseconds. It panics if handler is nil and returns handler unchanged \(no logging\) if logger is nil. The remote address logged is identity.ClientIPFromRequest, which accepts forwarding headers only from configured trusted proxies.
 
 <a name="NewRequestMetrics"></a>
-## func [NewRequestMetrics](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/request_metrics.go#L56>)
+## func [NewRequestMetrics](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/request_metrics.go#L63>)
 
 ```go
 func NewRequestMetrics(h http.Handler) http.Handler
@@ -92,6 +92,8 @@ h = telemetry.NewRequestMetrics(h) // records every response
 ```
 
 Without a nested handler, or when the request never reached it, the role is the one of the identity in the outer request, which is the guest role when none was stored.
+
+A request whose handler panics is recorded too, with the status already sent \(see ResponseCapture\) or 500 when none was; the panic, including http.ErrAbortHandler, is not recovered and continues to the server. net/http then aborts the response, so the client of a handler that panicked before sending a status sees no 500; gserver TLS listeners answer it with 500.
 
 <a name="SetRoute"></a>
 ## func [SetRoute](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/route.go#L63>)
@@ -162,9 +164,9 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request)
 ServeHTTP implements the http.Handler interface. We wrap the call to the real handler to collect info about the response, and then write out the log line
 
 <a name="ResponseCapture"></a>
-## type [ResponseCapture](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L29-L33>)
+## type [ResponseCapture](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L34-L42>)
 
-ResponseCapture is a net/http.ResponseWriter that delegates everything to the contained delegate, but captures the status code and number of bytes written. The status defaults to 200 until WriteHeader is called.
+ResponseCapture is a net/http.ResponseWriter that delegates everything to the contained delegate, but captures the status code and number of bytes written. The status is the one the response was sent with: the first final status passed to WriteHeader, or 200 when the handler wrote the body, copied a byte of it or flushed first, or wrote nothing. Like net/http, it ignores informational 1xx statuses other than 101 and every WriteHeader after the status was sent; an invalid code \(outside 100\-999\), which net/http rejects with a panic, is not captured.
 
 Unwrap exposes the delegate, so http.ResponseController reaches its optional features \(read and write deadlines, full duplex, flush, hijack\). ResponseCapture also implements http.Flusher, FlushError and http.Hijacker for handlers that assert them directly \(WebSocket upgrades\); they reach the delegate through http.ResponseController. When the delegate chain lacks the feature, Flush is a no\-op, and FlushError and Hijack return an error wrapping http.ErrNotSupported \(Hijack does on HTTP/2\), so asserting http.Hijacker does not prove that hijacking works. Status and size cover only what is written through the ResponseCapture, not what a handler writes to a hijacked connection. ResponseCapture implements io.ReaderFrom, so io.Copy into it \(http.ServeContent, http.FileServer\) keeps the delegate's ReadFrom, which uses sendfile for files on plain TCP connections.
 
@@ -175,7 +177,7 @@ type ResponseCapture struct {
 ```
 
 <a name="NewResponseCapture"></a>
-### func [NewResponseCapture](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L36>)
+### func [NewResponseCapture](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L45>)
 
 ```go
 func NewResponseCapture(w http.ResponseWriter) *ResponseCapture
@@ -184,7 +186,7 @@ func NewResponseCapture(w http.ResponseWriter) *ResponseCapture
 NewResponseCapture returns a new ResponseCapture instance that delegates writes to the supplied ResponseWriter
 
 <a name="ResponseCapture.BodySize"></a>
-### func \(\*ResponseCapture\) [BodySize](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L46>)
+### func \(\*ResponseCapture\) [BodySize](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L59>)
 
 ```go
 func (r *ResponseCapture) BodySize() uint64
@@ -193,7 +195,7 @@ func (r *ResponseCapture) BodySize() uint64
 BodySize returns in bytes the total number of bytes written to the response body so far.
 
 <a name="ResponseCapture.Flush"></a>
-### func \(\*ResponseCapture\) [Flush](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L97>)
+### func \(\*ResponseCapture\) [Flush](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L130>)
 
 ```go
 func (r *ResponseCapture) Flush()
@@ -202,7 +204,7 @@ func (r *ResponseCapture) Flush()
 Flush sends any buffered data to the client when the delegate chain supports flushing. It implements http.Flusher, which cannot report errors, so a failed or unsupported flush is ignored; use FlushError, or http.ResponseController.Flush, which calls it, to see the error.
 
 <a name="ResponseCapture.FlushError"></a>
-### func \(\*ResponseCapture\) [FlushError](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L106>)
+### func \(\*ResponseCapture\) [FlushError](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L139>)
 
 ```go
 func (r *ResponseCapture) FlushError() error
@@ -211,7 +213,7 @@ func (r *ResponseCapture) FlushError() error
 FlushError flushes like Flush and returns the delegate chain's error: an error wrapping http.ErrNotSupported when no writer in the chain can flush, or the write error after the client went away. http.ResponseController.Flush calls it, so streaming handlers see the error through the ResponseCapture.
 
 <a name="ResponseCapture.Header"></a>
-### func \(\*ResponseCapture\) [Header](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L61>)
+### func \(\*ResponseCapture\) [Header](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L74>)
 
 ```go
 func (r *ResponseCapture) Header() http.Header
@@ -220,7 +222,7 @@ func (r *ResponseCapture) Header() http.Header
 Header returns the underlying writers Header instance
 
 <a name="ResponseCapture.Hijack"></a>
-### func \(\*ResponseCapture\) [Hijack](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L116>)
+### func \(\*ResponseCapture\) [Hijack](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L154>)
 
 ```go
 func (r *ResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error)
@@ -229,7 +231,7 @@ func (r *ResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error)
 Hijack lets the caller take over the connection, as http.Hijacker, when the delegate chain supports it \(HTTP/1.x\). Otherwise, for example on HTTP/2, it returns an error wrapping http.ErrNotSupported.
 
 <a name="ResponseCapture.ReadFrom"></a>
-### func \(\*ResponseCapture\) [ReadFrom](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L75>)
+### func \(\*ResponseCapture\) [ReadFrom](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L89>)
 
 ```go
 func (r *ResponseCapture) ReadFrom(src io.Reader) (int64, error)
@@ -238,16 +240,16 @@ func (r *ResponseCapture) ReadFrom(src io.Reader) (int64, error)
 ReadFrom copies src to the response, as io.ReaderFrom, and counts the bytes copied. It calls the delegate's ReadFrom when the delegate implements io.ReaderFrom, and copies through its Write otherwise; like Write, it returns the delegate's error as is.
 
 <a name="ResponseCapture.StatusCode"></a>
-### func \(\*ResponseCapture\) [StatusCode](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L41>)
+### func \(\*ResponseCapture\) [StatusCode](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L54>)
 
 ```go
 func (r *ResponseCapture) StatusCode() int
 ```
 
-StatusCode returns the http status set by the handler.
+StatusCode returns the HTTP status the response was sent with, or 200 when nothing was sent yet.
 
 <a name="ResponseCapture.Unwrap"></a>
-### func \(\*ResponseCapture\) [Unwrap](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L52>)
+### func \(\*ResponseCapture\) [Unwrap](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L65>)
 
 ```go
 func (r *ResponseCapture) Unwrap() http.ResponseWriter
@@ -256,7 +258,7 @@ func (r *ResponseCapture) Unwrap() http.ResponseWriter
 Unwrap returns the delegate ResponseWriter; http.ResponseController uses it to reach the delegate's optional interfaces.
 
 <a name="ResponseCapture.Write"></a>
-### func \(\*ResponseCapture\) [Write](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L66>)
+### func \(\*ResponseCapture\) [Write](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L79>)
 
 ```go
 func (r *ResponseCapture) Write(data []byte) (int, error)
@@ -265,12 +267,12 @@ func (r *ResponseCapture) Write(data []byte) (int, error)
 Write the supplied data to the response \(tracking the number of bytes written as we go\)
 
 <a name="ResponseCapture.WriteHeader"></a>
-### func \(\*ResponseCapture\) [WriteHeader](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L88>)
+### func \(\*ResponseCapture\) [WriteHeader](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L108>)
 
 ```go
 func (r *ResponseCapture) WriteHeader(sc int)
 ```
 
-WriteHeader sets the HTTP status code of the response
+WriteHeader sets the HTTP status code of the response. The captured status changes only on the first final status, as net/http sends only that one.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

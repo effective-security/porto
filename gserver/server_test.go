@@ -2,8 +2,11 @@ package gserver_test
 
 import (
 	"context"
+	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,9 +14,11 @@ import (
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/porto/pkg/retriable"
 	"github.com/effective-security/porto/restserver"
+	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/tests/mockappcontainer"
 	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/porto/xhttp/header"
+	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -212,5 +217,141 @@ func testServiceFactory(server gserver.GServer) any {
 	return func() {
 		svc := &tservice{}
 		server.AddService(svc)
+	}
+}
+
+// stateService is a REST service whose readiness the test controls.
+type stateService struct {
+	ready atomic.Bool
+}
+
+func (s *stateService) Name() string  { return "state" }
+func (s *stateService) IsReady() bool { return s.ready.Load() }
+func (s *stateService) Close()        {}
+
+func (s *stateService) RegisterRoute(r restserver.Router) {
+	r.GET("/status", func(w http.ResponseWriter, _ *http.Request, _ restserver.Params) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+// getJSONError sends a GET request and decodes the httperror response.
+func getJSONError(t *testing.T, url string) (int, *httperror.Error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusBadRequest {
+		return resp.StatusCode, nil
+	}
+	herr := &httperror.Error{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(herr))
+	return resp.StatusCode, herr
+}
+
+// TestServerReadinessAndDiscovery checks that the server is ready only
+// while its services are, answers REST requests with 503 until then and
+// with a JSON 404 for unknown paths, registers its services with the
+// injected discovery, and reports no serve error while serving.
+func TestServerReadinessAndDiscovery(t *testing.T) {
+	t.Parallel()
+	svc := &stateService{}
+	disco := discovery.New()
+	cfg := &gserver.Config{
+		ListenURLs: []string{"http://127.0.0.1:0"},
+		Services:   []string{svc.Name()},
+	}
+	factories := map[string]gserver.ServiceFactory{
+		svc.Name(): func(server gserver.GServer) any {
+			return func() {
+				server.AddService(svc)
+			}
+		},
+	}
+	srv, err := gserver.Start("state", cfg, mockappcontainer.NewBuilder().WithDiscovery(disco).Container(), factories)
+	require.NoError(t, err)
+	defer srv.Close()
+	e := srv.(*gserver.Server)
+	base := "http://" + e.Listeners[0].Addr().String()
+
+	assert.False(t, srv.IsReady())
+	code, herr := getJSONError(t, base+"/status")
+	assert.Equal(t, http.StatusServiceUnavailable, code)
+	require.NotNil(t, herr)
+	assert.Equal(t, httperror.CodeNotReady, herr.Code)
+
+	svc.ready.Store(true)
+	assert.True(t, srv.IsReady())
+	code, herr = getJSONError(t, base+"/status")
+	assert.Equal(t, http.StatusNoContent, code)
+	assert.Nil(t, herr)
+
+	code, herr = getJSONError(t, base+"/v1/missing")
+	assert.Equal(t, http.StatusNotFound, code)
+	require.NotNil(t, herr)
+	assert.Equal(t, httperror.CodeNotFound, herr.Code)
+	assert.Equal(t, "/v1/missing", herr.Message)
+
+	assert.Same(t, disco, e.Discovery())
+	var found gserver.Service
+	require.NoError(t, disco.Find("state", &found))
+	assert.Same(t, svc, found)
+
+	select {
+	case err := <-e.Err():
+		t.Fatalf("unexpected serve error: %v", err)
+	default:
+	}
+}
+
+// TestStartConfigurationErrors checks that Start reports invalid listen
+// URLs and authorization rules, and releases the listener it opened before
+// the failure.
+func TestStartConfigurationErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// listenURLs returns the listen URLs; addr is bound before the failure
+		listenURLs func(addr string) []string
+		authz      *authz.Config
+		wantErr    string
+	}{
+		{
+			name: "unsupported scheme",
+			listenURLs: func(addr string) []string {
+				return []string{"http://" + addr, "ftp://" + addr}
+			},
+			wantErr: `unsupported URL scheme "ftp"`,
+		},
+		{
+			name: "invalid authz rule",
+			listenURLs: func(addr string) []string {
+				return []string{"http://" + addr}
+			},
+			authz:   &authz.Config{Allow: []string{"no-roles"}},
+			wantErr: `not valid Authz allow configuration: "no-roles"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			addr := testutils.CreateBindAddr("127.0.0.1")
+			cfg := &gserver.Config{
+				ListenURLs: tt.listenURLs(addr),
+				Authz:      tt.authz,
+			}
+			container := mockappcontainer.NewBuilder().WithDiscovery(discovery.New()).Container()
+			srv, err := gserver.Start("config-errors", cfg, container, nil)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantErr)
+			assert.Nil(t, srv)
+
+			l, err := net.Listen("tcp", addr)
+			require.NoError(t, err, "Start must release the listener opened before the failure")
+			require.NoError(t, l.Close())
+		})
 	}
 }

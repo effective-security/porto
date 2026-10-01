@@ -402,7 +402,7 @@ if mc != nil {
 - `make docs` regenerates the API reference under `Documentation/api/`.
 - `make all` runs clean, tools, generate and covtest.
 
-CI runs `make build covtest` and requires 90% total coverage. Conventions
+CI runs `make lint` and `make build covtest` and requires more than 90% total coverage. Conventions
 for contributors and agents are in [AGENTS.md](AGENTS.md); known defects
 are tracked in [FINDINGS.md](FINDINGS.md) and larger work in
 [ROADMAP.md](ROADMAP.md).

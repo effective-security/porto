@@ -11,7 +11,12 @@ import (
 
 // ResponseCapture is a net/http.ResponseWriter that delegates everything to
 // the contained delegate, but captures the status code and number of bytes
-// written. The status defaults to 200 until WriteHeader is called.
+// written. The status is the one the response was sent with: the first
+// final status passed to WriteHeader, or 200 when the handler wrote the
+// body, copied a byte of it or flushed first, or wrote nothing. Like
+// net/http, it ignores informational 1xx statuses other than 101 and every
+// WriteHeader after the status was sent; an invalid code (outside
+// 100-999), which net/http rejects with a panic, is not captured.
 //
 // Unwrap exposes the delegate, so http.ResponseController reaches its
 // optional features (read and write deadlines, full duplex, flush, hijack).
@@ -30,14 +35,22 @@ type ResponseCapture struct {
 	statusCode int
 	bodySize   uint64
 	delegate   http.ResponseWriter
+	// wroteHeader reports that the status was sent: by a final WriteHeader,
+	// or as 200 by a Write, a ReadFrom that copied a byte, or a flush
+	// before it.
+	wroteHeader bool
 }
 
 // NewResponseCapture returns a new ResponseCapture instance that delegates writes to the supplied ResponseWriter
 func NewResponseCapture(w http.ResponseWriter) *ResponseCapture {
-	return &ResponseCapture{http.StatusOK, 0, w}
+	return &ResponseCapture{
+		statusCode: http.StatusOK,
+		delegate:   w,
+	}
 }
 
-// StatusCode returns the http status set by the handler.
+// StatusCode returns the HTTP status the response was sent with, or 200
+// when nothing was sent yet.
 func (r *ResponseCapture) StatusCode() int {
 	return r.statusCode
 }
@@ -64,6 +77,7 @@ func (r *ResponseCapture) Header() http.Header {
 
 // Write the supplied data to the response (tracking the number of bytes written as we go)
 func (r *ResponseCapture) Write(data []byte) (int, error) {
+	r.wroteHeader = true
 	r.bodySize += uint64(len(data))
 	return r.delegate.Write(data)
 }
@@ -80,14 +94,33 @@ func (r *ResponseCapture) ReadFrom(src io.Reader) (int64, error) {
 	} else {
 		n, err = io.Copy(r.delegate, src)
 	}
+	if n > 0 {
+		// net/http sends the status with the first byte, not before
+		r.wroteHeader = true
+	}
 	r.bodySize += uint64(n)
 	return n, err
 }
 
-// WriteHeader sets the HTTP status code of the response
+// WriteHeader sets the HTTP status code of the response. The captured
+// status changes only on the first final status, as net/http sends only
+// that one.
 func (r *ResponseCapture) WriteHeader(sc int) {
-	r.statusCode = sc
+	if !r.wroteHeader && isFinalStatus(sc) {
+		r.statusCode = sc
+		r.wroteHeader = true
+	}
 	r.delegate.WriteHeader(sc)
+}
+
+// isFinalStatus reports whether net/http sends sc as the status of the
+// response: a valid code (100-999, net/http panics on others) that is not
+// an informational 1xx other than 101 Switching Protocols.
+func isFinalStatus(sc int) bool {
+	if sc < 100 || sc > 999 {
+		return false
+	}
+	return sc >= 200 || sc == http.StatusSwitchingProtocols
 }
 
 // Flush sends any buffered data to the client when the delegate chain
@@ -104,7 +137,12 @@ func (r *ResponseCapture) Flush() {
 // http.ResponseController.Flush calls it, so streaming handlers see the
 // error through the ResponseCapture.
 func (r *ResponseCapture) FlushError() error {
-	if err := http.NewResponseController(r.delegate).Flush(); err != nil {
+	err := http.NewResponseController(r.delegate).Flush()
+	if !errors.Is(err, http.ErrNotSupported) {
+		// a flush sends the status, 200 unless WriteHeader set one
+		r.wroteHeader = true
+	}
+	if err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

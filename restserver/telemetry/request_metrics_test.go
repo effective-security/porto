@@ -1,13 +1,18 @@
 package telemetry
 
 import (
+	"bytes"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/effective-security/metrics"
 	"github.com/effective-security/porto/xhttp/identity"
@@ -153,11 +158,6 @@ func Test_RequestMetricsNested(t *testing.T) {
 		SetRoute(r.Context(), usersRoute)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	withRole := func(role string, next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, identity.WithTestIdentity(r, identity.NewIdentity(role, "user", "", nil, "", "", identity.MethodNone)))
-		})
-	}
 	// identity rejects requests to /denied before the inner handler
 	reject := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +168,7 @@ func Test_RequestMetricsNested(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
-	rm := NewRequestMetrics(reject(withRole("admin", NewRequestMetrics(h))))
+	rm := NewRequestMetrics(reject(withTestRole("admin", NewRequestMetrics(h))))
 
 	serve := func(h http.Handler, r *http.Request, status int) {
 		w := httptest.NewRecorder()
@@ -179,12 +179,12 @@ func Test_RequestMetricsNested(t *testing.T) {
 	serve(rm, httptest.NewRequest(http.MethodGet, "/denied", nil), http.StatusUnauthorized)
 	// an identity outside the outer handler labels requests that never
 	// reach the inner one
-	serve(withRole("client", rm), httptest.NewRequest(http.MethodGet, "/denied", nil), http.StatusUnauthorized)
+	serve(withTestRole("client", rm), httptest.NewRequest(http.MethodGet, "/denied", nil), http.StatusUnauthorized)
 	// an empty role reported by the inner handler is kept
-	serve(NewRequestMetrics(withRole("", NewRequestMetrics(h))),
+	serve(NewRequestMetrics(withTestRole("", NewRequestMetrics(h))),
 		httptest.NewRequest(http.MethodDelete, "/api/users/2", nil), http.StatusNoContent)
 	// three levels: the innermost role wins
-	serve(NewRequestMetrics(withRole("client", NewRequestMetrics(withRole("admin", NewRequestMetrics(h))))),
+	serve(NewRequestMetrics(withTestRole("client", NewRequestMetrics(withTestRole("admin", NewRequestMetrics(h))))),
 		httptest.NewRequest(http.MethodDelete, "/api/users/3", nil), http.StatusNoContent)
 
 	samples, counters := metricCounts(im)
@@ -253,4 +253,168 @@ func Test_SetRouteWithoutMetrics(t *testing.T) {
 		SetRoute(r.Context(), usersRoute)
 	})
 	assert.Nil(t, r.Context().Value(labelsKey{}))
+}
+
+// Test_RequestMetricsPanic checks that a request whose handler panics is
+// recorded once, with its route and role, and with the status it sent or
+// 500 when it sent none, and that the panic continues unchanged (formerly
+// P-091). http.ErrAbortHandler is counted like any other panic.
+func Test_RequestMetricsPanic(t *testing.T) {
+	im := newInmemMetrics(t)
+
+	errBoom := errors.New("boom")
+	flush := func(w http.ResponseWriter) { w.(http.Flusher).Flush() }
+	tcases := []struct {
+		route  string
+		value  any
+		write  func(w http.ResponseWriter)
+		writer http.ResponseWriter
+	}{
+		{"/none", errBoom, func(http.ResponseWriter) {}, nil},
+		{"/status", errBoom, func(w http.ResponseWriter) { w.WriteHeader(http.StatusAccepted) }, nil},
+		{"/body", "boom", func(w http.ResponseWriter) { _, _ = io.WriteString(w, "partial") }, nil},
+		{"/flush", errBoom, flush, nil},
+		// a flush that no writer in the chain supports sends nothing
+		{"/flush-unsupported", errBoom, flush, plainWriter{http.Header{}}},
+		{"/informational", errBoom, func(w http.ResponseWriter) { w.WriteHeader(http.StatusEarlyHints) }, nil},
+		// net/http (and httptest) panic on an invalid code
+		{"/invalid-status", "invalid WriteHeader code 0", func(w http.ResponseWriter) { w.WriteHeader(0) }, nil},
+		{"/abort", http.ErrAbortHandler, func(http.ResponseWriter) {}, nil},
+		{"/abort-status", http.ErrAbortHandler, func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }, nil},
+	}
+	for _, tc := range tcases {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			SetRoute(r.Context(), tc.route)
+			tc.write(w)
+			panic(tc.value)
+		})
+		// the nested handler reports the role, as in both servers
+		rm := NewRequestMetrics(withTestRole("admin", NewRequestMetrics(h)))
+		w := tc.writer
+		if w == nil {
+			w = httptest.NewRecorder()
+		}
+		assert.PanicsWithValue(t, tc.value, func() {
+			rm.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.route, nil))
+		}, tc.route)
+	}
+
+	// runtime.Goexit also leaves the handler without returning
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		NewRequestMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			SetRoute(r.Context(), "/goexit")
+			runtime.Goexit()
+		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/goexit", nil))
+	}()
+	<-done
+
+	samples, counters := metricCounts(im)
+	assert.Equal(t, map[string]int{
+		"test_http_requests_perf;verb=GET;status=500;uri=/none":              1,
+		"test_http_requests_perf;verb=GET;status=202;uri=/status":            1,
+		"test_http_requests_perf;verb=GET;status=200;uri=/body":              1,
+		"test_http_requests_perf;verb=GET;status=200;uri=/flush":             1,
+		"test_http_requests_perf;verb=GET;status=500;uri=/flush-unsupported": 1,
+		"test_http_requests_perf;verb=GET;status=500;uri=/informational":     1,
+		"test_http_requests_perf;verb=GET;status=500;uri=/invalid-status":    1,
+		"test_http_requests_perf;verb=GET;status=500;uri=/abort":             1,
+		"test_http_requests_perf;verb=GET;status=204;uri=/abort-status":      1,
+		"test_http_requests_perf;verb=GET;status=500;uri=/goexit":            1,
+	}, samples)
+	assert.Equal(t, map[string]int{
+		"test_http_requests_role;verb=GET;status=500;uri=/none;role=admin":              1,
+		"test_http_requests_role;verb=GET;status=202;uri=/status;role=admin":            1,
+		"test_http_requests_role;verb=GET;status=200;uri=/body;role=admin":              1,
+		"test_http_requests_role;verb=GET;status=200;uri=/flush;role=admin":             1,
+		"test_http_requests_role;verb=GET;status=500;uri=/flush-unsupported;role=admin": 1,
+		"test_http_requests_role;verb=GET;status=500;uri=/informational;role=admin":     1,
+		"test_http_requests_role;verb=GET;status=500;uri=/invalid-status;role=admin":    1,
+		"test_http_requests_role;verb=GET;status=500;uri=/abort;role=admin":             1,
+		"test_http_requests_role;verb=GET;status=204;uri=/abort-status;role=admin":      1,
+		"test_http_requests_role;verb=GET;status=500;uri=/goexit;role=guest":            1,
+	}, counters)
+}
+
+// crashHandler panics; Test_RequestMetricsPanicServer finds its name in the
+// stack the server logs.
+func crashHandler(http.ResponseWriter, *http.Request) {
+	panic("crash")
+}
+
+// lockedBuffer is a bytes.Buffer safe for the server's error log and the
+// test reading it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Test_RequestMetricsPanicServer serves panicking handlers with net/http:
+// each request is counted as 500, and the panic still reaches the server,
+// which aborts the response and logs the stack of the panicking handler
+// (silently for http.ErrAbortHandler).
+func Test_RequestMetricsPanicServer(t *testing.T) {
+	im := newInmemMetrics(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/crash", crashHandler)
+	mux.HandleFunc("/abort", func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	})
+	errLog := &lockedBuffer{}
+	srv := httptest.NewUnstartedServer(NewRequestMetrics(mux))
+	srv.Config.ErrorLog = log.New(errLog, "", 0)
+	srv.Start()
+	defer srv.Close()
+
+	// fresh connections, so the client never retries a request
+	client := srv.Client()
+	client.Transport.(*http.Transport).DisableKeepAlives = true
+	for _, path := range []string{"/crash", "/abort"} {
+		res, err := client.Get(srv.URL + path)
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		require.Error(t, err, path)
+	}
+
+	// the server logs the panic before it closes the connection
+	logged := errLog.String()
+	assert.Contains(t, logged, "http: panic serving")
+	assert.Contains(t, logged, "telemetry.crashHandler")
+	assert.NotContains(t, logged, http.ErrAbortHandler.Error())
+
+	_, counters := metricCounts(im)
+	assert.Equal(t, map[string]int{
+		"test_http_requests_role;verb=GET;status=500;uri=unknown;role=guest": 2,
+	}, counters)
+}
+
+// plainWriter is a ResponseWriter without optional interfaces.
+type plainWriter struct {
+	header http.Header
+}
+
+func (w plainWriter) Header() http.Header         { return w.header }
+func (w plainWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (w plainWriter) WriteHeader(int)             {}
+
+// withTestRole serves next with an identity of role.
+func withTestRole(role string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, identity.WithTestIdentity(r, identity.NewIdentity(role, "user", "", nil, "", "", identity.MethodNone)))
+	})
 }

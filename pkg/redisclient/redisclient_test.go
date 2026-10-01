@@ -3,6 +3,7 @@ package redisclient_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -893,6 +894,178 @@ func Test_Redis(t *testing.T) {
 		released, err = client.ReleaseLock(ctx, "key2", token2)
 		require.NoError(t, err)
 		assert.True(t, released)
+	})
+
+	t.Run("ListLengthAndIndex", func(t *testing.T) {
+		const list, empty = "len_index_list", "len_index_empty"
+		t.Cleanup(func() { cleanup(ctx, t, client, list) })
+
+		n, err := client.LLen(ctx, list)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), n, "a missing list is empty")
+
+		require.NoError(t, client.RPush(ctx, list, "a", "b", "c"))
+		n, err = client.LLen(ctx, list)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), n)
+		n, err = rootclient.LLen(ctx, "/test/"+list)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), n, "the list lives under the prefix")
+
+		val, err := client.LIndex(ctx, list, 0)
+		require.NoError(t, err)
+		assert.Equal(t, "a", val)
+		val, err = client.LIndex(ctx, list, -1)
+		require.NoError(t, err)
+		assert.Equal(t, "c", val)
+
+		// an index past the end and a pop from an empty list are a wrapped
+		// redis.Nil, not ErrNotFound
+		val, err = client.LIndex(ctx, list, 3)
+		require.EqualError(t, err, "unable to get index 3 from list len_index_list: redis: nil")
+		assert.ErrorIs(t, err, redis.Nil)
+		assert.False(t, redisclient.IsNotFoundError(err))
+		assert.Empty(t, val)
+
+		val, err = client.LPop(ctx, empty)
+		require.EqualError(t, err, "unable to pop value from list len_index_empty: redis: nil")
+		assert.ErrorIs(t, err, redis.Nil)
+		assert.Empty(t, val)
+		val, err = client.RPop(ctx, empty)
+		require.EqualError(t, err, "unable to pop value from list len_index_empty: redis: nil")
+		assert.ErrorIs(t, err, redis.Nil)
+		assert.Empty(t, val)
+	})
+
+	t.Run("SetIsMember", func(t *testing.T) {
+		const set = "is_member_set"
+		t.Cleanup(func() { cleanup(ctx, t, client, set) })
+
+		ok, err := client.SIsMember(ctx, set, "a")
+		require.NoError(t, err)
+		assert.False(t, ok, "a missing set has no members")
+
+		require.NoError(t, client.SAdd(ctx, set, "a", 1))
+		for _, tc := range []struct {
+			member any
+			want   bool
+		}{
+			{member: "a", want: true},
+			// members are stored as strings
+			{member: 1, want: true},
+			{member: "1", want: true},
+			{member: "b", want: false},
+		} {
+			ok, err = client.SIsMember(ctx, set, tc.member)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, ok, tc.member)
+		}
+	})
+
+	t.Run("HashExistsAndValues", func(t *testing.T) {
+		const hash = "exists_vals_hash"
+		t.Cleanup(func() { cleanup(ctx, t, client, hash) })
+
+		ok, err := client.HExists(ctx, hash, "f1")
+		require.NoError(t, err)
+		assert.False(t, ok)
+		vals, err := client.HVals(ctx, hash)
+		require.NoError(t, err)
+		assert.Empty(t, vals)
+
+		require.NoError(t, client.HSetMany(ctx, hash, map[string]any{
+			"f1": "v1",
+			"f2": 2,
+		}))
+		// an empty map writes nothing
+		require.NoError(t, client.HSetMany(ctx, hash, map[string]any{}))
+
+		ok, err = client.HExists(ctx, hash, "f1")
+		require.NoError(t, err)
+		assert.True(t, ok)
+		ok, err = client.HExists(ctx, hash, "f3")
+		require.NoError(t, err)
+		assert.False(t, ok)
+
+		vals, err = client.HVals(ctx, hash)
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"v1", "2"}, vals)
+		all, err := client.HGetAll(ctx, hash)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"f1": "v1", "f2": "2"}, all)
+
+		_, err = client.HGet(ctx, hash, "f3")
+		assert.ErrorIs(t, err, redisclient.ErrNotFound)
+		assert.True(t, redisclient.IsNotFoundError(err))
+	})
+
+	t.Run("ZRem", func(t *testing.T) {
+		const zset = "zrem_zset"
+		t.Cleanup(func() { cleanup(ctx, t, client, zset) })
+
+		// removing from a missing set is not an error
+		require.NoError(t, client.ZRem(ctx, zset, "a"))
+
+		for i, m := range []string{"a", "b", "c"} {
+			require.NoError(t, client.ZAdd(ctx, zset, float64(i+1), m))
+		}
+		require.NoError(t, client.ZRem(ctx, zset, "a", "c", "missing"))
+
+		members, err := client.ZRevRangeWithScores(ctx, zset, 0, -1)
+		require.NoError(t, err)
+		assert.Equal(t, []redis.Z{{Score: 2, Member: "b"}}, members)
+		card, err := client.ZCard(ctx, zset)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), card)
+	})
+
+	t.Run("GetErrors", func(t *testing.T) {
+		const text, list = "get_text", "get_list"
+		t.Cleanup(func() { cleanup(ctx, t, client, text, list) })
+
+		var s string
+		err := client.Get(ctx, "get_missing", &s)
+		require.EqualError(t, err, "not found")
+		assert.ErrorIs(t, err, redisclient.ErrNotFound)
+		assert.True(t, redisclient.IsNotFoundError(err))
+
+		// a non-JSON value cannot be decoded into a non-string target
+		require.NoError(t, client.Set(ctx, text, "plain", time.Minute))
+		var n int
+		err = client.Get(ctx, text, &n)
+		require.EqualError(t, err, "failed to unmarshal value: invalid character 'p' looking for beginning of value")
+		var syntaxErr *json.SyntaxError
+		assert.ErrorAs(t, err, &syntaxErr)
+
+		// server errors are wrapped with the relative key
+		require.NoError(t, client.RPush(ctx, list, "a"))
+		err = client.Get(ctx, list, &s)
+		require.EqualError(t, err, "failed to get key: get_list: WRONGTYPE Operation against a key holding the wrong kind of value")
+		assert.False(t, redisclient.IsNotFoundError(err))
+		_, err = client.HGet(ctx, list, "f")
+		require.EqualError(t, err, "unable to get field f from hash get_list: WRONGTYPE Operation against a key holding the wrong kind of value")
+	})
+
+	t.Run("NoPrefix", func(t *testing.T) {
+		const key = "noprefix_key"
+		t.Cleanup(func() { cleanup(ctx, t, rootclient, key) })
+
+		// without a prefix keys, patterns and listed names are used as is
+		assert.Equal(t, "a//b", rootclient.Key("a//b"))
+		assert.Equal(t, "/test/x", rootclient.SubKey("/test/x"))
+		require.NoError(t, rootclient.Set(ctx, key, "v", time.Minute))
+
+		keys, err := rootclient.Keys(ctx, "noprefix_*")
+		require.NoError(t, err)
+		assert.Equal(t, []string{key}, keys)
+		keys, err = rootclient.ScanKeys(ctx, "noprefix_*", 0)
+		require.NoError(t, err)
+		assert.Equal(t, []string{key}, keys)
+
+		// the prefixed client does not see it
+		keys, err = client.Keys(ctx, "noprefix_*")
+		require.NoError(t, err)
+		assert.Empty(t, keys)
 	})
 }
 

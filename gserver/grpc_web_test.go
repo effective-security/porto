@@ -369,3 +369,108 @@ func mustGunzip(b []byte) []byte {
 	_ = r.Close()
 	return out
 }
+
+// plainWriter is an http.ResponseWriter without http.Flusher.
+type plainWriter struct {
+	header http.Header
+	body   bytes.Buffer
+}
+
+func (w *plainWriter) Header() http.Header         { return w.header }
+func (w *plainWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+func (w *plainWriter) WriteHeader(int)             {}
+
+// failingWriter is an http.ResponseWriter whose writes fail, like a
+// connection the client closed.
+type failingWriter struct {
+	header http.Header
+}
+
+func (w *failingWriter) Header() http.Header       { return w.header }
+func (w *failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+func (w *failingWriter) WriteHeader(int)           {}
+
+// TestGrpcWebResponse_FlushModes checks that Flush does nothing before the
+// response started, forwards to the wrapped writer of an uncompressed
+// (streaming) response, and flushes only the gzip writer of a compressed
+// (unary) response, so net/http can still compute Content-Length.
+func TestGrpcWebResponse_FlushModes(t *testing.T) {
+	t.Parallel()
+	payload := []byte("streamed message")
+
+	t.Run("before write", func(t *testing.T) {
+		t.Parallel()
+		for _, compress := range []bool{false, true} {
+			resp := httptest.NewRecorder()
+			g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, compress)
+			g.Flush()
+			assert.False(t, resp.Flushed, "compress=%v", compress)
+			assert.Zero(t, resp.Body.Len(), "compress=%v", compress)
+			g.Close()
+		}
+	})
+
+	t.Run("uncompressed", func(t *testing.T) {
+		t.Parallel()
+		resp := httptest.NewRecorder()
+		g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, false)
+		_, err := g.Write(payload)
+		require.NoError(t, err)
+		g.Flush()
+		assert.True(t, resp.Flushed)
+		assert.Equal(t, payload, resp.Body.Bytes())
+	})
+
+	t.Run("compressed", func(t *testing.T) {
+		t.Parallel()
+		resp := httptest.NewRecorder()
+		g := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, true)
+		defer g.Close()
+		_, err := g.Write(payload)
+		require.NoError(t, err)
+		g.Flush()
+		assert.False(t, resp.Flushed, "the wrapped writer must not be flushed")
+
+		// The flushed gzip stream already holds the whole payload.
+		zr, err := gzip.NewReader(bytes.NewReader(resp.Body.Bytes()))
+		require.NoError(t, err)
+		got := make([]byte, len(payload))
+		_, err = io.ReadFull(zr, got)
+		require.NoError(t, err)
+		assert.Equal(t, payload, got)
+	})
+
+	t.Run("wrapped writer without flusher", func(t *testing.T) {
+		t.Parallel()
+		w := &plainWriter{header: make(http.Header)}
+		g := newGrpcWebResponse(w, header.ApplicationGRPCWebProto, false)
+		_, err := g.Write(payload)
+		require.NoError(t, err)
+		g.Flush()
+		g.finishRequest()
+		assert.True(t, bytes.HasPrefix(w.body.Bytes(), payload))
+	})
+}
+
+// TestGrpcWebResponse_GzipCloseAfterWriteFailure checks that a compressed
+// response whose client went away still releases its gzip writer: later
+// writes report errWriteAfterClose, and the pooled writer serves the next
+// response correctly.
+func TestGrpcWebResponse_GzipCloseAfterWriteFailure(t *testing.T) {
+	t.Parallel()
+	g := newGrpcWebResponse(&failingWriter{header: make(http.Header)}, header.ApplicationGRPCWebProto, true)
+	_, err := g.Write([]byte("lost"))
+	require.ErrorIs(t, err, io.ErrClosedPipe)
+	g.Flush()
+	g.Close()
+	_, err = g.Write([]byte("late"))
+	require.ErrorIs(t, err, errWriteAfterClose)
+
+	resp := httptest.NewRecorder()
+	next := newGrpcWebResponse(resp, header.ApplicationGRPCWebProto, true)
+	payload := []byte("next response")
+	_, err = next.Write(payload)
+	require.NoError(t, err)
+	next.finishRequest()
+	assert.True(t, bytes.HasPrefix(mustGunzip(resp.Body.Bytes()), payload))
+}

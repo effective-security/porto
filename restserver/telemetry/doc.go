@@ -10,7 +10,9 @@
 //
 // A NewRequestMetrics nested inside another records nothing and passes the
 // role of its request's identity to the outer one, so the outer handler
-// also counts the responses of the identity handler (as guest).
+// also counts the responses of the identity handler (as guest). The outer
+// handler also records a request whose handler panics, with the status it
+// had sent or 500, and lets the panic continue.
 //
 // Metrics are emitted through porto/metricskey (HTTPReqPerf, HTTPReqByRole)
 // keyed by method, status and route template. The restserver Router records

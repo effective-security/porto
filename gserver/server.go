@@ -379,6 +379,10 @@ func stopServers(ctx context.Context, ss *servers) {
 		return
 	}
 
+	// FINDINGS P-101: the HTTP server is shut down only on timeout, so
+	// its keep-alive connections keep serving after Close.
+	// FINDINGS P-102: on TLS, shutdownNow stops gRPC streams after the HTTP
+	// server, and the client sees a malformed response.
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)

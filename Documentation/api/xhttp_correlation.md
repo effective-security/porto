@@ -54,7 +54,7 @@ var CorrelationIDgRPCHeaderName = "x-correlation-id"
 ```
 
 <a name="ID"></a>
-## func [ID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L222>)
+## func [ID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L224>)
 
 ```go
 func ID(ctx context.Context) string
@@ -72,7 +72,7 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor
 NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that adds the correlation ID \(from incoming metadata or newly generated\) to the context and xlog fields, and recovers panics from the handler, logging them and returning an "unhandled exception" error.
 
 <a name="NewFromContext"></a>
-## func [NewFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L318>)
+## func [NewFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L320>)
 
 ```go
 func NewFromContext(ctx context.Context) context.Context
@@ -90,7 +90,7 @@ func NewHandler(delegate http.Handler) http.Handler
 NewHandler returns middleware that reads the correlation ID from the X\-Correlation\-ID or X\-Request\-ID request header \(or generates one\), stores it in the request context, adds it to the xlog context as "ctx" and sets the X\-Correlation\-ID response header before calling delegate. An ID already present in the context is reused.
 
 <a name="NewStreamServerInterceptor"></a>
-## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L119>)
+## func [NewStreamServerInterceptor](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L120>)
 
 ```go
 func NewStreamServerInterceptor() grpc.StreamServerInterceptor
@@ -99,7 +99,7 @@ func NewStreamServerInterceptor() grpc.StreamServerInterceptor
 NewStreamServerInterceptor returns the streaming counterpart of NewAuthUnaryInterceptor; the stream is wrapped with streamctx.WithContext so handlers see the enriched context.
 
 <a name="WithID"></a>
-## func [WithID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L233>)
+## func [WithID](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L235>)
 
 ```go
 func WithID(ctx context.Context) context.Context
@@ -108,7 +108,7 @@ func WithID(ctx context.Context) context.Context
 WithID returns a context carrying a newly generated correlation ID \(also added to the xlog fields\). If ctx already has one, ctx is returned as is.
 
 <a name="WithMetaFromContext"></a>
-## func [WithMetaFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L249>)
+## func [WithMetaFromContext](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L251>)
 
 ```go
 func WithMetaFromContext(ctx context.Context) context.Context
@@ -117,7 +117,7 @@ func WithMetaFromContext(ctx context.Context) context.Context
 WithMetaFromContext ensures the outgoing gRPC metadata of ctx carries the correlation ID under CorrelationIDgRPCHeaderName, generating and storing a new ID in the context when none exists. Use it before making a gRPC client call.
 
 <a name="WithMetaFromRequest"></a>
-## func [WithMetaFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L271>)
+## func [WithMetaFromRequest](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L273>)
 
 ```go
 func WithMetaFromRequest(req *http.Request) context.Context
@@ -150,7 +150,7 @@ type RequestContext struct {
 ```
 
 <a name="Value"></a>
-### func [Value](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L213>)
+### func [Value](<https://github.com/effective-security/porto/blob/main/xhttp/correlation/correlation.go#L215>)
 
 ```go
 func Value(ctx context.Context) *RequestContext

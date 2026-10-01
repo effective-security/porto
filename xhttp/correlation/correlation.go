@@ -92,6 +92,7 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 					"action", si.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
+				// FINDINGS P-098: a plain error reaches the client as Unknown.
 				err = errors.New("unhandled exception")
 			}
 		}()
@@ -126,6 +127,7 @@ func NewStreamServerInterceptor() grpc.StreamServerInterceptor {
 					"action", info.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
+				// FINDINGS P-098: a plain error reaches the client as Unknown.
 				err = errors.New("unhandled exception")
 			}
 		}()

@@ -254,6 +254,7 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 	}
 
 	if signer != nil && strings.EqualFold(token.TokenType, dpopTokenType) {
+		// FINDINGS P-092: a relative htu fails dpop.VerifyClaims.
 		u := &url.URL{
 			Path: ri.Method,
 		}

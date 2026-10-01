@@ -462,6 +462,8 @@ func (p *provider) IdentityFromContext(ctx context.Context, uri string) (identit
 		dhdr := md.Get(header.DPoP)
 		if token != "" && p.config.DPoP.Enabled &&
 			strings.EqualFold(typ, dpopTokenType) && len(dhdr) > 0 {
+			// FINDINGS P-092: uri is the relative method path, which
+			// dpop.VerifyClaims rejects.
 			id, err := p.dpopIdentity(ctx, dhdr[0], http.MethodPost, uri, token, dpopTokenType)
 			if err == nil {
 				return id, nil

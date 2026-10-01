@@ -109,6 +109,7 @@ func (p *memProv) Get(_ context.Context, key string, v any) error {
 		}
 	}
 
+	// FINDINGS P-095: the sentinel is not wrapped.
 	return ErrNotFound
 }
 
