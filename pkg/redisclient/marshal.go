@@ -31,6 +31,7 @@ func Marshal(v any) (any, error) {
 func UnmarshalStringCmd(val *redis.StringCmd, v any) error {
 	switch t := v.(type) {
 	case *string:
+		// FINDINGS P-094: val.Err() is not checked here.
 		*t = val.Val()
 	case *[]byte:
 		b, err := val.Bytes()

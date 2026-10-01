@@ -162,6 +162,7 @@ func newClient(cfg *Config) (*Client, error) {
 					return nil, errors.WithMessage(err, "unable to load key for DPoP")
 				}
 				typ = "DPoP"
+				// FINDINGS P-093: panics on a public-only key.
 				signer, err := dpop.NewSigner(k.Key.(crypto.Signer))
 				if err != nil {
 					return nil, errors.WithMessage(err, "unable to create DPoP signer")
@@ -232,6 +233,8 @@ func (c *Client) dial(target string, creds credentials.TransportCredentials, dop
 			}
 			if !conn.WaitForStateChange(dctx, state) {
 				_ = conn.Close()
+				// FINDINGS P-103: dctx.Err() is dropped, so a canceled
+				// Context is reported as this timeout.
 				return nil, errors.Errorf("failed to connect to %q within %s", target, c.cfg.DialTimeout)
 			}
 		}

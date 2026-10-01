@@ -104,6 +104,7 @@ func (c *Storage) Marshal(file string, v any) error {
 // access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
 // (see ParseAuthToken).
 func (c *Storage) SaveAuthToken(token string) (string, error) {
+	// FINDINGS P-097: ParseAuthToken ignores token_type.
 	location := filepath.Join(c.folder, authTokenFileName)
 	if err := c.ensurePrivateFolder(); err != nil {
 		return location, err
@@ -314,6 +315,8 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 	err := filepath.Walk(c.folder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			logger.KV(xlog.DEBUG, "path", path, "err", err.Error())
+			// FINDINGS P-096: this stops the walk at an unreadable
+			// sub-folder, and ListKeys still returns nil.
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jwk") {

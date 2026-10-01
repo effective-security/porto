@@ -87,6 +87,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 			if s, ok := status.FromError(err); ok {
 				code = s.Code()
 			} else {
+				// FINDINGS P-098: grpc-go sends such errors as Unknown.
 				code = codes.Internal
 			}
 		}

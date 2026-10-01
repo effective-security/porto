@@ -16,6 +16,7 @@ import (
 	"github.com/effective-security/porto/pkg/retriable"
 	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/restserver"
+	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -90,7 +91,7 @@ func (c *ctx) SetHeaders(r *http.Request) {
 
 func Test_ServerWithServicesOverHTTP(t *testing.T) {
 	cfg := &serverConfig{
-		BindAddr: ":8088",
+		BindAddr: testutils.CreateBindAddr("127.0.0.1"),
 	}
 
 	startedCount := 0
@@ -132,7 +133,7 @@ func Test_ServerWithServicesOverHTTP(t *testing.T) {
 
 func Test_ServerWithCORS(t *testing.T) {
 	cfg := &serverConfig{
-		BindAddr: ":8088",
+		BindAddr: testutils.CreateBindAddr("127.0.0.1"),
 	}
 
 	startedCount := 0
@@ -180,7 +181,9 @@ func Test_ServerWithCORS(t *testing.T) {
 }
 
 func testHTTPService(t *testing.T, server restserver.Server) {
-	resp, err := http.Get(fmt.Sprintf("%s://localhost:%s/v1/test", server.Protocol(), server.Port()))
+	// the servers of its callers bind 127.0.0.1, which localhost may not
+	// reach first
+	resp, err := http.Get(fmt.Sprintf("%s://127.0.0.1:%s/v1/test", server.Protocol(), server.Port()))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	b, err := io.ReadAll(resp.Body)

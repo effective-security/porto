@@ -180,6 +180,7 @@ func (p *redisProv) Get(ctx context.Context, key string, v any) error {
 	err := val.Err()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
+			// FINDINGS P-095: the sentinel is not wrapped.
 			return ErrNotFound
 		}
 		return errors.Wrapf(err, "failed to get key: %s", k)

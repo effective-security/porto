@@ -663,7 +663,9 @@ func main() {
 	defer tlsloader.Close()
 
 	cfg := &serverConfig{
-		BindAddr: ":8181",
+		// any free loopback port, so the example cannot collide with other
+		// tests; a deployment sets its own address, such as ":8181"
+		BindAddr: "127.0.0.1:0",
 	}
 
 	server, err := rest.New("v1.0.123", "", cfg, tlsInfo)

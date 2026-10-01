@@ -95,3 +95,34 @@ func TestDefaultRateLimitRejection(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", rejected.Header().Get(header.ContentType))
 	assert.Equal(t, "You have reached maximum request limit.", rejected.Body.String())
 }
+
+// TestRateLimitMethods checks that a limiter with Metods limits only the
+// listed methods.
+func TestRateLimitMethods(t *testing.T) {
+	t.Parallel()
+	enabled := true
+	h := configureRateLimiter(&RateLimit{
+		Enabled:           &enabled,
+		RequestsPerSecond: 1,
+		Metods:            []string{http.MethodPost},
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	h = identity.NewTrustedProxyHandler(h, nil)
+
+	var got []int
+	for _, method := range []string{http.MethodGet, http.MethodGet, http.MethodGet, http.MethodPost, http.MethodPost} {
+		r := httptest.NewRequest(method, "/", nil)
+		r.RemoteAddr = "198.51.100.7:123"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		got = append(got, w.Code)
+	}
+	assert.Equal(t, []int{
+		http.StatusOK,
+		http.StatusOK,
+		http.StatusOK,
+		http.StatusOK,
+		http.StatusTooManyRequests,
+	}, got)
+}

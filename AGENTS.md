@@ -137,10 +137,11 @@ Do not start by grepping the tree.
 - `make docs` : regenerate the gomarkdoc API reference under `Documentation/api/`
 - `make all` : clean, tools, generate, covtest
 
-CI (`.github/workflows/unittest.yml`) runs `make build covtest` and requires
-**90%** total coverage (`MIN_TESTCOV`). CI does not run `make lint` or the
-race detector; run both locally. Pushes to `main` that change `.VERSION`
-create a tag `<.VERSION>.<commit count>`.
+CI (`.github/workflows/unittest.yml`) runs `make lint` and
+`make build covtest`, and its coverage status requires more than **90%**
+total coverage (`MIN_TESTCOV`). Keep every package with statements above
+90% too. CI does not run the race detector; run it locally. Pushes to
+`main` that change `.VERSION` create a tag `<.VERSION>.<commit count>`.
 
 ### Documentation
 

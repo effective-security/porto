@@ -2,6 +2,7 @@ package gserver
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -177,6 +179,48 @@ func TestRateLimitRejectionCounted(t *testing.T) {
 		// the admitted request is counted by the handlers behind the limiter
 		assert.Equal(t, requestMetric("verb=POST;status=429;uri=unknown", roles.GuestRoleName, 2), delta(before, counts()), lookups)
 	}
+}
+
+// TestPanicCounted checks that the response of a panicking REST handler on
+// a TLS listener, which grpcHandlerFunc answers with 500 after the panic
+// left the handlers of configureHandlers, is counted with its route and
+// role: as 500 when the handler sent no status, else with the status it
+// sent (formerly P-091).
+func TestPanicCounted(t *testing.T) {
+	counts := newMetricsSink(t)
+
+	s := &Server{
+		name:     "metrics",
+		identity: headerIdentity{},
+	}
+	router := restserver.NewRouter(notFoundHandler)
+	router.GET("/v1/crash/:id", func(http.ResponseWriter, *http.Request, restserver.Params) {
+		panic("crash")
+	})
+	router.GET("/v1/partial/:id", func(w http.ResponseWriter, _ *http.Request, _ restserver.Params) {
+		w.WriteHeader(http.StatusAccepted)
+		panic("crash")
+	})
+	sctx := &serveCtx{cfg: &s.cfg}
+	h := sctx.grpcHandlerFunc(grpc.NewServer(), configureHandlers(s, router.Handler()))
+
+	serve := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set(testRoleHeader, "admin")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+
+	before := counts()
+	w := serve("/v1/crash/1")
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "unhandled exception\n", w.Body.String())
+	assert.Equal(t, http.StatusAccepted, serve("/v1/partial/1").Code)
+
+	want := requestMetric("verb=GET;status=500;uri=/v1/crash/:id", "admin", 1)
+	maps.Copy(want, requestMetric("verb=GET;status=202;uri=/v1/partial/:id", "admin", 1))
+	assert.Equal(t, want, delta(before, counts()))
 }
 
 // delta returns the keys whose count grew from before to after, with the

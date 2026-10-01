@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/effective-security/porto/restserver/telemetry"
@@ -280,5 +281,61 @@ func BenchmarkResponseCapture_ServeFile(b *testing.B) {
 		require.NoError(b, err)
 		require.NoError(b, res.Body.Close())
 		require.Equal(b, int64(size), n)
+	}
+}
+
+// TestResponseCapture_Status checks that the captured status is the one
+// net/http sends: the first final status, or 200 once the body is written,
+// copied or flushed, ignoring informational statuses other than 101.
+// Test_RequestMetricsPanic checks when the status counts as sent.
+func TestResponseCapture_Status(t *testing.T) {
+	t.Parallel()
+	tcases := []struct {
+		name   string
+		do     func(rc *telemetry.ResponseCapture)
+		status int
+	}{
+		{"nothing", func(*telemetry.ResponseCapture) {}, http.StatusOK},
+		{"status", func(rc *telemetry.ResponseCapture) { rc.WriteHeader(http.StatusNotFound) }, http.StatusNotFound},
+		{"second status", func(rc *telemetry.ResponseCapture) {
+			rc.WriteHeader(http.StatusCreated)
+			rc.WriteHeader(http.StatusInternalServerError)
+		}, http.StatusCreated},
+		{"status after body", func(rc *telemetry.ResponseCapture) {
+			_, _ = rc.Write([]byte("x"))
+			rc.WriteHeader(http.StatusInternalServerError)
+		}, http.StatusOK},
+		{"status after copy", func(rc *telemetry.ResponseCapture) {
+			_, _ = rc.ReadFrom(strings.NewReader("x"))
+			rc.WriteHeader(http.StatusInternalServerError)
+		}, http.StatusOK},
+		{"status after empty copy", func(rc *telemetry.ResponseCapture) {
+			_, _ = rc.ReadFrom(iotest.ErrReader(errors.New("upstream failed")))
+			rc.WriteHeader(http.StatusBadGateway)
+		}, http.StatusBadGateway},
+		{"status after flush", func(rc *telemetry.ResponseCapture) {
+			rc.Flush()
+			rc.WriteHeader(http.StatusInternalServerError)
+		}, http.StatusOK},
+		{"informational then status", func(rc *telemetry.ResponseCapture) {
+			rc.WriteHeader(http.StatusEarlyHints)
+			rc.WriteHeader(http.StatusNoContent)
+		}, http.StatusNoContent},
+		{"informational then body", func(rc *telemetry.ResponseCapture) {
+			rc.WriteHeader(http.StatusEarlyHints)
+			_, _ = rc.Write([]byte("x"))
+		}, http.StatusOK},
+		{"switching protocols", func(rc *telemetry.ResponseCapture) {
+			rc.WriteHeader(http.StatusSwitchingProtocols)
+			rc.WriteHeader(http.StatusOK)
+		}, http.StatusSwitchingProtocols},
+	}
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rc := telemetry.NewResponseCapture(httptest.NewRecorder())
+			tc.do(rc)
+			assert.Equal(t, tc.status, rc.StatusCode())
+		})
 	}
 }

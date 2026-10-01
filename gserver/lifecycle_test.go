@@ -285,3 +285,39 @@ func TestServeFailureUnblocksClose(t *testing.T) {
 	requireClosesPromptly(t, e)
 	requireNoReloaders(t, "Close must stop the KeypairReloader")
 }
+
+// TestErrHandlerStopsReportingAfterClose checks that serve errors reach
+// Err until Close begins, and are dropped afterwards without blocking.
+func TestErrHandlerStopsReportingAfterClose(t *testing.T) {
+	t.Parallel()
+	e := &Server{
+		stopc: make(chan struct{}),
+		errc:  make(chan error, 1),
+	}
+	serveErr := errors.New("accept failed")
+	e.errHandler(serveErr)
+	select {
+	case err := <-e.Err():
+		assert.Equal(t, serveErr, err)
+	default:
+		t.Fatal("the serve error was not reported")
+	}
+
+	close(e.stopc)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// errc has room, but Close has begun: the error is dropped
+		e.errHandler(errors.New("late"))
+		// errc is full and nobody reads it: the call must not block
+		e.errc <- serveErr
+		e.errHandler(errors.New("blocked"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(lifecycleWait):
+		t.Fatal("errHandler blocked after Close")
+	}
+	assert.Equal(t, serveErr, <-e.Err())
+	assert.Empty(t, e.Err())
+}

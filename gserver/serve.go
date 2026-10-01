@@ -236,8 +236,13 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	// until m.Serve runs, so a failure must leave nothing to stop.
 	var insecure, secure *servers
 	var grpcL, httpL, tlsL net.Listener
+	// serving is set once the servers run; Close stops them from then on.
+	serving := false
 	defer func() {
-		if err == nil {
+		// m.Serve returns an error when Close closes the root listener,
+		// while Close may still be draining the gRPC server: stopping it
+		// here would abort the active RPCs.
+		if err == nil || serving {
 			return
 		}
 		if secure != nil {
@@ -312,6 +317,7 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	logger.KV(xlog.INFO, "status", "serving", "service", s.Name(), "address", sctx.listener.Addr().String(), "secure", sctx.secure, "insecure", sctx.insecure)
 
 	sctx.closeServers()
+	serving = true
 
 	// Serve starts multiplexing the listener.
 	// Serve blocks and perhaps should be invoked concurrently within a go routine.
@@ -482,6 +488,8 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		opts = append(opts, grpc.Creds(bundle.TransportCredentials()))
 	}
 
+	// FINDINGS P-099: validation rejects requests before the log
+	// interceptor, which records the gRPC metrics.
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		panicInterceptor(),
 		NewRequestValidationUnaryInterceptor(),
@@ -596,8 +604,12 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// FINDINGS P-091: the 500 of a panicking REST handler is written
-		// here, outside the metrics handler of configureHandlers.
+		// The metrics handler of configureHandlers has already counted a
+		// panicking REST handler, as 500 when it sent no status, when the
+		// panic reaches this recover. FINDINGS P-100: the 500 is written
+		// even into a started response, and http.ErrAbortHandler is not
+		// re-panicked. FINDINGS P-102: gRPC streams that Close stops
+		// after Timeout.Request end with a malformed HTTP response.
 		defer func() {
 			if rec := recover(); rec != nil {
 				logger.ContextKV(r.Context(), xlog.ERROR,
