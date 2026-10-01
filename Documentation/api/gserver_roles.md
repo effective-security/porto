@@ -10,6 +10,8 @@ Package roles maps authenticated callers to porto roles for both HTTP and gRPC r
 
 New builds an IdentityProvider from an IdentityMap. The provider inspects the Authorization header \(or gRPC "authorization" metadata\) and, depending on the token type, verifies an AWS STS presigned GetCallerIdentity URL \("AWS4"\), a DPoP\-bound JWT \("DPoP"\) or a bearer JWT \("Bearer"\); it can also fall back to a JWT stored in a cookie \(with CSRF double\-submit checks for unsafe HTTP methods and every gRPC call\) and to a client TLS certificate carrying a SPIFFE URI SAN. The resulting identity.Identity carries the mapped role, subject, tenant and claims; unauthenticated requests receive the guest identity.
 
+For gRPC, DPoP proofs sign POST with an absolute htu of https://\<incoming :authority\>\<full method path\>. Relative\-path proofs fail authentication. A proxy must preserve that authority and method path.
+
 The provider is wired into gserver via Config.IdentityMap, but can be used directly with xhttp/identity:
 
 ```
@@ -90,7 +92,7 @@ const (
 ```
 
 <a name="ParseSTSTokenExpiration"></a>
-## func [ParseSTSTokenExpiration](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L991>)
+## func [ParseSTSTokenExpiration](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L1026>)
 
 ```go
 func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, error)
@@ -99,7 +101,7 @@ func ParseSTSTokenExpiration(presignedURL string) (*time.Time, string, string, e
 ParseSTSTokenExpiration computes the expiry of an AWS SigV4 presigned URL from its X\-Amz\-Date and X\-Amz\-Expires query parameters. It also returns the raw parameter values for logging. An unparsable X\-Amz\-Expires falls back to credentials.CacheTTL.
 
 <a name="ValidateSTSPresignedURL"></a>
-## func [ValidateSTSPresignedURL](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L932>)
+## func [ValidateSTSPresignedURL](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L967>)
 
 ```go
 func ValidateSTSPresignedURL(presignedURL string) error
@@ -129,7 +131,7 @@ type AWSIdentityMap struct {
 ```
 
 <a name="CallerIdentity"></a>
-## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L1023-L1038>)
+## type [CallerIdentity](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L1058-L1073>)
 
 CallerIdentity is the JSON response of the AWS STS GetCallerIdentity API, see https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html. It is cached per presigned URL until Expires.
 
@@ -230,7 +232,7 @@ func (i *IdentityMap) GetCookiesConfig() CookiesConfig
 GetCookiesConfig returns the cookie configuration; safe on a nil receiver.
 
 <a name="IdentityProvider"></a>
-## type [IdentityProvider](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L81-L96>)
+## type [IdentityProvider](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L88-L104>)
 
 IdentityProvider extracts the caller identity from HTTP requests and gRPC contexts. IdentityFromRequest and IdentityFromContext are the mappers to pass to identity.NewContextHandler and identity.NewAuthUnaryInterceptor.
 
@@ -248,13 +250,14 @@ type IdentityProvider interface {
     // carries credentials for an enabled method.
     ApplicableForContext(ctx context.Context) bool
     // IdentityFromContext returns the identity of the gRPC caller for the
-    // given method URI (used to verify DPoP proofs), or the guest identity.
+    // given full method path, or the guest identity. DPoP proofs must name
+    // POST https://<incoming :authority><full method path>.
     IdentityFromContext(ctx context.Context, uri string) (identity.Identity, error)
 }
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L149>)
+### func [New](<https://github.com/effective-security/porto/blob/main/gserver/roles/roles.go#L157>)
 
 ```go
 func New(config *IdentityMap, jwt jwt.Parser) (IdentityProvider, error)

@@ -37,9 +37,9 @@ URL validation. Retires P-035.
 
 There are two DPoP follow-ups if those behaviors matter to your deployment:
 
-HTTP proof verification (gserver/roles/roles.go:293) assumes an https origin when the request URL has no scheme. Plain HTTP or a different public origin needs an explicit trusted external URL.
+Proof verification in `gserver/roles` builds the expected `htu` from client-supplied values: `IdentityFromRequest` from the request URL or `Host` (https when the URL has no scheme), and `IdentityFromContext` (`grpcDPoPURI`) from the gRPC `:authority`, always https. Plain HTTP, including gRPC-Web on a plain-HTTP listener, or a different public origin needs a trusted origin setting in porto (for example in `jwt_dpop`) that replaces the scheme and host in both paths. xpki's `dpop.VerifyConfig.ExternalURL` is read only by `dpop.VerifyRequestClaims`, so it could cover the HTTP path only if `dpopIdentity` switched to that call; `dpop.VerifyClaims` ignores it.
 
-Proof verification (gserver/roles/roles.go:518) and client proof signing (pkg/retriable/retriable.go:1111) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
+Proof verification (`gserver/roles` `dpopIdentity`) and client proof signing (`pkg/retriable` `Client.Do`, `gserver/credentials` `perRPCCredential.GetRequestMetadata`) do not use xpki’s new opt-in replay and access token hash checks. Enabling access token binding would require coordinated client and server changes.
 
 The stricter JWT time, algorithm, and key checks may reject previously accepted tokens; Porto parses tokens supplied by callers and does not issue them here.
 

@@ -24,6 +24,8 @@ const (
 	ApplicationTimestampReply = "application/timestamp-reply"
 	// Authorization is HTTP header for "Authorization"
 	Authorization = "Authorization"
+	// Authority is the HTTP/2 pseudo-header exposed in gRPC incoming metadata.
+	Authority = ":authority"
 	// Cookie is HTTP header for browser cookies.
 	Cookie = "Cookie"
 	// ProxyAuthorization is HTTP header for proxy credentials.

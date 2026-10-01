@@ -27,6 +27,9 @@ const (
 	dpopTokenType = "DPoP"
 	// dpopFieldNameGRPC is the gRPC metadata key carrying the DPoP proof.
 	dpopFieldNameGRPC = "dpop"
+	// schemeHTTPS is the scheme of grpc-go's credential audience and of the
+	// DPoP proof URI.
+	schemeHTTPS = "https"
 )
 
 var (
@@ -209,7 +212,7 @@ func (rc *perRPCCredential) RequireTransportSecurity() bool {
 	return true
 }
 
-func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string) (map[string]string, error) {
+func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	rc.mu.RLock()
 	token := rc.token
 	provider := rc.callerIdentity
@@ -244,19 +247,31 @@ func (rc *perRPCCredential) GetRequestMetadata(ctx context.Context, _ ...string)
 		)
 	}*/
 
-	ri, _ := grpccredentials.RequestInfoFromContext(ctx)
-	// if err := grpccredentials.CheckSecurityLevel(ri.AuthInfo, grpccredentials.PrivacyAndIntegrity); err != nil {
-	// 	return nil, fmt.Errorf("unable to transfer Access Token: %v", err)
-	// }
-
 	res := map[string]string{
 		TokenFieldNameGRPC: token.TokenType + " " + token.AccessToken,
 	}
 
 	if signer != nil && strings.EqualFold(token.TokenType, dpopTokenType) {
-		// FINDINGS P-092: a relative htu fails dpop.VerifyClaims.
+		if len(uri) != 1 {
+			return nil, errors.New("unable to sign DPoP proof: a single gRPC audience URI is required")
+		}
+		audience, err := url.Parse(uri[0])
+		if err != nil {
+			return nil, errors.WithMessage(err, "unable to parse gRPC audience URI")
+		}
+		if audience.Scheme != schemeHTTPS || audience.Hostname() == "" || audience.User != nil || audience.Opaque != "" {
+			return nil, errors.New("unable to sign DPoP proof: an absolute HTTPS audience URI is required")
+		}
+		ri, ok := grpccredentials.RequestInfoFromContext(ctx)
+		if !ok || !strings.HasPrefix(ri.Method, "/") {
+			return nil, errors.New("unable to sign DPoP proof: a gRPC method is required")
+		}
+		// grpc-go's audience names the authority and service. Bind the proof
+		// to that authority and the full method instead of only the service.
 		u := &url.URL{
-			Path: ri.Method,
+			Scheme: audience.Scheme,
+			Host:   audience.Host,
+			Path:   ri.Method,
 		}
 
 		dhdr, err := signer.Sign(ctx, http.MethodPost, u, nil)

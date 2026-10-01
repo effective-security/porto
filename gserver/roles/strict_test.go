@@ -163,7 +163,7 @@ func TestStrictRejectsInvalidCredentials(t *testing.T) {
 			request: func(r *http.Request) {
 				setAuthorizationDPoPHeader(r, testProof, "AccessToken123")
 			},
-			md:      metadata.Pairs("authorization", "DPoP AccessToken123", "dpop", testProof),
+			md:      metadata.Pairs("authorization", "DPoP AccessToken123", "dpop", testProof, header.Authority, "api.test"),
 			wantErr: "dpop: failed to parse header",
 		},
 		{
@@ -196,7 +196,7 @@ func TestStrictRejectsInvalidCredentials(t *testing.T) {
 			if tt.peer != nil {
 				ctx = createPeerContext(ctx, tt.peer)
 			}
-			id, err = p.IdentityFromContext(ctx, "https://api.test/v1/items")
+			id, err = p.IdentityFromContext(ctx, "/v1/items")
 			checkStrict(t, strict, tt.wantErr, id, err, "gRPC "+tt.name)
 		}
 	}

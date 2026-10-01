@@ -60,6 +60,8 @@
 
 ### Correctness and interoperability
 
+- B32 / P-092: gRPC DPoP authentication works again with xpki 1.0. Clients sign `POST https://<authority><full-method-path>` using grpc-go's credential audience authority and full RPC method; servers verify against incoming `:authority` and the dispatched method. TLS server-name/authority overrides and Unix TLS targets follow the same convention. Missing or ambiguous authority, an authority that is not host[:port], relative-path proofs and mismatched authority/method/key bindings fail authentication. HTTPS port 443 and host case use xpki URI normalization; IPv6 zone authorities (sent escaped as `%25`) match.
+
 - Return REST server HTTP bind errors from `StartHTTP`, support `Config()` and IPv6 bind addresses (`HostName()` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` add them), and make `StopHTTP` safe before start and on repeated calls.
 
 - Route `unix:///path` and `unixs:///path` gRPC client endpoints through the Unix socket resolver without appending a TCP port.
@@ -98,7 +100,7 @@
 
 ### Tests and tooling
 
-- B24: behavior tests for every package that was below 90% statement coverage (`pkg/rpcclient`, `pkg/redisclient`, `pkg/retriable`, `pkg/streamctx`, `pkg/tlsconfig`, `pkg/appinit`, `gserver`, `gserver/roles`, `tests/mockappcontainer`). Total coverage measured as in CI rose from 89.6% to 96.3%, and every package with statements is above 90%. The CI coverage status now fails at 90% or below (`MIN_TESTCOV`, previously 80), as `AGENTS.md` and the README already stated. The defects these tests found are recorded in `FINDINGS.md` (P-092 to P-104); only the `gserver` `Close` drain above is fixed in this release. The `restserver` and `gserver` `ExampleServer` tests and the `restserver` service tests bind free loopback ports (and the `gserver` example a Unix socket in a temporary directory) instead of the fixed `:8181`, `:8088`, `127.0.0.1:12345` and `/tmp/gserver_test.sock`, which failed the suite when another process held them.
+- B24: behavior tests for every package that was below 90% statement coverage (`pkg/rpcclient`, `pkg/redisclient`, `pkg/retriable`, `pkg/streamctx`, `pkg/tlsconfig`, `pkg/appinit`, `gserver`, `gserver/roles`, `tests/mockappcontainer`). Total coverage measured as in CI rose from 89.6% to 96.3%, and every package with statements is above 90%. The CI coverage status now fails at 90% or below (`MIN_TESTCOV`, previously 80), as `AGENTS.md` and the README already stated. The remaining defects these tests found are recorded in `FINDINGS.md`. The `restserver` and `gserver` `ExampleServer` tests and the `restserver` service tests bind free loopback ports (and the `gserver` example a Unix socket in a temporary directory) instead of the fixed `:8181`, `:8088`, `127.0.0.1:12345` and `/tmp/gserver_test.sock`, which failed the suite when another process held them.
 
 ## New features and behaviour
 
@@ -114,6 +116,8 @@
 - B19: `gserver/roles` caches STS rejections of an AWS4 token for 30s, so a repeated bad token no longer calls STS each time: 4xx responses except 408, 429 and throttling (STS throttles with HTTP 400 and code `Throttling`), and undecodable responses. Transport errors, timeouts, throttling and 5xx are not cached. Concurrent requests with the same uncached token share one STS call; if it panics, the requests waiting for it fail with `STS lookup panicked`. The CSRF check ignores spaces around the cookie value as it did around the header value. `xhttp/header` adds `XCSRFToken`.
 
 ## Breaking changes: what clients must change
+
+- B32 / P-092: custom gRPC DPoP clients must replace relative `htu` values such as `/pkg.Service/Method` with `https://<authority>/pkg.Service/Method` and `htm: POST`. Use the request's HTTP/2 `:authority`, including any authority override, rather than the dial address or TLS peer address. Upgrade porto clients and servers together: old relative proofs do not authenticate on the new server, and older servers expecting a relative proof do not accept the new format. Proxies must preserve the proof's authority and method path; forwarded host/proto headers are not used to reconstruct the gRPC URI. Direct callers of per-RPC credentials must provide grpc-go's HTTPS audience URI and `credentials.RequestInfo` with the full method. `xhttp/header.Authority` names the metadata key.
 
 - B06: raise or disable read/body limits for large uploads and long request streams using `gserver.Config.Timeouts`/`MaxRequestBody`, REST `WithTimeouts`/`WithMaxRequestBody`, or Prometheus `timeouts`/`max_request_body`. Zero selects defaults and negative values disable individual limits. `restserver.MaxRequestSize` is now enforced and is 10 MiB (previously an advisory 64 MiB). Native plaintext gRPC retains per-message limits; TLS gRPC/gRPC-Web request streams receive HTTP body limits, and a native gRPC stream on TLS fails with `Unavailable` after `max_request_body` bytes in total. Handlers that read bodies without `DecodeBody` must map `*http.MaxBytesError` themselves; a known oversized body is no longer answered with 413 before the handler runs. Native net/http TLS handshakes use the smaller positive header/read deadline; `Handshake` configures cmux and eager transport handshakes. Handle `appinit.Metrics` initialization errors and close its returned resource. Sinks still initialize once per process.
 
@@ -161,4 +165,5 @@
 
 ## Known issues
 
-- DPoP-bound gRPC calls are not authenticated by DPoP (P-092): since xpki v1.0, `dpop.VerifyClaims` rejects the relative method path that `gserver/credentials` signs as `htu` and `gserver/roles` verifies, so such calls fall back to the other identity methods (guest without one) or fail in `Strict` mode. REST DPoP is not affected. A fix needs a decision on the `htu` format that gRPC clients sign.
+Remaining open issues and remediation decisions are tracked in
+[FINDINGS.md](../FINDINGS.md) and [PLAN.md](../PLAN.md).

@@ -4,7 +4,7 @@ This queue groups the open issues in [FINDINGS.md](FINDINGS.md) into
 reviewable implementation batches. The batches follow package ownership and
 shared behavior; a finding that spans packages is completed only when every
 named part is fixed. Completed batches are removed; their public behavior
-changes are in `Documentation/RELEASE_NOTES.md`.
+changes are in [the 1.0 release notes](Documentation/RELEASE_NOTES_1.0.md).
 
 Work from top to bottom within each priority. Independent batches can proceed
 separately. A batch with an entry in the **Decision** column needs its
@@ -15,7 +15,6 @@ is pending. The related larger designs are recorded in
 
 | Batch                            | Priority | Scope and intended result                                                                                                                                                                                                                                                                                                          | Findings                   | Decision                                                                                                                        |
 | -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| B32 — gRPC DPoP proof URI        | P1       | `gserver/credentials`, `gserver/roles`: sign and verify an `htu` that `dpop.VerifyClaims` accepts, so DPoP-bound gRPC calls authenticate, with an end-to-end test between `pkg/rpcclient` and `gserver`.                                                                                                                           | P-092                      | The `htu` that every gRPC DPoP client must sign (for example `https://<authority>/<method>`), or a relative-`htu` mode in xpki. |
 | B33 — gserver shutdown           | P2       | `gserver`: drain and shut down the plaintext HTTP server with the gRPC graceful stop in `Close`, so no handler runs after `Close` returns; decide whether services close after the servers stopped (drained gRPC and HTTP handlers run against closed services today); end TLS gRPC streams stopped by `Close` with a gRPC status. | P-101, P-102               | None                                                                                                                            |
 | B34 — gRPC errors and metrics    | P3       | `gserver`, `xhttp/identity`, `xhttp/correlation`: recovered panics return `Internal`, metrics and logs label errors with the code the client receives, and validation rejections are counted.                                                                                                                                      | P-098, P-099               | None                                                                                                                            |
 | B35 — TLS handler mux            | P3       | `gserver` `grpcHandlerFunc`: negotiate gRPC-Web gzip with q-values like `marshal.WriteJSON`, abort REST responses that a panic cut short, and pass `http.ErrAbortHandler` through.                                                                                                                                                 | P-076, P-100               | None                                                                                                                            |
@@ -28,8 +27,8 @@ is pending. The related larger designs are recorded in
    for its observable behavior. Preserve its ID until all portions of a
    multi-package finding are complete.
 2. For rows with a **Decision**, record the selected behavior and any migration note
-   before implementation. Findings marked Needs Approval retain that status
-   until their decision is made; this plan does not grant approval.
+   before implementation. An open compatibility decision must be resolved
+   explicitly; this plan does not grant approval.
 3. Keep each code change reviewable. A multi-package batch may be delivered
    as linked package-scoped changes, with the same batch ID and a single
    final completion check. Update the codemap when entry points, ownership,
@@ -39,8 +38,9 @@ is pending. The related larger designs are recorded in
    with Docker available for the Redis-backed tests. Benchmark performance
    fixes against the same scenario before and after; run race checks
    separately from timing.
-5. Run `make testshort` and `make lint`; run the full `make test` suite with
-   Docker for the final integrated change. Keep the total coverage above the
+5. Obtain an independent code review and address its comments; record the
+   review in `PR_REVIEW.md`. Run `make testshort` and `make lint`; run the full
+   `make test` suite with Docker for the final integrated change. Keep the total coverage above the
    90% CI gate (`MIN_TESTCOV`) and every package with statements above 90%.
    Record any unavailable fixture or incomplete check.
 6. When a batch is complete, remove its fixed findings from `FINDINGS.md`,

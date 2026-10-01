@@ -6,7 +6,7 @@
 import "github.com/effective-security/porto/xhttp/header"
 ```
 
-Package header defines constants for HTTP header names and common Content\-Type values used across porto \(X\-Correlation\-ID, Authorization, application/json, application/grpc\-web\+proto, ...\). Header names are in canonical MIME form and can be passed directly to http.Header methods.
+Package header defines constants for HTTP header names and common Content\-Type values used across porto \(X\-Correlation\-ID, Authorization, application/json, application/grpc\-web\+proto, ...\). Header names are in canonical MIME form and can be passed directly to http.Header methods, except Authority, the HTTP/2 pseudo\-header used in gRPC metadata.
 
 ## Index
 
@@ -42,6 +42,8 @@ const (
     ApplicationTimestampReply = "application/timestamp-reply"
     // Authorization is HTTP header for "Authorization"
     Authorization = "Authorization"
+    // Authority is the HTTP/2 pseudo-header exposed in gRPC incoming metadata.
+    Authority = ":authority"
     // Cookie is HTTP header for browser cookies.
     Cookie = "Cookie"
     // ProxyAuthorization is HTTP header for proxy credentials.
