@@ -1,6 +1,6 @@
-# porto v0.41 release notes
+# v1.0 RELEASE NOTES
 
-## Major fixes
+## Major fixes since v0.40
 
 ### Security
 

@@ -4,7 +4,7 @@ This queue groups the open issues in [FINDINGS.md](FINDINGS.md) into
 reviewable implementation batches. The batches follow package ownership and
 shared behavior; a finding that spans packages is completed only when every
 named part is fixed. Completed batches are removed; their public behavior
-changes are in `Documentation/RELEASE_NOTES_<version>.md`.
+changes are in `Documentation/RELEASE_NOTES.md`.
 
 Work from top to bottom within each priority. Independent batches can proceed
 separately. A batch with an entry in the **Decision** column needs its

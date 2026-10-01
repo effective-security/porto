@@ -33,7 +33,7 @@ go get github.com/effective-security/porto@latest
 | `xhttp/header`                              | HTTP header name and content-type constants.                                                                                                                                    |
 | `xhttp/httperror`                           | Structured API errors with HTTP status, code, gRPC status and request ID, plus gRPC ↔ HTTP mapping.                                                                             |
 | `xhttp/identity`                            | Caller identity, client IP and user agent extraction into request contexts for HTTP and gRPC.                                                                                   |
-| `xhttp/limits` | Shared HTTP, protocol detection and TLS handshake timeout defaults and body-size defaults. |
+| `xhttp/limits`                              | Shared HTTP, protocol detection and TLS handshake timeout defaults and body-size defaults.                                                                                      |
 | `xhttp/marshal`                             | JSON response writing (errors, gzip, pretty print) and strict JSON request decoding.                                                                                            |
 | `pkg/retriable`                             | HTTP client with retry policy, JSON marshalling, header propagation, Bearer/DPoP auth, replay nonces and token storage. See [pkg/retriable/README.md](pkg/retriable/README.md). |
 | `pkg/rpcclient`                             | gRPC client builder: TLS bundle, per-RPC Bearer/DPoP tokens, keepalive, message limits, optional blocking dial.                                                                 |
@@ -444,3 +444,8 @@ detail that `GRPCStatus` attaches.
 Prometheus accepts the same `timeouts` and `max_request_body` fields inside
 its metrics config block. `appinit.Metrics` returns bind errors synchronously;
 callers must handle them and close its returned closer to stop the endpoint.
+
+## RELEASE NOTES
+
+[dev](Documentation/RELEASE_NOTES.md)
+[v1.0](Documentation/RELEASE_NOTES_1.0.md)
