@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/didip/tollbooth/v7"
-	"github.com/didip/tollbooth/v7/limiter"
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/pkg/transport"
 	"github.com/effective-security/porto/restserver"
@@ -35,6 +33,15 @@ import (
 	"google.golang.org/grpc/codes"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
+)
+
+const (
+	// requestLogGranularity is the unit of the duration the HTTP request
+	// logger records.
+	requestLogGranularity = time.Millisecond
+	// unhandledException is the message of a call or request that failed
+	// with a recovered panic.
+	unhandledException = "unhandled exception"
 )
 
 type serveCtx struct {
@@ -253,13 +260,18 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		}
 	}()
 
+	// one limiter per listener: its REST handlers and gRPC servers share the
+	// buckets
+	rl := newRateLimiter(s.cfg.RateLimit, s.trustedProxies)
+
 	if sctx.insecure {
 		grpcL = m.Match(cmux.HTTP2())
 
 		handler := router.Handler()
 		handler = configureHandlers(s, handler)
-		// rate limit will be first
-		handler = configureRateLimiter(s.cfg.RateLimit, handler)
+		// rate limit will be first; cmux sends gRPC (h2c) to the gRPC
+		// server, whose interceptors limit it
+		handler = rl.httpHandler(handler, s.cfg.SkipLogPaths)
 		handler = marshal.LimitRequestBody(handler, s.cfg.MaxRequestBody)
 		handler = identity.NewTrustedProxyHandler(handler, s.trustedProxies)
 
@@ -270,19 +282,20 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 		s.cfg.Timeouts.ApplyHTTP(srv)
 		httpL = m.Match(cmux.HTTP1())
 
-		insecure = &servers{grpc: grpcServer(s, nil, sctx.gopts...), http: srv}
+		insecure = &servers{grpc: grpcServer(s, nil, rl, sctx.gopts...), http: srv}
 	}
 
 	if sctx.secure {
 		tlsCfg := sctx.tlsInfo.Config()
-		gs := grpcServer(s, tlsCfg, sctx.gopts...)
+		gs := grpcServer(s, tlsCfg, rl, sctx.gopts...)
 		handler := router.Handler()
 		handler = configureHandlers(s, handler)
+		// rate limit REST requests; gRPC and gRPC-Web calls are limited by
+		// the interceptors of gs, which answer them with ResourceExhausted
+		handler = rl.httpHandler(handler, s.cfg.SkipLogPaths)
 
 		// mux between http and grpc
 		handler = sctx.grpcHandlerFunc(gs, handler)
-		// rate limit will be first
-		handler = configureRateLimiter(s.cfg.RateLimit, handler)
 		// The body limit also bounds native gRPC streams here: grpc-go's
 		// ServeHTTP transport buffers request data without flow control
 		// (ROADMAP 12).
@@ -324,73 +337,6 @@ func (sctx *serveCtx) serve(s *Server, errHandler func(error)) (err error) {
 	return m.Serve()
 }
 
-// configureRateLimiter wraps handler with the tollbooth limiter described by
-// cfg, which Start has already checked with RateLimit.Validate.
-func configureRateLimiter(cfg *RateLimit, handler http.Handler) http.Handler {
-	if !cfg.GetEnabled() {
-		return handler
-	}
-	logger.KV(xlog.NOTICE, "RateLimit", "enabled")
-
-	ttl := cfg.ExpirationTTL
-	if ttl == 0 {
-		ttl = defaultRateLimitTTL
-	}
-	ops := limiter.ExpirableOptions{
-		DefaultExpirationTTL: ttl,
-	}
-
-	lmt := tollbooth.NewLimiter(float64(cfg.RequestsPerSecond), &ops)
-	if len(cfg.Metods) > 0 {
-		lmt.SetMethods(cfg.Metods)
-	}
-
-	// reject answers a limited request like tollbooth.LimitHandler, inside
-	// its own metrics handler: the limiter runs before the one of
-	// configureHandlers, so its responses are counted here, with the guest
-	// role and UnknownRoute. On TLS listeners they include gRPC and gRPC-Web
-	// calls, whose other responses the HTTP metrics never see.
-	reject := telemetry.NewRequestMetrics(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lmt.ExecOnLimitReached(w, r)
-		if lmt.GetOverrideDefaultResponseWriter() {
-			return
-		}
-		w.Header().Add(header.ContentType, lmt.GetMessageContentType())
-		w.WriteHeader(lmt.GetStatusCode())
-		_, _ = w.Write([]byte(lmt.GetMessage()))
-	}))
-
-	if len(cfg.HeadersIPLookups) > 0 {
-		// Administrator override: tollbooth reads the named headers as sent.
-		lmt.SetIPLookups(cfg.HeadersIPLookups)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if httpErr := tollbooth.LimitByRequest(lmt, w, r); httpErr != nil {
-				reject.ServeHTTP(w, r)
-				return
-			}
-			handler.ServeHTTP(w, r)
-		})
-	}
-
-	// Default: key on the client IP resolved by the trusted proxy policy.
-	// tollbooth reads only RemoteAddr, so it checks a shallow copy whose
-	// RemoteAddr is the bare client IP; tollbooth also echoes that IP in
-	// X-Rate-Limit-Request-Remote-Addr. The handler and reject receive the
-	// original request (reject's handler, and so tollbooth's OnLimitReached
-	// callback, which is unused here, sees it with the metrics labels in its
-	// context and the metrics ResponseCapture). An empty IP is not limited.
-	lmt.SetIPLookups([]string{rateLookupRemoteAddr})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		limitReq := *r
-		limitReq.RemoteAddr = identity.ClientIPFromRequest(r)
-		if httpErr := tollbooth.LimitByRequest(lmt, w, &limitReq); httpErr != nil {
-			reject.ServeHTTP(w, r)
-			return
-		}
-		handler.ServeHTTP(w, r)
-	})
-}
-
 func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	// NOTE: the handlers are executed in the reverse order
 	// therefore configure additional first
@@ -411,11 +357,7 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	}
 
 	// logging wrapper
-	var opts []telemetry.Option
-	if len(s.cfg.SkipLogPaths) > 0 {
-		opts = append(opts, telemetry.WithLoggerSkipPaths(s.cfg.SkipLogPaths))
-	}
-	handler = telemetry.NewRequestLogger(handler, time.Millisecond, logger, opts...)
+	handler = telemetry.NewRequestLogger(handler, requestLogGranularity, logger, telemetry.WithLoggerSkipPaths(s.cfg.SkipLogPaths))
 
 	// reports the caller role to the metrics wrapper outside the identity
 	// handler, and records nothing itself
@@ -430,7 +372,7 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	}
 
 	// metrics wrapper; also counts the identity rejections and CORS
-	// preflights (rate-limit rejections are counted by configureRateLimiter)
+	// preflights (rate-limit rejections are counted by rateLimiter.httpHandler)
 	handler = telemetry.NewRequestMetrics(handler)
 
 	// Add correlationID
@@ -479,7 +421,9 @@ func restRouter(e *Server) restserver.Router {
 	return router
 }
 
-func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Server {
+// grpcServer returns the gRPC server of one listener, limited by rl unless
+// rl is nil.
+func grpcServer(s *Server, tls *tls.Config, rl *rateLimiter, gopts ...grpc.ServerOption) *grpc.Server {
 	var opts []grpc.ServerOption
 	//opts = append(opts, grpc.CustomCodec(&codec{}))
 
@@ -488,15 +432,21 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 		opts = append(opts, grpc.Creds(bundle.TransportCredentials()))
 	}
 
-	// FINDINGS P-099: validation rejects requests before the log
-	// interceptor, which records the gRPC metrics.
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		panicInterceptor(),
-		NewRequestValidationUnaryInterceptor(),
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
-		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
 	}
+	// The limiter rejects calls after the log interceptor, which records
+	// them, and before validation and identity extraction do any work for
+	// them, so an invalid request draws a token too.
+	if rl != nil {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, rl.unaryInterceptor())
+	}
+	chainUnaryInterceptors = append(chainUnaryInterceptors,
+		NewRequestValidationUnaryInterceptor(),
+		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
+	)
 	// authz is nil when the config has no allow rules; the interceptors
 	// would dereference it on every call.
 	if s.authz != nil {
@@ -512,8 +462,13 @@ func grpcServer(s *Server, tls *tls.Config, gopts ...grpc.ServerOption) *grpc.Se
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		s.newLogStreamServerInterceptor(),
 		correlation.NewStreamServerInterceptor(),
-		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
 	}
+	if rl != nil {
+		chainStreamInterceptors = append(chainStreamInterceptors, rl.streamInterceptor())
+	}
+	chainStreamInterceptors = append(chainStreamInterceptors,
+		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
+	)
 	if s.authz != nil {
 		chainStreamInterceptors = append(chainStreamInterceptors, s.authz.NewStreamServerInterceptor())
 	}
@@ -562,7 +517,7 @@ func panicInterceptor() grpc.UnaryServerInterceptor {
 					"action", si.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
-				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, "unhandled exception")
+				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, unhandledException)
 			}
 		}()
 		return handler(ctx, req)
@@ -580,7 +535,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 						"reason", "panic",
 						"err", rec,
 						"stack", string(debug.Stack()))
-					http.Error(w, "unhandled exception", http.StatusInternalServerError)
+					http.Error(w, unhandledException, http.StatusInternalServerError)
 				}
 			}()
 			grpcServer.ServeHTTP(w, r)
@@ -616,7 +571,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					"reason", "panic",
 					"err", rec,
 					"stack", string(debug.Stack()))
-				http.Error(w, "unhandled exception", http.StatusInternalServerError)
+				http.Error(w, unhandledException, http.StatusInternalServerError)
 			}
 		}()
 
@@ -778,14 +733,34 @@ type Validator interface {
 
 // NewRequestValidationUnaryInterceptor returns a unary interceptor that calls
 // Validate on requests implementing Validator and rejects the call with the
-// returned error. It is always installed by Start.
+// returned error. A panic in Validate fails the call with Internal; panics
+// in the handler are left to the interceptors around it. Start installs it
+// after the log and rate-limit interceptors, so invalid requests are
+// logged, counted and limited.
 func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		if validator, ok := req.(Validator); ok {
-			if err := validator.Validate(ctx); err != nil {
+			if err := validate(ctx, validator, si); err != nil {
 				return nil, err
 			}
 		}
 		return handler(ctx, req)
 	}
+}
+
+// validate calls v.Validate and turns a panic into the Internal error that
+// panicInterceptor returns, which the inner recover of the correlation
+// interceptor would otherwise report as Unknown (FINDINGS P-098).
+func validate(ctx context.Context, v Validator, si *grpc.UnaryServerInfo) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.ContextKV(ctx, xlog.ERROR,
+				"reason", "panic",
+				"action", si.FullMethod,
+				"err", rec,
+				"stack", string(debug.Stack()))
+			err = httperror.NewGrpcFromCtx(ctx, codes.Internal, unhandledException)
+		}
+	}()
+	return v.Validate(ctx)
 }

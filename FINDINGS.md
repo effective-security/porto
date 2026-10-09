@@ -28,7 +28,7 @@ Line numbers may drift; the symbol name is the stable reference.
 | P-076 | gserver                                    | `serve.go` `serveCtx.grpcHandlerFunc`                                                       | gRPC-Web gzip chosen by substring match on `Accept-Encoding`; ignores `q=0`            | correctness | LOW      | Open           |
 | P-095 | pkg/redisclient, pkg/cache                 | `redisclient.go` `Get`, `HGet`, `IsNotFoundError`; `cache.go` `IsNotFoundError`, `GetOrSet` | `ErrNotFound` returned bare and matched by message text                                | correctness | LOW      | Open |
 | P-098 | gserver, xhttp/identity, xhttp/correlation | `logs.go` `logRequest`, `ctx.go`, `correlation.go`                                          | Plain gRPC errors and handler panics reach clients as Unknown, metrics as Internal     | correctness | LOW      | Open           |
-| P-099 | gserver                                    | `logs.go` `newLogUnaryInterceptor`, `serve.go` `grpcServer`                                 | gRPC metrics miss calls rejected by request validation                                 | correctness | LOW      | Open           |
+| P-099 | gserver                                    | `logs.go` `newLogUnaryInterceptor`                                                          | gRPC metrics miss calls that panic past the log interceptor                            | correctness | LOW      | Open           |
 | P-100 | gserver                                    | `serve.go` `serveCtx.grpcHandlerFunc`                                                       | REST panic recovery on TLS listeners corrupts started responses and swallows aborts    | correctness | LOW      | Open           |
 | P-104 | pkg/redisclient                            | `redisclient.go` `ZAdd`, `ZIncrBy`, `ZRem`, `ZRemRangeByRank`, `SIsMember`                  | Unwrapped go-redis errors and a misformatted member in errors                          | correctness | LOW      | Open           |
 | P-097 | pkg/retriable                              | `storage.go` `SaveAuthToken`                                                                | Comment documents a `token_type` field that `ParseAuthToken` ignores                   | docs        | LOW      | Open           |
@@ -76,11 +76,11 @@ Line numbers may drift; the symbol name is the stable reference.
 - Impact: the gRPC metrics and logs disagree with the code the client receives; dashboards count `Internal` for calls that clients see as `Unknown`.
 - Fix: return `httperror.NewGrpcFromCtx(ctx, codes.Internal, "unhandled exception")` from those recovers, and label plain errors with `status.Code(err)` (`Unknown`), using `errors.As` for the `httperror` types.
 
-### P-099 gRPC metrics miss validation rejections
+### P-099 gRPC metrics miss calls that panic past the log interceptor
 
-- Evidence: `grpcServer` chains `panicInterceptor`, `NewRequestValidationUnaryInterceptor`, then the correlation and log interceptors, so a request that fails `Validate` (or panics in it) returns before `newLogUnaryInterceptor` and records no `rpc_requests_*`. The log interceptor also registers its recording `defer` after the handler returned, so a panic escaping the inner interceptors would skip it (today the identity interceptor recovers handler panics first).
-- Impact: invalid requests are invisible in the gRPC metrics, unlike REST 400s.
-- Fix: run the log interceptor before validation (after panic recovery) and record in a `defer` registered before the handler call, as the HTTP metrics handler does.
+- Evidence: `newLogUnaryInterceptor` and `newLogStreamServerInterceptor` register their recording `defer` after the handler returned, so a panic escaping the inner interceptors skips the log line and `rpc_requests_*` (today the identity interceptor recovers handler panics first, and `NewRequestValidationUnaryInterceptor` recovers `Validate` panics). Validation rejections are counted since the rate-limit change moved validation after the log and rate-limit interceptors.
+- Impact: a panic in a custom interceptor, or in a stream handler before identity, is invisible in the gRPC metrics.
+- Fix: record in a `defer` registered before the handler call, as the HTTP metrics handler does.
 
 ### P-100 REST panic recovery on TLS listeners
 
