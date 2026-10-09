@@ -24,7 +24,8 @@ func WithMiddleware(otherHandler Middleware) Option {
 }
 
 // WithUnaryServerInterceptor appends a gRPC unary interceptor after the
-// built-in chain (panic recovery, validation, correlation, logging, identity, authz).
+// built-in chain (panic recovery, correlation, logging, rate limit,
+// validation, identity, authz).
 func WithUnaryServerInterceptor(other grpc.UnaryServerInterceptor) Option {
 	return newFuncOption(func(o *options) {
 		o.unary = append(o.unary, other)
@@ -32,7 +33,7 @@ func WithUnaryServerInterceptor(other grpc.UnaryServerInterceptor) Option {
 }
 
 // WithStreamServerInterceptor appends a gRPC stream interceptor after the
-// built-in chain (logging, correlation, identity, authz).
+// built-in chain (logging, correlation, rate limit, identity, authz).
 func WithStreamServerInterceptor(other grpc.StreamServerInterceptor) Option {
 	return newFuncOption(func(o *options) {
 		o.stream = append(o.stream, other)

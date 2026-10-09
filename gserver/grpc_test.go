@@ -3,7 +3,6 @@ package gserver_test
 import (
 	"context"
 	"io"
-	"maps"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -415,9 +414,10 @@ func rpcMetric(api string, code codes.Code) map[string]int {
 
 // TestGRPCRequestMetrics checks the metrics recorded by the logging
 // interceptors: one sample and one counter per call labelled with the
-// method and the status code of its error, a single counter under "unknown"
-// and "404" for NotFound, and nothing for a successful call on a skipped
-// path. It installs the process-global metrics sink, so it is not parallel.
+// method and the status code of its error, including calls that fail or
+// panic in Validate (FINDINGS P-099), a single counter under "unknown" and
+// "404" for NotFound, and nothing for a successful call on a skipped path.
+// It installs the process-global metrics sink, so it is not parallel.
 func TestGRPCRequestMetrics(t *testing.T) {
 	counts := newGRPCMetricsSink(t)
 	cfg := &gserver.Config{
@@ -438,6 +438,8 @@ func TestGRPCRequestMetrics(t *testing.T) {
 		{echoInternal, codes.Internal},
 		{echoMany, codes.InvalidArgument},
 		{echoStatus, codes.FailedPrecondition},
+		{echoInvalid, codes.InvalidArgument},
+		{echoValidatePanic, codes.Internal},
 	} {
 		_, err := callEcho(ctx, conn, []byte(tt.value))
 		require.Equal(t, tt.code, status.Code(err), "%s: %v", tt.value, err)
@@ -454,11 +456,15 @@ func TestGRPCRequestMetrics(t *testing.T) {
 	for _, m := range []map[string]int{
 		rpcMetric(echoMethod, codes.OK),
 		rpcMetric(echoMethod, codes.Internal),
+		rpcMetric(echoMethod, codes.Internal),
+		rpcMetric(echoMethod, codes.InvalidArgument),
 		rpcMetric(echoMethod, codes.InvalidArgument),
 		rpcMetric(echoMethod, codes.FailedPrecondition),
 		rpcMetric(watchMethod, codes.FailedPrecondition),
 	} {
-		maps.Copy(want, m)
+		for k, v := range m {
+			want[k] += v
+		}
 	}
 	assert.Equal(t, want, counts())
 }

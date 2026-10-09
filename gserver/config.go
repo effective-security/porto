@@ -31,6 +31,13 @@ const (
 	// tollbooth compares lookup names exactly, so header.XRealIP would not match.
 	rateLookupXRealIP = "X-Real-IP"
 
+	// rateLimitLogReason is the log reason for a rejected request when
+	// RateLimit.LogRejections is set.
+	rateLimitLogReason = "rate_limit"
+	// rateLimitNoAgent is logged when a rejected request has no User-Agent,
+	// matching the request logger.
+	rateLimitNoAgent = "no-agent"
+
 	// defaultRateLimitTTL is the RateLimit.ExpirationTTL used when zero.
 	defaultRateLimitTTL = 10 * time.Minute
 	// minRateLimitTTL is the shortest accepted positive RateLimit.ExpirationTTL:
@@ -320,8 +327,11 @@ func (c *CORS) GetOptionsPassthrough() bool {
 }
 
 // RateLimit configures the per-client token bucket rate limiter
-// (github.com/didip/tollbooth) that wraps the HTTP handler. An enabled block
-// must pass Validate; Start rejects one that does not.
+// (github.com/didip/tollbooth) of each listener. It answers a limited REST
+// request with HTTP 429 and a limited gRPC or gRPC-Web call with
+// ResourceExhausted; both are logged and counted like other responses of
+// their protocol. An enabled block must pass Validate; Start rejects one
+// that does not.
 type RateLimit struct {
 	// Enabled specifies if rate limiting is enabled.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
@@ -339,8 +349,9 @@ type RateLimit struct {
 	// order: "RemoteAddr", "X-Forwarded-For" or "X-Real-IP" (as spelled by
 	// tollbooth; any other name is rejected because tollbooth would ignore it
 	// and leave requests unlimited). The default is the trusted client
-	// address derived from the socket peer and TrustedProxyCIDRs. Explicit
-	// header lookups can be spoofed and should be configured only when the
+	// address derived from the socket peer and TrustedProxyCIDRs; a Unix
+	// socket peer has none, so its callers are not limited. Explicit header
+	// lookups can be spoofed and should be configured only when the
 	// deployment guarantees they are overwritten.
 	HeadersIPLookups []string `json:"headers_ip_lookups,omitempty" yaml:"headers_ip_lookups,omitempty"`
 	// Metods (sic) restricts limiting to the listed HTTP methods, e.g. "GET",
@@ -349,11 +360,25 @@ type RateLimit struct {
 	// tchar characters only); any other entry is rejected because it would
 	// never match and leave every request unlimited.
 	Metods []string `json:"metods,omitempty" yaml:"metods,omitempty"`
+	// LogRejections, when true, adds a WARNING line for each rejected
+	// request with the limiter key (an IPv6 client's /64 prefix, as
+	// tollbooth groups it), the socket peer, the User-Agent and the
+	// forwarding headers as received. Its correlation ID (ctx) is the
+	// X-Correlation-ID of a 429 and the request ID of a gRPC error. It is
+	// off by default. Turn it on to check whether a load balancer's client
+	// IP is the limiter key, or whether every caller shares one internal
+	// peer such as 10.0.x.x; gRPC log lines show no client address.
+	LogRejections *bool `json:"log_rejections,omitempty" yaml:"log_rejections,omitempty"`
 }
 
 // GetEnabled returns true when rate limiting is configured and enabled; safe on a nil receiver.
 func (c *RateLimit) GetEnabled() bool {
 	return c != nil && c.Enabled != nil && *c.Enabled
+}
+
+// GetLogRejections returns true when rejected requests are logged; safe on a nil receiver.
+func (c *RateLimit) GetLogRejections() bool {
+	return c != nil && c.LogRejections != nil && *c.LogRejections
 }
 
 // Validate returns an error when rate limiting is enabled with settings that

@@ -143,33 +143,31 @@ func TestHandlersCountEarlyResponses(t *testing.T) {
 	assert.Equal(t, want, delta(before, counts()))
 }
 
-// TestRateLimitRejectionCounted checks that both rate limiter variants
-// count their rejections, including those of gRPC calls, which reach the
-// limiter on TLS listeners (formerly P-084).
+// TestRateLimitRejectionCounted checks that both HTTP rate limiter variants
+// count their rejections with the guest role and UnknownRoute (formerly
+// P-084). gRPC and gRPC-Web calls are limited by the gRPC interceptors and
+// counted by the gRPC metrics instead (TestGRPCRateLimitMetrics).
 func TestRateLimitRejectionCounted(t *testing.T) {
 	counts := newMetricsSink(t)
 
 	enabled := true
 	for _, lookups := range [][]string{nil, {rateLookupRemoteAddr}} {
 		calls := 0
-		h := configureRateLimiter(&RateLimit{
+		h := newRateLimiter(&RateLimit{
 			Enabled:           &enabled,
 			RequestsPerSecond: 1,
 			HeadersIPLookups:  lookups,
-		}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		}, nil).httpHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
 			w.WriteHeader(http.StatusOK)
-		}))
+		}), nil)
 		h = identity.NewTrustedProxyHandler(h, nil)
 
 		before := counts()
 		codes := make([]int, 0, 3)
-		for _, ct := range []string{"", "", header.ApplicationGRPC} {
-			r := httptest.NewRequest(http.MethodPost, "/pkg.Service/Method", nil)
+		for range 3 {
+			r := httptest.NewRequest(http.MethodPost, "/v1/items", nil)
 			r.RemoteAddr = "198.51.100.7:123"
-			if ct != "" {
-				r.Header.Set(header.ContentType, ct)
-			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
 			codes = append(codes, w.Code)

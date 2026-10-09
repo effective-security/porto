@@ -11,14 +11,19 @@
 // "application/grpc-web-text" requests are translated to gRPC and their
 // trailers are encoded into the gRPC-Web response body.
 //
-// Every request passes through a fixed middleware chain: rate limiting
-// (optional; its rejections are counted by the request metrics), correlation
-// ID, request metrics, CORS (optional), identity extraction
-// (roles.IdentityProvider built from Config.IdentityMap), a nested metrics
-// handler that reports the caller role, request logging, authorization
-// (restserver/authz built from Config.Authz), and a readiness check. gRPC
-// calls go through the equivalent interceptor chain, prefixed by a
-// panic-recovery interceptor and NewRequestValidationUnaryInterceptor.
+// Every REST request passes through a fixed middleware chain: rate limiting
+// (optional), correlation ID, request metrics, CORS (optional), identity
+// extraction (roles.IdentityProvider built from Config.IdentityMap), a nested
+// metrics handler that reports the caller role, request logging,
+// authorization (restserver/authz built from Config.Authz), and a readiness
+// check. gRPC and gRPC-Web calls go through the equivalent interceptor chain:
+// panic recovery, correlation ID, logging, rate limiting and, for unary
+// calls, NewRequestValidationUnaryInterceptor before identity extraction.
+// Each listener has one limiter: a limited REST request gets
+// HTTP 429 and a limited call ResourceExhausted, logged and counted like any
+// other response of its protocol; with RateLimit.LogRejections set, a
+// WARNING line adds the limiter key, the socket peer and the forwarding
+// headers.
 //
 // Minimal usage:
 //

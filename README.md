@@ -190,6 +190,7 @@ cors:
 rate_limit:
   enabled: true
   requests_per_second: 100
+  # log_rejections: true
 timeout:
   request: 10s
 identity_map:
@@ -226,6 +227,23 @@ if err != nil {
 }
 srv.WithTrustedProxies(trust)
 ```
+
+`gserver` limits REST, gRPC and gRPC-Web on every listener, with one
+bucket per client IP and request path; callers on a Unix socket have no
+client IP and are not limited unless `headers_ip_lookups` is set (without
+`RemoteAddr`, which keys every socket caller as `@`). A limited
+REST request gets HTTP 429 with an `X-Correlation-ID`; a limited gRPC or
+gRPC-Web call gets `ResourceExhausted` with the request ID. Both are logged
+and counted in the metrics like any other response. Unless
+`headers_ip_lookups` is set, the 429 access line's `remote` is the
+resolved client IP the limiter keys on; tollbooth groups an IPv6 client
+by its /64 prefix. If
+every 429 shows an internal address such as 10.0.x.x, all callers behind
+the load balancer share one bucket: add the balancer to
+`trusted_proxy_cidrs` and make sure it sets `X-Forwarded-For`. Set
+`log_rejections: true` on `rate_limit` to log each rejection at WARNING
+with the limiter key, the socket peer, the User-Agent and the forwarding
+headers as received; gRPC log lines show no client address without it.
 
 ### HTTP client with retries
 
