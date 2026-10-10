@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"cmp"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,12 @@ import (
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
 )
+
+// NoAgent is the agent logged, and matched against LoggerSkipPath.Agent,
+// for a request without a User-Agent header. The gserver gRPC, rate-limit,
+// CORS and debug lines log it too; gserver matches SkipLogPaths against the
+// User-Agent as sent.
+const NoAgent = "no-agent"
 
 // Option configures NewRequestLogger; see WithLoggerSkipPaths.
 type Option option
@@ -100,11 +107,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rw := NewResponseCapture(w)
 	l.handler.ServeHTTP(rw, r)
 
-	agent := r.Header.Get(header.UserAgent)
-	if agent == "" {
-		agent = "no-agent"
-	}
-
+	agent := cmp.Or(r.Header.Get(header.UserAgent), NoAgent)
 	if ShouldSkip(l.cfg.skippaths, r.URL.Path, agent) {
 		return
 	}

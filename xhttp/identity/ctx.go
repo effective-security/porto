@@ -120,7 +120,7 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.WARNING,
 					"reason", "identityMapper",
-					"ip", clientIP,
+					"remote", clientIP,
 					"target", target,
 					"err", err.Error())
 
@@ -185,13 +185,13 @@ func getMdHeader(md metadata.MD, name string) string {
 }
 
 func createIdentityContext(ctx context.Context, methodFullMethod string, identityMapper ProviderFromContext) (context.Context, error) {
-	var id Identity
-	var err error
-	id, err = identityMapper(ctx, methodFullMethod)
+	clientIP := ClientIPFromGRPC(ctx)
+	id, err := identityMapper(ctx, methodFullMethod)
 	if err != nil {
 		logger.ContextKV(ctx, xlog.WARNING,
 			"reason", "access_denied",
 			"method", methodFullMethod,
+			"remote", clientIP,
 			"err", err.Error())
 		he := identityError(ctx, err)
 		if he.RPCStatus == codes.OK {
@@ -213,7 +213,7 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 			rc.userAgent = getMdHeader(md, "x-user-agent")
 		}
 	}
-	rc.clientIP = ClientIPFromGRPC(ctx)
+	rc.clientIP = clientIP
 
 	ctx = AddToContext(ctx, rc)
 	role := id.Role()

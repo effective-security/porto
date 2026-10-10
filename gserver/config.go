@@ -34,9 +34,6 @@ const (
 	// rateLimitLogReason is the log reason for a rejected request when
 	// RateLimit.LogRejections is set.
 	rateLimitLogReason = "rate_limit"
-	// rateLimitNoAgent is logged when a rejected request has no User-Agent,
-	// matching the request logger.
-	rateLimitNoAgent = "no-agent"
 
 	// defaultRateLimitTTL is the RateLimit.ExpirationTTL used when zero.
 	defaultRateLimitTTL = 10 * time.Minute
@@ -367,7 +364,7 @@ type RateLimit struct {
 	// X-Correlation-ID of a 429 and the request ID of a gRPC error. It is
 	// off by default. Turn it on to check whether a load balancer's client
 	// IP is the limiter key, or whether every caller shares one internal
-	// peer such as 10.0.x.x; gRPC log lines show no client address.
+	// peer such as 10.0.x.x.
 	LogRejections *bool `json:"log_rejections,omitempty" yaml:"log_rejections,omitempty"`
 }
 

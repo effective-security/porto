@@ -115,7 +115,7 @@ func setKeepAlive(c net.Conn) {
 	if err := kac.SetKeepAliveConfig(keepAliveConfig); err != nil {
 		logger.KV(xlog.DEBUG,
 			"reason", "set_keepalive",
-			"remote", c.RemoteAddr(),
+			"peer", c.RemoteAddr(),
 			"err", err.Error(),
 		)
 	}
