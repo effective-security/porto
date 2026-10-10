@@ -1,6 +1,7 @@
 package gserver
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -446,6 +447,9 @@ func grpcServer(s *Server, tls *tls.Config, rl *rateLimiter, gopts ...grpc.Serve
 	chainUnaryInterceptors = append(chainUnaryInterceptors,
 		NewRequestValidationUnaryInterceptor(),
 		identity.NewAuthUnaryInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
+		// passes the caller to the log interceptor, which runs before
+		// identity (formerly P-105)
+		identityHandoffUnaryInterceptor(),
 	)
 	// authz is nil when the config has no allow rules; the interceptors
 	// would dereference it on every call.
@@ -468,6 +472,7 @@ func grpcServer(s *Server, tls *tls.Config, rl *rateLimiter, gopts ...grpc.Serve
 	}
 	chainStreamInterceptors = append(chainStreamInterceptors,
 		identity.NewStreamServerInterceptor(s.identity.IdentityFromContext, s.trustedProxies),
+		identityHandoffStreamInterceptor(),
 	)
 	if s.authz != nil {
 		chainStreamInterceptors = append(chainStreamInterceptors, s.authz.NewStreamServerInterceptor())
@@ -616,8 +621,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 							"reason", "cors_not_allowed",
 							"method", r.Method,
 							"ct", ct,
-							"remote", r.RemoteAddr,
-							"agent", r.UserAgent(),
+							"remote", identity.ClientIPFromRequest(r),
+							"peer", r.RemoteAddr,
+							"agent", cmp.Or(r.UserAgent(), telemetry.NoAgent),
 							"content-type", r.Header.Get(header.ContentType),
 							"accept", r.Header.Get(header.Accept),
 							"url", r.URL.String())
@@ -665,8 +671,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				logger.ContextKV(r.Context(), xlog.DEBUG,
 					"method", r.Method,
 					"ct", ct,
-					"remote", r.RemoteAddr,
-					"agent", r.UserAgent(),
+					"remote", identity.ClientIPFromRequest(r),
+					"peer", r.RemoteAddr,
+					"agent", cmp.Or(r.UserAgent(), telemetry.NoAgent),
 					"content-type", r.Header.Get(header.ContentType),
 					"accept", r.Header.Get(header.Accept),
 					"content-length", r.ContentLength,
@@ -690,8 +697,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				logger.ContextKV(r.Context(), xlog.DEBUG,
 					"handle", "otherHandler",
 					"ct", ct,
-					"remote", r.RemoteAddr,
-					"agent", r.UserAgent(),
+					"remote", identity.ClientIPFromRequest(r),
+					"peer", r.RemoteAddr,
+					"agent", cmp.Or(r.UserAgent(), telemetry.NoAgent),
 					"content-type", r.Header.Get(header.ContentType),
 					"accept", r.Header.Get(header.Accept),
 					"content-length", r.ContentLength,

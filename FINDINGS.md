@@ -7,7 +7,9 @@ removed; public behavior changes are recorded in
 Use the **ID** when commenting or assigning work. Remove an item only when every
 part is resolved. Compatibility decisions are tracked in [PLAN.md](PLAN.md).
 IDs are never reused, so a gap in the numbering only means the item was
-resolved and removed.
+resolved and removed. An item fixed in the change that found it gets an ID
+but no row here; the last ID assigned is **P-105**, so the next free ID is
+P-106. Update this line when you assign one.
 
 Type: **security** > **bug** > **race** > **correctness** > **performance** > **docs**.
 

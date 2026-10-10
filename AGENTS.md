@@ -32,9 +32,9 @@ and `pkg/*` never import `restserver` or `gserver`; `xhttp/header`,
 `pkg/tlsconfig`, `pkg/tasks`, `pkg/discovery`, `pkg/streamctx` and
 `metricskey` import nothing else from this module; `restserver` imports only
 `restserver/*` and `xhttp/*`; `gserver` may import `restserver/*`,
-`xhttp/*`, `pkg/transport` and `pkg/discovery`. `pkg/retriable` and
-`pkg/rpcclient` import `gserver/credentials` for token types only. Nothing
-outside `tests/` imports `tests/`.
+`xhttp/*`, `pkg/transport`, `pkg/discovery` and `pkg/streamctx`.
+`pkg/retriable` and `pkg/rpcclient` import `gserver/credentials` for token
+types only. Nothing outside `tests/` imports `tests/`.
 
 ## NAVIGATION
 

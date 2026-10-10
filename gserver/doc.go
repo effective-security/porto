@@ -17,13 +17,16 @@
 // metrics handler that reports the caller role, request logging,
 // authorization (restserver/authz built from Config.Authz), and a readiness
 // check. gRPC and gRPC-Web calls go through the equivalent interceptor chain:
-// panic recovery, correlation ID, logging, rate limiting and, for unary
-// calls, NewRequestValidationUnaryInterceptor before identity extraction.
+// panic recovery, correlation ID, logging (streams: logging, then
+// correlation ID, which recovers panics), rate limiting and, for unary calls,
+// NewRequestValidationUnaryInterceptor before identity extraction.
 // Each listener has one limiter: a limited REST request gets
 // HTTP 429 and a limited call ResourceExhausted, logged and counted like any
 // other response of its protocol; with RateLimit.LogRejections set, a
 // WARNING line adds the limiter key, the socket peer and the forwarding
-// headers.
+// headers. gRPC log lines carry the client IP as remote and the User-Agent
+// as agent, like the REST access lines, and the gRPC metrics carry the role
+// that identity extraction resolved.
 //
 // Minimal usage:
 //

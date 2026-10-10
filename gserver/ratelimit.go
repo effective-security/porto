@@ -1,6 +1,7 @@
 package gserver
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"net/netip"
@@ -227,10 +228,7 @@ func (rl *rateLimiter) grpcRequest(ctx context.Context, fullMethod string) *http
 // It shows the limiter key next to the socket peer, the User-Agent and the
 // forwarding headers as received.
 func (rl *rateLimiter) logRejection(r *http.Request) {
-	agent := r.Header.Get(header.UserAgent)
-	if agent == "" {
-		agent = rateLimitNoAgent
-	}
+	agent := cmp.Or(r.Header.Get(header.UserAgent), telemetry.NoAgent)
 	logger.ContextKV(r.Context(), xlog.WARNING,
 		"reason", rateLimitLogReason,
 		"method", r.Method,

@@ -65,8 +65,14 @@ const (
 )
 ```
 
+<a name="NoAgent"></a>NoAgent is the agent logged, and matched against LoggerSkipPath.Agent, for a request without a User\-Agent header. The gserver gRPC, rate\-limit, CORS and debug lines log it too; gserver matches SkipLogPaths against the User\-Agent as sent.
+
+```go
+const NoAgent = "no-agent"
+```
+
 <a name="NewRequestLogger"></a>
-## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L67-L71>)
+## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L74-L78>)
 
 ```go
 func NewRequestLogger(handler http.Handler, granularity time.Duration, logger xlog.KeyValueLogger, opts ...Option) http.Handler
@@ -105,7 +111,7 @@ func SetRoute(ctx context.Context, pattern string)
 SetRoute records pattern, the registered route template that matched the request \(for example "/v1/users/:id"\), as the uri label of the metrics recorded by NewRequestMetrics. The restserver Router calls it for every matched route; custom routers behind NewRequestMetrics call it with ctx from the request they dispatch. The pattern must come from the route registration, never from the request, so that the label stays bounded. The last call wins; without an enclosing NewRequestMetrics it is a no\-op.
 
 <a name="ShouldSkip"></a>
-## func [ShouldSkip](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L27>)
+## func [ShouldSkip](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L34>)
 
 ```go
 func ShouldSkip(cfg []LoggerSkipPath, path, userAgent string) bool
@@ -114,7 +120,7 @@ func ShouldSkip(cfg []LoggerSkipPath, path, userAgent string) bool
 ShouldSkip reports whether a request for path with the given User\-Agent matches any entry in cfg and should therefore not be logged.
 
 <a name="LoggerSkipPath"></a>
-## type [LoggerSkipPath](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L20-L23>)
+## type [LoggerSkipPath](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L27-L30>)
 
 LoggerSkipPath describes requests to exclude from logging by Path and User\-Agent. Path is compared exactly \("\*" matches every path\); Agent is a substring match \("\*" matches every agent\). Both must match.
 
@@ -126,7 +132,7 @@ type LoggerSkipPath struct {
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L14>)
+## type [Option](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L21>)
 
 Option configures NewRequestLogger; see WithLoggerSkipPaths.
 
@@ -135,7 +141,7 @@ type Option option
 ```
 
 <a name="WithLoggerSkipPaths"></a>
-### func [WithLoggerSkipPaths](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L46>)
+### func [WithLoggerSkipPaths](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L53>)
 
 ```go
 func WithLoggerSkipPaths(value []LoggerSkipPath) Option
@@ -144,7 +150,7 @@ func WithLoggerSkipPaths(value []LoggerSkipPath) Option
 WithLoggerSkipPaths returns an Option that suppresses log lines for requests matching any of the given LoggerSkipPath entries.
 
 <a name="RequestLogger"></a>
-## type [RequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L56-L59>)
+## type [RequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L63-L66>)
 
 RequestLogger is a http.Handler that forwards requests to the wrapped handler and then logs one INFO line per request \(method, path, status, bytes, duration, remote IP, agent\) using the request context for correlation fields.
 
@@ -155,7 +161,7 @@ type RequestLogger struct {
 ```
 
 <a name="RequestLogger.ServeHTTP"></a>
-### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L98>)
+### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L105>)
 
 ```go
 func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request)

@@ -1,12 +1,16 @@
 package gserver
 
 import (
+	"cmp"
 	"context"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/effective-security/porto/metricskey"
+	"github.com/effective-security/porto/pkg/streamctx"
 	"github.com/effective-security/porto/restserver/telemetry"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/identity"
 	"github.com/effective-security/xlog"
@@ -34,16 +38,79 @@ func headerFromContext(ctx context.Context, name string) string {
 	return ""
 }
 
+type callLogKey struct{}
+
+// callLog carries the caller of one gRPC call from the identity
+// interceptor back to the log interceptor, which runs before it: the log
+// interceptor puts a callLog in the call context and the identity handoff
+// interceptor, right after identity, stores the RequestContext in it. The
+// pointer is atomic so that the log interceptor's read stays safe if an
+// interceptor runs the rest of the chain on another goroutine.
+type callLog struct {
+	caller atomic.Pointer[identity.RequestContext]
+}
+
+// withCallLog returns ctx with a new callLog for the call.
+func withCallLog(ctx context.Context) (context.Context, *callLog) {
+	call := &callLog{}
+	return context.WithValue(ctx, callLogKey{}, call), call
+}
+
+// recordCaller stores the RequestContext in ctx in the callLog of the call,
+// if the log interceptor created one.
+func recordCaller(ctx context.Context) {
+	if call, ok := ctx.Value(callLogKey{}).(*callLog); ok {
+		call.caller.Store(identity.FromContext(ctx))
+	}
+}
+
+// identityHandoffUnaryInterceptor runs right after
+// identity.NewAuthUnaryInterceptor and passes the caller to the log
+// interceptor; see callLog.
+func identityHandoffUnaryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		recordCaller(ctx)
+		return handler(ctx, req)
+	}
+}
+
+// identityHandoffStreamInterceptor is the streaming counterpart of
+// identityHandoffUnaryInterceptor.
+func identityHandoffStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		recordCaller(ss.Context())
+		return handler(srv, ss)
+	}
+}
+
+// callerOf returns the role and client IP of the call: those of the
+// RequestContext stored in call, or, for a call rejected before or by
+// identity (rate limit, validation, identity errors), the guest role and
+// the client IP resolved under the server's trusted proxy policy.
+func (e *Server) callerOf(ctx context.Context, call *callLog) (role, remote string) {
+	if rc := call.caller.Load(); rc != nil {
+		return rc.Identity().Role(), rc.ClientIP()
+	}
+	if e.trustedProxies != nil {
+		ctx = identity.WithTrustedProxies(ctx, e.trustedProxies)
+	}
+	return identity.GuestRoleName, identity.ClientIPFromGRPC(ctx)
+}
+
 func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		startTime := time.Now()
+		ctx, call := withCallLog(ctx)
 		resp, err := handler(ctx, req)
 		defer func() {
-			userAgent := headerFromContext(ctx, "user-agent")
+			// SkipLogPaths matches the User-Agent as sent, so a call without
+			// one is skipped only by an empty or "*" agent
+			userAgent := headerFromContext(ctx, header.UserAgent)
 			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, userAgent) {
 				return
 			}
-			logRequest(ctx, info.FullMethod, userAgent, startTime, req, err)
+			role, remote := e.callerOf(ctx, call)
+			logRequest(ctx, info.FullMethod, role, remote, cmp.Or(userAgent, telemetry.NoAgent), startTime, req, err)
 		}()
 		return resp, err
 	}
@@ -52,26 +119,27 @@ func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		startTime := time.Now()
-		err := handler(srv, ss)
-		ctx := ss.Context()
+		ctx, call := withCallLog(ss.Context())
+		err := handler(srv, streamctx.WithContext(ctx, ss))
 		defer func() {
-			userAgent := headerFromContext(ctx, "user-agent")
+			userAgent := headerFromContext(ctx, header.UserAgent)
 			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, userAgent) {
 				return
 			}
-			logRequest(ctx, info.FullMethod, userAgent, startTime, srv, err)
+			role, remote := e.callerOf(ctx, call)
+			logRequest(ctx, info.FullMethod, role, remote, cmp.Or(userAgent, telemetry.NoAgent), startTime, srv, err)
 		}()
 		return err
 	}
 }
 
-func logRequest(ctx context.Context, responseType, userAgent string, startTime time.Time, req any, err error) {
+// logRequest logs one gRPC call and records its metrics. remote is the
+// client IP and agent the User-Agent (telemetry.NoAgent when missing),
+// under the field names of the REST request logger; error lines carry
+// remote too.
+func logRequest(ctx context.Context, responseType, role, remote, agent string, startTime time.Time, req any, err error) {
 	duration := time.Since(startTime)
 	expensiveRequest := duration > WarnUnaryRequestLatency
-
-	idx := identity.FromContext(ctx)
-	role := idx.Identity().Role()
-	remote := idx.ClientIP()
 
 	var code codes.Code
 	var cause error
@@ -93,7 +161,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 		}
 		// Do not log client errors
 		if code != codes.NotFound && code != codes.Canceled && code != codes.PermissionDenied && code != codes.Unauthenticated {
-			logError(ctx, code, responseType, err, cause)
+			logError(ctx, code, responseType, remote, err, cause)
 		}
 	}
 
@@ -107,7 +175,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 				"req", reflect.TypeOf(req),
 				"res", responseType,
 				"remote", remote,
-				"ua", userAgent,
+				"agent", agent,
 				"duration", duration.Milliseconds(),
 				"code", code,
 				"reason", "slow_request",
@@ -117,7 +185,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 				"req", reflect.TypeOf(req),
 				"res", responseType,
 				"remote", remote,
-				"ua", userAgent,
+				"agent", agent,
 				"duration", duration.Milliseconds(),
 				"code", code,
 			)
@@ -128,7 +196,7 @@ func logRequest(ctx context.Context, responseType, userAgent string, startTime t
 	}
 }
 
-func logError(ctx context.Context, code codes.Code, method string, err, cause error) {
+func logError(ctx context.Context, code codes.Code, method, remote string, err, cause error) {
 	sv := xlog.WARNING
 	typ := "API_ERROR"
 	if code == codes.Unknown || code == codes.Internal || code == codes.Unavailable {
@@ -142,6 +210,7 @@ func logError(ctx context.Context, code codes.Code, method string, err, cause er
 			logger.ContextKV(ctx, sv,
 				"type", typ,
 				"method", method,
+				"remote", remote,
 				"code", code.String(),
 				"err", err.Error(),
 				"cause", cause)
@@ -149,6 +218,7 @@ func logError(ctx context.Context, code codes.Code, method string, err, cause er
 			logger.ContextKV(ctx, sv,
 				"type", typ,
 				"method", method,
+				"remote", remote,
 				"code", code.String(),
 				"err", err.Error(),
 				"cause", cause.Error(),
@@ -158,6 +228,7 @@ func logError(ctx context.Context, code codes.Code, method string, err, cause er
 		logger.ContextKV(ctx, sv,
 			"type", typ,
 			"method", method,
+			"remote", remote,
 			"code", code.String(),
 			"err", err.Error(),
 		)

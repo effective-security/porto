@@ -1,21 +1,26 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/porto/xhttp/httperror"
 	"github.com/effective-security/porto/xhttp/marshal"
+	"github.com/effective-security/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -429,4 +434,72 @@ type testStream struct {
 
 func (s testStream) Context() context.Context {
 	return s.ctx
+}
+
+// TestRejectedIdentityLogsRemote checks that the WARNING lines of a
+// rejected HTTP request and gRPC call carry the client IP resolved under
+// the trusted proxy policy as remote, the field name of the access lines.
+// It installs a process-global log formatter, so it is not parallel.
+func TestRejectedIdentityLogsRemote(t *testing.T) {
+	const (
+		proxy  = "10.0.0.2"
+		client = "203.0.113.9"
+		path   = "/v1/items"
+		method = "/pkg.Service/Method"
+		// identityLogPkg is the package name of this package's logger
+		identityLogPkg = "context"
+	)
+	var logs bytes.Buffer
+	t.Cleanup(xlog.InstallFormatter(xlog.NewJSONFormatter(&logs)))
+	trust, err := ParseTrustedProxies([]string{proxy + "/32"})
+	require.NoError(t, err)
+	deny := errors.New("invalid credentials")
+
+	httpMapper := func(*http.Request) (Identity, error) { return nil, deny }
+	h := NewTrustedProxyHandler(NewContextHandler(http.NotFoundHandler(), httpMapper), trust)
+	r := httptest.NewRequest(http.MethodGet, path, nil)
+	r.RemoteAddr = proxy + ":443"
+	r.Header.Set(header.XForwardedFor, client)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+
+	grpcMapper := func(context.Context, string) (Identity, error) { return nil, deny }
+	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP(proxy), Port: 443}})
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(header.XForwardedFor, client))
+	_, err = NewAuthUnaryInterceptor(grpcMapper, trust)(ctx, nil, &grpc.UnaryServerInfo{FullMethod: method},
+		func(context.Context, any) (any, error) { return nil, nil })
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+
+	// the lines of this package's logger; marshal logs the 401 too
+	var got []map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(logs.String()), "\n") {
+		entry := map[string]any{}
+		require.NoError(t, json.Unmarshal([]byte(line), &entry), line)
+		if entry["pkg"] == identityLogPkg {
+			// func of the HTTP line is a closure name, which changes when
+			// an earlier closure is added
+			delete(entry, "time")
+			delete(entry, "func")
+			got = append(got, entry)
+		}
+	}
+	assert.Equal(t, []map[string]any{
+		{
+			"level":  "W",
+			"pkg":    identityLogPkg,
+			"reason": "identityMapper",
+			"remote": client,
+			"target": path,
+			"err":    deny.Error(),
+		},
+		{
+			"level":  "W",
+			"pkg":    identityLogPkg,
+			"reason": "access_denied",
+			"method": method,
+			"remote": client,
+			"err":    deny.Error(),
+		},
+	}, got)
 }

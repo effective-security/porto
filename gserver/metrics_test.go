@@ -28,14 +28,13 @@ const (
 	testOrigin = "https://app.test"
 )
 
-// headerIdentity is a roles.IdentityProvider that maps testRoleHeader to
-// the role, the guest role without it, and fails for deniedRole.
+// headerIdentity is a roles.IdentityProvider that maps the testRoleHeader
+// header (or gRPC metadata) to the role, the guest role without it, and
+// fails for deniedRole.
 type headerIdentity struct{}
 
-func (headerIdentity) ApplicableForRequest(*http.Request) bool { return true }
-
-func (headerIdentity) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
-	role := r.Header.Get(testRoleHeader)
+// roleIdentity returns the identity headerIdentity maps role to.
+func roleIdentity(role string) (identity.Identity, error) {
 	if role == deniedRole {
 		return nil, errors.New("invalid credentials")
 	}
@@ -45,10 +44,16 @@ func (headerIdentity) IdentityFromRequest(r *http.Request) (identity.Identity, e
 	return identity.NewIdentity(role, "user", "", nil, "", "", identity.MethodNone), nil
 }
 
-func (headerIdentity) ApplicableForContext(context.Context) bool { return false }
+func (headerIdentity) ApplicableForRequest(*http.Request) bool { return true }
 
-func (headerIdentity) IdentityFromContext(context.Context, string) (identity.Identity, error) {
-	return identity.NewIdentity(roles.GuestRoleName, "", "", nil, "", "", identity.MethodNone), nil
+func (headerIdentity) IdentityFromRequest(r *http.Request) (identity.Identity, error) {
+	return roleIdentity(r.Header.Get(testRoleHeader))
+}
+
+func (headerIdentity) ApplicableForContext(context.Context) bool { return true }
+
+func (headerIdentity) IdentityFromContext(ctx context.Context, _ string) (identity.Identity, error) {
+	return roleIdentity(headerFromContext(ctx, testRoleHeader))
 }
 
 // newMetricsSink installs a process-global in-memory metrics sink and

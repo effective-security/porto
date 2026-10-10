@@ -243,7 +243,12 @@ the load balancer share one bucket: add the balancer to
 `trusted_proxy_cidrs` and make sure it sets `X-Forwarded-For`. Set
 `log_rejections: true` on `rate_limit` to log each rejection at WARNING
 with the limiter key, the socket peer, the User-Agent and the forwarding
-headers as received; gRPC log lines show no client address without it.
+headers as received.
+
+Request log lines use the same field names for REST and gRPC: `remote` is
+the client IP resolved under `trusted_proxy_cidrs`, `peer` the socket
+address (host:port) where a line shows it, and `agent` the User-Agent
+(`no-agent` when missing).
 
 ### HTTP client with retries
 
