@@ -11,8 +11,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -55,10 +57,65 @@ func Test_ForRequest(t *testing.T) {
 	assert.NotNil(t, ctx)
 }
 
+// TestFromRequestConcurrent calls FromRequest from two goroutines on a
+// context stored by NewContextHandler for a caller without a client IP or
+// User-Agent; run it with -race: FromRequest must not write to it.
+func TestFromRequestConcurrent(t *testing.T) {
+	t.Parallel()
+
+	type seen struct {
+		ip    string
+		addr  netip.Addr
+		agent string
+	}
+	results := make(chan seen, 2)
+	h := NewContextHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Go(func() {
+				rc := FromRequest(r)
+				results <- seen{ip: rc.ClientIP(), addr: rc.ClientAddr(), agent: rc.UserAgent()}
+			})
+		}
+		wg.Wait()
+	}), GuestIdentityMapper)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "@"
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	for range 2 {
+		assert.Equal(t, seen{}, <-results)
+	}
+}
+
+func TestFromRequestClientIP(t *testing.T) {
+	t.Parallel()
+
+	// A Unix socket peer has no client IP: "" rather than "invalid IP".
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "@"
+	rc := FromRequest(r)
+	assert.Empty(t, rc.ClientIP())
+	assert.False(t, rc.ClientAddr().IsValid())
+
+	// A stored context without an IP is filled in from the request, and the
+	// string is formatted from the same address.
+	stored := NewRequestContext(guestIdentity, "/stored")
+	r = httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "[::ffff:198.51.100.7]:443"
+	r = r.WithContext(AddToContext(r.Context(), stored))
+	rc = FromRequest(r)
+	assert.Same(t, stored, rc)
+	assert.Equal(t, "/stored", rc.Target())
+	assert.Equal(t, netip.MustParseAddr("198.51.100.7"), rc.ClientAddr())
+	assert.Equal(t, "198.51.100.7", rc.ClientIP())
+}
+
 func Test_ClientIP(t *testing.T) {
 	d := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller := FromRequest(r)
 		assert.Equal(t, "10.0.0.1", caller.ClientIP())
+		assert.Equal(t, netip.MustParseAddr("10.0.0.1"), caller.ClientAddr())
 		assert.Equal(t, "test", caller.UserAgent())
 		assert.Equal(t, "/test", caller.Target())
 	})
@@ -265,6 +322,7 @@ func Test_grpcFromContext(t *testing.T) {
 		interceptor := NewAuthUnaryInterceptor(GuestIdentityForContext, trust)
 		_, err = interceptor(ctx, nil, info, func(ctx context.Context, _ any) (any, error) {
 			assert.Equal(t, "192.168.1.4", FromContext(ctx).ClientIP())
+			assert.Equal(t, netip.MustParseAddr("192.168.1.4"), FromContext(ctx).ClientAddr())
 			return nil, nil
 		})
 		require.NoError(t, err)
@@ -410,7 +468,7 @@ func identityMapperFromCN(r *http.Request) (Identity, error) {
 	var role string
 	var name string
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		name = ClientIPFromRequest(r)
+		name = IPString(ClientIPFromRequest(r))
 		role = GuestRoleName
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName

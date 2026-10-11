@@ -19,10 +19,10 @@ type trustedProxiesKey struct{}
 // policy and, once NewTrustedProxyHandler has resolved it, the client IP for
 // the socket address peer.
 type forwarding struct {
-	trust    *TrustedProxies
-	peer     string
-	clientIP string
-	resolved bool
+	trust      *TrustedProxies
+	peer       string
+	clientAddr netip.Addr
+	resolved   bool
 }
 
 func forwardingFromContext(ctx context.Context) forwarding {
@@ -65,10 +65,10 @@ func WithTrustedProxies(ctx context.Context, trust *TrustedProxies) context.Cont
 func NewTrustedProxyHandler(next http.Handler, trust *TrustedProxies) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fwd := forwarding{
-			trust:    trust,
-			peer:     r.RemoteAddr,
-			clientIP: trust.clientIPFromRequest(r),
-			resolved: true,
+			trust:      trust,
+			peer:       r.RemoteAddr,
+			clientAddr: trust.clientIPFromRequest(r),
+			resolved:   true,
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), trustedProxiesKey{}, fwd)))
 	})
@@ -106,15 +106,16 @@ func trustedPeer(trust *TrustedProxies, address string) bool {
 }
 
 // forwardedClient resolves the client IP for a connection from peerAddress
-// that carried the X-Forwarded-For values and X-Real-Ip realIP. It returns ""
-// when peerAddress is empty.
-func (t *TrustedProxies) forwardedClient(peerAddress string, values []string, realIP string) string {
-	peerIP := peerHost(peerAddress)
-	peerAddr, err := netip.ParseAddr(peerIP)
+// that carried the X-Forwarded-For values and X-Real-Ip realIP. It returns
+// the zero Addr when the host of peerAddress is not an IP: empty, or a Unix
+// socket peer ("@").
+func (t *TrustedProxies) forwardedClient(peerAddress string, values []string, realIP string) netip.Addr {
+	peerAddr, err := netip.ParseAddr(peerHost(peerAddress))
 	if err != nil {
-		return peerIP
+		return netip.Addr{}
 	}
-	peerIP = peerAddr.Unmap().String()
+	// contains matches the mapped form too, so trust is checked before Unmap.
+	peerIP := peerAddr.Unmap()
 	if !t.contains(peerAddr) {
 		return peerIP
 	}
@@ -133,16 +134,16 @@ func (t *TrustedProxies) forwardedClient(peerAddress string, values []string, re
 			}
 			client = addr.Unmap()
 			if !t.contains(addr) {
-				return client.String()
+				return client
 			}
 		}
 	}
 	if client.IsValid() {
-		return client.String()
+		return client
 	}
 	if candidate := strings.TrimSpace(realIP); candidate != "" {
 		if addr, err := netip.ParseAddr(candidate); err == nil {
-			return addr.Unmap().String()
+			return addr.Unmap()
 		}
 	}
 	return peerIP
@@ -150,7 +151,7 @@ func (t *TrustedProxies) forwardedClient(peerAddress string, values []string, re
 
 // clientIPFromRequest resolves r's client IP under t without reading the
 // cached value in r's context.
-func (t *TrustedProxies) clientIPFromRequest(r *http.Request) string {
+func (t *TrustedProxies) clientIPFromRequest(r *http.Request) netip.Addr {
 	return t.forwardedClient(r.RemoteAddr, r.Header.Values(header.XForwardedFor), r.Header.Get(header.XRealIP))
 }
 
@@ -158,13 +159,17 @@ func (t *TrustedProxies) clientIPFromRequest(r *http.Request) string {
 // the request context's TrustedProxies. It then walks X-Forwarded-For from
 // right to left and returns the first untrusted address, or the leftmost
 // address when every hop is trusted. Invalid forwarding data falls back to
-// the socket peer. A request without a RemoteAddr (for example one built with
-// http.NewRequest and served in process) has no client IP and returns "".
-// Behind NewTrustedProxyHandler it returns the IP resolved there.
-func ClientIPFromRequest(r *http.Request) string {
+// the socket peer. IPv4-mapped IPv6 addresses are returned as IPv4. A
+// request whose RemoteAddr is not an IP (empty, as for one built with
+// http.NewRequest and served in process, or "@" for a Unix socket peer) has
+// no client IP: the result is the zero Addr, whose IsValid is false. Use
+// IPString, not Addr.String, to log or key on it, so that the missing IP is
+// "" rather than "invalid IP". Behind NewTrustedProxyHandler it returns the
+// IP resolved there.
+func ClientIPFromRequest(r *http.Request) netip.Addr {
 	fwd := forwardingFromContext(r.Context())
 	if fwd.resolved && fwd.peer == r.RemoteAddr {
-		return fwd.clientIP
+		return fwd.clientAddr
 	}
 	return fwd.trust.clientIPFromRequest(r)
 }
@@ -187,13 +192,25 @@ func ForwardedProto(r *http.Request) string {
 }
 
 // ClientIPFromGRPC returns the peer IP unless it is a trusted proxy; trusted
-// peers may supply x-forwarded-for or x-real-ip metadata. Unknown peers
-// return an empty string.
-func ClientIPFromGRPC(ctx context.Context) string {
+// peers may supply x-forwarded-for or x-real-ip metadata, resolved as in
+// ClientIPFromRequest. A call without a peer, or whose peer is not an IP (a
+// Unix socket peer), has no client IP: the result is the zero Addr.
+func ClientIPFromGRPC(ctx context.Context) netip.Addr {
 	peerInfo, ok := peer.FromContext(ctx)
 	if !ok || peerInfo.Addr == nil {
-		return ""
+		return netip.Addr{}
 	}
 	md, _ := metadata.FromIncomingContext(ctx)
 	return forwardingFromContext(ctx).trust.forwardedClient(peerInfo.Addr.String(), md.Get(header.XForwardedFor), getMdHeader(md, header.XRealIP))
+}
+
+// IPString returns addr in its netip.Addr.String form, or "" for the zero
+// Addr that ClientIPFromRequest and ClientIPFromGRPC return when a caller
+// has no client IP; netip.Addr.String would return "invalid IP", which as a
+// rate limit key or log value would group every such caller together.
+func IPString(addr netip.Addr) string {
+	if !addr.IsValid() {
+		return ""
+	}
+	return addr.String()
 }

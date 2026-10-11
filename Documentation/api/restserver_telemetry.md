@@ -72,13 +72,13 @@ const NoAgent = "no-agent"
 ```
 
 <a name="NewRequestLogger"></a>
-## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L74-L78>)
+## func [NewRequestLogger](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L76-L80>)
 
 ```go
 func NewRequestLogger(handler http.Handler, granularity time.Duration, logger xlog.KeyValueLogger, opts ...Option) http.Handler
 ```
 
-NewRequestLogger creates a RequestLogger that chains to handler. The logged duration is expressed in units of granularity \(e.g. time.Millisecond\); a zero or negative granularity logs nanoseconds. It panics if handler is nil and returns handler unchanged \(no logging\) if logger is nil. The remote address logged is identity.ClientIPFromRequest, which accepts forwarding headers only from configured trusted proxies.
+NewRequestLogger creates a RequestLogger that chains to handler. The logged duration is expressed in units of granularity \(e.g. time.Millisecond\); a zero or negative granularity logs nanoseconds. It panics if handler is nil and returns handler unchanged \(no logging\) if logger is nil. The remote address logged is identity.ClientIPFromRequest, which accepts forwarding headers only from configured trusted proxies, formatted by identity.IPString \("" for a caller without an IP, such as a Unix socket peer\).
 
 <a name="NewRequestMetrics"></a>
 ## func [NewRequestMetrics](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/request_metrics.go#L63>)
@@ -161,7 +161,7 @@ type RequestLogger struct {
 ```
 
 <a name="RequestLogger.ServeHTTP"></a>
-### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L105>)
+### func \(\*RequestLogger\) [ServeHTTP](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/requestlogger.go#L107>)
 
 ```go
 func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request)

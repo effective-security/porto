@@ -386,7 +386,7 @@ func TestHTTPServerTrustedProxies(t *testing.T) {
 
 	var got string
 	server.WithIdentityProvider(func(r *http.Request) (identity.Identity, error) {
-		got = identity.ClientIPFromRequest(r)
+		got = identity.ClientIPFromRequest(r).String()
 		return nil, nil
 	})
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -404,7 +404,7 @@ func TestCustomMuxTrustedProxies(t *testing.T) {
 	trust, err := identity.ParseTrustedProxies([]string{"127.0.0.1/32"})
 	require.NoError(t, err)
 	server.WithTrustedProxies(trust).WithMuxFactory(muxer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, err := w.Write([]byte(identity.ClientIPFromRequest(r)))
+		_, err := w.Write([]byte(identity.ClientIPFromRequest(r).String()))
 		assert.NoError(t, err)
 	})))
 	require.NoError(t, server.StartHTTP())
@@ -737,7 +737,7 @@ func identityMapperFromCN(r *http.Request) (identity.Identity, error) {
 	var role string
 	var name string
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-		name = identity.ClientIPFromRequest(r)
+		name = identity.IPString(identity.ClientIPFromRequest(r))
 		role = identity.GuestRoleName
 	} else {
 		name = r.TLS.PeerCertificates[0].Subject.CommonName

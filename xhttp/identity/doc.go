@@ -12,7 +12,8 @@
 //	func handler(w http.ResponseWriter, r *http.Request) {
 //		rc := identity.FromRequest(r)
 //		role := rc.Identity().Role()
-//		ip := rc.ClientIP()
+//		ip := rc.ClientIP()     // string, "" when unknown
+//		addr := rc.ClientAddr() // netip.Addr, IsValid false when unknown
 //	}
 //
 // When no identity is present a guest identity (role "guest") is returned,
@@ -30,6 +31,11 @@
 //	}
 //	h := identity.NewTrustedProxyHandler(identity.NewContextHandler(next, myMapper), trust)
 //
-// A request without a socket peer, such as one built with http.NewRequest
-// and served in process, has no client IP: ClientIPFromRequest returns "".
+// ClientIPFromRequest and ClientIPFromGRPC return a netip.Addr. A caller
+// without an IP socket peer, such as a request built with http.NewRequest
+// and served in process or a Unix socket peer, has no client IP: they
+// return the zero Addr. Format it with IPString, which returns "" for it,
+// rather than Addr.String, which returns "invalid IP":
+//
+//	remote := identity.IPString(identity.ClientIPFromRequest(r))
 package identity
