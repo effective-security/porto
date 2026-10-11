@@ -94,7 +94,7 @@ func (e *Server) callerOf(ctx context.Context, call *callLog) (role, remote stri
 	if e.trustedProxies != nil {
 		ctx = identity.WithTrustedProxies(ctx, e.trustedProxies)
 	}
-	return identity.GuestRoleName, identity.ClientIPFromGRPC(ctx)
+	return identity.GuestRoleName, identity.IPString(identity.ClientIPFromGRPC(ctx))
 }
 
 func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {

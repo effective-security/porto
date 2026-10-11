@@ -70,7 +70,9 @@ type RequestLogger struct {
 // time.Millisecond); a zero or negative granularity logs nanoseconds. It
 // panics if handler is nil and returns handler unchanged (no logging) if
 // logger is nil. The remote address logged is identity.ClientIPFromRequest,
-// which accepts forwarding headers only from configured trusted proxies.
+// which accepts forwarding headers only from configured trusted proxies,
+// formatted by identity.IPString ("" for a caller without an IP, such as a
+// Unix socket peer).
 func NewRequestLogger(
 	handler http.Handler,
 	granularity time.Duration,
@@ -120,7 +122,7 @@ func (l *RequestLogger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"status", rw.statusCode,
 		"bytes", rw.bodySize,
 		"duration", dur.Nanoseconds()/l.cfg.granularity,
-		"remote", identity.ClientIPFromRequest(r),
+		"remote", identity.IPString(identity.ClientIPFromRequest(r)),
 		"agent", agent,
 	)
 }

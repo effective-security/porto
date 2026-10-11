@@ -138,6 +138,27 @@ func TestHttp_RequestLoggerDef(t *testing.T) {
 	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=GET path=\"/foo\" status=200 bytes=11 duration=0 remote=127.0.0.1 agent=no-agent\n", logLine)
 }
 
+// TestHttp_RequestLoggerUnixPeer checks that a caller without a client IP,
+// such as a Unix socket peer, is logged with an empty remote (which the
+// string formatter omits), not "invalid IP".
+func TestHttp_RequestLoggerUnixPeer(t *testing.T) {
+	xlog.TimeNowFn = func() time.Time {
+		date, _ := time.Parse("2006-01-02", "2021-04-01")
+		return date
+	}
+
+	handler := &testHandler{t, http.StatusOK, []byte(`Hello World`)}
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("GET", "/foo", nil)
+	r.RemoteAddr = "@"
+
+	tw := bytes.Buffer{}
+	writer := bufio.NewWriter(&tw)
+	xlog.SetFormatter(xlog.NewStringFormatter(writer))
+	NewRequestLogger(handler, time.Millisecond, logger).ServeHTTP(w, r)
+	assert.Equal(t, "time=2021-04-01T00:00:00Z level=I pkg=http func=ServeHTTP method=GET path=\"/foo\" status=200 bytes=11 duration=0 agent=no-agent\n", tw.String())
+}
+
 func TestHttp_RequestLoggerGranularity(t *testing.T) {
 	durationRe := regexp.MustCompile(`duration=(\d+) `)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

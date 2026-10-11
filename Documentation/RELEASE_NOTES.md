@@ -61,8 +61,42 @@ User-Agent. Update log queries and dashboards that use the old names:
 - `rpc_requests_role` (`GRPCReqByRole`) counts calls under the caller's
   role instead of `guest`.
 
+## Breaking changes (client IP type)
+
+- `xhttp/identity.ClientIPFromRequest` and `ClientIPFromGRPC` return
+  `netip.Addr` instead of `string`, so callers that need the address (a
+  prefix check, a location lookup) no longer parse it back. A caller
+  without an IP peer (no `RemoteAddr`, a Unix socket peer, a gRPC call
+  without a peer) gets the zero `Addr`. Format the result with the new
+  `identity.IPString`, which returns "" for it as before;
+  `netip.Addr.String` returns "invalid IP".
+- `identity.Context` (implemented by `RequestContext`) has a new
+  `ClientAddr() netip.Addr`; `ClientIP()` still returns the string, ""
+  when unknown. Other implementations of `Context` must add the method.
+- Log field `remote` for a caller on a Unix socket is now empty instead
+  of `@` (`"remote":""` in JSON; the text formatter omits it) in the REST
+  access line, the gRPC lines, the `cors_not_allowed` and `debug_logs`
+  lines and the `xhttp/identity` WARNING lines. `peer` still shows the
+  socket address where it is logged.
+- `identity.WithTestIdentity` also sets `ClientAddr`, and `FromRequest` no
+  longer rewrites a context stored by `NewContextHandler` or the gRPC
+  interceptors, so concurrent `FromRequest` calls in a handler are
+  race-free for callers without a client IP or User-Agent.
+
 ## New features
 
 - `restserver/telemetry.NoAgent` (`no-agent`): the agent the REST request
   logger logs and matches for a request without a User-Agent. The
   `gserver` gRPC, rate-limit, CORS and debug lines log it too.
+- New `pkg/location`: the location (city, region, country) of a client
+  IP. `Provider` is the lookup interface; `NewIPWhoIs` implements it with
+  the ipwho.is JSON API (bounded timeout, no redirects, 4 KiB answers) and
+  `NewCache` wraps any provider with an LRU of a configured size that
+  shares one answer per IPv4 /24 or IPv6 /48 network (configurable), keeps
+  answers for a TTL (24h by default), retries failed lookups and runs one
+  lookup per network at a time. After an HTTP 429 the ipwho.is provider
+  skips lookups until `Retry-After` and fails them with
+  `ErrQuotaExceeded`. Private, loopback, carrier-grade NAT, IPv6 outside
+  `2000::/3` and other special-purpose addresses are never looked up
+  (`IsPublic`). `IPLocation` is a one-off lookup that logs and drops
+  errors.

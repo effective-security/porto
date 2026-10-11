@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 
 	"github.com/effective-security/porto/pkg/streamctx"
@@ -35,11 +36,17 @@ const (
 // IP, target (HTTP path or gRPC method) and user agent. It implements
 // Context. Correlation IDs live in xhttp/correlation, not here.
 type RequestContext struct {
-	identity Identity
+	identity   Identity
+	clientAddr netip.Addr
+	// clientIP is IPString(clientAddr), formatted once per request
 	clientIP string
 	// target of the request, e.g. HTTP path or gRPC method
 	target    string
 	userAgent string
+	// resolved is set when NewContextHandler or the gRPC interceptors built
+	// the context from the request; FromRequest then leaves it unchanged,
+	// so handlers may call it concurrently.
+	resolved bool
 }
 
 // NewRequestContext creates a request context with a specific identity and
@@ -56,8 +63,12 @@ type Context interface {
 	// Identity returns the caller's identity; never nil (guest when unknown).
 	Identity() Identity
 	// ClientIP returns the client IP as determined by ClientIPFromRequest or
-	// ClientIPFromGRPC, or "".
+	// ClientIPFromGRPC, formatted by IPString: "" when there is none.
 	ClientIP() string
+	// ClientAddr returns the client IP that ClientIP formats, for callers
+	// that need the parsed address (prefix checks, location lookups); the
+	// zero Addr when there is none.
+	ClientAddr() netip.Addr
 	// Target of the request, e.g. HTTP path or gRPC method
 	Target() string
 	// UserAgent returns the User-Agent header (or user-agent / x-user-agent
@@ -85,14 +96,19 @@ func AddToContext(ctx context.Context, rq *RequestContext) context.Context {
 
 // FromRequest returns the RequestContext for r (guest when none was stored),
 // filling in target, client IP and user agent from the request when they are
-// empty. Note that it updates the stored RequestContext in place.
+// empty. Note that it updates the stored RequestContext in place, unless
+// NewContextHandler stored it: that one already holds r's values.
 func FromRequest(r *http.Request) *RequestContext {
 	c := FromContext(r.Context())
+	if c.resolved {
+		return c
+	}
 	if c.target == "" {
 		c.target = r.URL.Path
 	}
-	if c.clientIP == "" {
-		c.clientIP = ClientIPFromRequest(r)
+	if !c.clientAddr.IsValid() {
+		c.clientAddr = ClientIPFromRequest(r)
+		c.clientIP = IPString(c.clientAddr)
 	}
 	if c.userAgent == "" {
 		c.userAgent = r.Header.Get(header.UserAgent)
@@ -115,7 +131,8 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 		v := r.Context().Value(keyContext)
 		if v == nil {
 			target := r.URL.Path
-			clientIP := ClientIPFromRequest(r)
+			clientAddr := ClientIPFromRequest(r)
+			clientIP := IPString(clientAddr)
 			idn, err := identityMapper(r)
 			if err != nil {
 				logger.ContextKV(r.Context(), xlog.WARNING,
@@ -132,10 +149,12 @@ func NewContextHandler(delegate http.Handler, identityMapper ProviderFromRequest
 			}
 
 			rctx = &RequestContext{
-				identity:  idn,
-				clientIP:  clientIP,
-				target:    target,
-				userAgent: r.Header.Get(header.UserAgent),
+				identity:   idn,
+				clientAddr: clientAddr,
+				clientIP:   clientIP,
+				target:     target,
+				userAgent:  r.Header.Get(header.UserAgent),
+				resolved:   true,
 			}
 
 			var email string
@@ -185,7 +204,8 @@ func getMdHeader(md metadata.MD, name string) string {
 }
 
 func createIdentityContext(ctx context.Context, methodFullMethod string, identityMapper ProviderFromContext) (context.Context, error) {
-	clientIP := ClientIPFromGRPC(ctx)
+	clientAddr := ClientIPFromGRPC(ctx)
+	clientIP := IPString(clientAddr)
 	id, err := identityMapper(ctx, methodFullMethod)
 	if err != nil {
 		logger.ContextKV(ctx, xlog.WARNING,
@@ -213,7 +233,9 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 			rc.userAgent = getMdHeader(md, "x-user-agent")
 		}
 	}
+	rc.clientAddr = clientAddr
 	rc.clientIP = clientIP
+	rc.resolved = true
 
 	ctx = AddToContext(ctx, rc)
 	role := id.Role()
@@ -309,6 +331,12 @@ func (c *RequestContext) Identity() Identity {
 // ClientIP returns the request's client IP, or "" when unknown.
 func (c *RequestContext) ClientIP() string {
 	return c.clientIP
+}
+
+// ClientAddr returns the request's client IP as a netip.Addr, or the zero
+// Addr (IsValid false) when unknown.
+func (c *RequestContext) ClientAddr() netip.Addr {
+	return c.clientAddr
 }
 
 // Target returns the request's target: the HTTP path or gRPC full method.

@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
 
@@ -93,13 +92,9 @@ func (rl *rateLimiter) key(r *http.Request) string {
 
 // clientIP returns the client IP of r resolved by the trusted proxy policy,
 // or "" when the socket peer has none, such as a Unix socket peer ("@"):
-// its callers would otherwise share one bucket.
+// its callers would otherwise share one bucket ("invalid IP").
 func clientIP(r *http.Request) string {
-	ip := identity.ClientIPFromRequest(r)
-	if _, err := netip.ParseAddr(ip); err != nil {
-		return ""
-	}
-	return ip
+	return identity.IPString(identity.ClientIPFromRequest(r))
 }
 
 // limitRequest returns the request tollbooth checks for r: r itself for

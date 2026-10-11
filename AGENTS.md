@@ -19,7 +19,8 @@ generated mock tree. The packages are:
   (memory and Redis providers), `tasks` (cron-like scheduler), `tlsconfig`
   (TLS config with file reloading), `transport` (TLS and keepalive
   listeners), `appinit` (application bootstrap), `discovery` (in-process
-  service registry), `crlcache`, `streamctx`.
+  service registry), `crlcache`, `streamctx`, `location` (client
+  location from IP with a per-network cache).
 - `metricskey`: metric descriptors shared by the servers.
 - `tests/*`: helpers used only by tests.
 

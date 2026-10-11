@@ -6,9 +6,11 @@ import (
 	"crypto/x509/pkix"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 
 	"github.com/effective-security/porto/xhttp/correlation"
+	"github.com/effective-security/x/netutil"
 	"github.com/effective-security/xpki/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,7 +54,18 @@ func Test_WithTestIdentityDirect(t *testing.T) {
 	require.NoError(t, err)
 
 	r = WithTestIdentity(r, NewIdentity("role1", "name1", "org1", nil, "", "", MethodNone))
+	// the local IP is the client IP, before and after FromRequest, which
+	// must not replace it with the request's (empty) peer
+	localIP, _ := netutil.GetLocalIP()
+	localAddr, _ := netip.ParseAddr(localIP)
+	stored := FromContext(r.Context())
+	assert.Equal(t, localAddr, stored.ClientAddr())
+	assert.Equal(t, IPString(localAddr), stored.ClientIP())
+
 	ctx := FromRequest(r)
+	assert.Same(t, stored, ctx)
+	assert.Equal(t, localAddr, ctx.ClientAddr())
+	assert.Equal(t, IPString(localAddr), ctx.ClientIP())
 
 	assert.Equal(t, "org1/name1:role1", ctx.Identity().String())
 	assert.Empty(t, correlation.ID(r.Context()))

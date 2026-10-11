@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"net/http"
+	"net/netip"
 
 	"cmp"
 
@@ -198,9 +199,12 @@ func GuestIdentityForContext(_ context.Context, _ string) (Identity, error) {
 // identity (with the local IP as client IP), for use in unit tests.
 func WithTestIdentity(r *http.Request, identity Identity) *http.Request {
 	ipaddr, _ := netutil.GetLocalIP()
+	// zero when the local IP is unknown; FromRequest then uses r's peer
+	addr, _ := netip.ParseAddr(ipaddr)
 	ctx := &RequestContext{
-		identity: identity,
-		clientIP: ipaddr,
+		identity:   identity,
+		clientAddr: addr,
+		clientIP:   IPString(addr),
 	}
 	c := context.WithValue(r.Context(), keyContext, ctx)
 	return r.WithContext(c)
