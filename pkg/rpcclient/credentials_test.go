@@ -229,6 +229,13 @@ func TestNewRejectsAuthToken(t *testing.T) {
 
 	folder := t.TempDir()
 	storage := retriable.NewStorage(folder)
+	publicKey, err := dpop.GenerateKey("")
+	require.NoError(t, err)
+	publicKey = &jose.JSONWebKey{Key: publicKey.Public().Key}
+	publicJkt, err := dpop.Thumbprint(publicKey)
+	require.NoError(t, err)
+	_, err = storage.SaveKey(publicKey)
+	require.NoError(t, err)
 	_, err = storage.SaveKey(edKey)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(folder, "malformed.jwk"), []byte("{"), 0o600))
@@ -240,6 +247,11 @@ func TestNewRejectsAuthToken(t *testing.T) {
 		expErr    string
 		expIs     error
 	}{
+		{
+			name:      "public-only DPoP key",
+			authToken: &retriable.AuthToken{AccessToken: "bound", DpopJkt: publicJkt},
+			expErr:    "unable to create DPoP signer: key is not a private signing key",
+		},
 		{
 			name:      "expired",
 			authToken: &retriable.AuthToken{AccessToken: "old", Expires: &past},

@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/metricskey"
 	"github.com/effective-security/porto/pkg/streamctx"
 	"github.com/effective-security/porto/restserver/telemetry"
@@ -98,11 +99,14 @@ func (e *Server) callerOf(ctx context.Context, call *callLog) (role, remote stri
 }
 
 func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		startTime := time.Now()
 		ctx, call := withCallLog(ctx)
-		resp, err := handler(ctx, req)
+		completed := false
 		defer func() {
+			if !completed {
+				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, unhandledException)
+			}
 			// SkipLogPaths matches the User-Agent as sent, so a call without
 			// one is skipped only by an empty or "*" agent
 			userAgent := headerFromContext(ctx, header.UserAgent)
@@ -112,16 +116,21 @@ func (e *Server) newLogUnaryInterceptor() grpc.UnaryServerInterceptor {
 			role, remote := e.callerOf(ctx, call)
 			logRequest(ctx, info.FullMethod, role, remote, cmp.Or(userAgent, telemetry.NoAgent), startTime, req, err)
 		}()
+		resp, err = handler(ctx, req)
+		completed = true
 		return resp, err
 	}
 }
 
 func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
-	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		startTime := time.Now()
 		ctx, call := withCallLog(ss.Context())
-		err := handler(srv, streamctx.WithContext(ctx, ss))
+		completed := false
 		defer func() {
+			if !completed {
+				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, unhandledException)
+			}
 			userAgent := headerFromContext(ctx, header.UserAgent)
 			if err == nil && telemetry.ShouldSkip(e.cfg.SkipLogPaths, info.FullMethod, userAgent) {
 				return
@@ -129,6 +138,8 @@ func (e *Server) newLogStreamServerInterceptor() grpc.StreamServerInterceptor {
 			role, remote := e.callerOf(ctx, call)
 			logRequest(ctx, info.FullMethod, role, remote, cmp.Or(userAgent, telemetry.NoAgent), startTime, srv, err)
 		}()
+		err = handler(srv, streamctx.WithContext(ctx, ss))
+		completed = true
 		return err
 	}
 }
@@ -141,23 +152,16 @@ func logRequest(ctx context.Context, responseType, role, remote, agent string, s
 	duration := time.Since(startTime)
 	expensiveRequest := duration > WarnUnaryRequestLatency
 
-	var code codes.Code
+	code := status.Code(err)
 	var cause error
 	if err != nil {
-		switch _resp := err.(type) {
-		case *httperror.Error:
-			code = _resp.RPCStatus
-			cause = _resp.Cause()
-		case *httperror.ManyError:
-			code = _resp.RPCStatus
-			cause = _resp.Cause()
-		default:
-			if s, ok := status.FromError(err); ok {
-				code = s.Code()
-			} else {
-				// FINDINGS P-098: grpc-go sends such errors as Unknown.
-				code = codes.Internal
-			}
+		var apiError *httperror.Error
+		var manyError *httperror.ManyError
+		switch {
+		case errors.As(err, &apiError):
+			cause = apiError.Cause()
+		case errors.As(err, &manyError):
+			cause = manyError.Cause()
 		}
 		// Do not log client errors
 		if code != codes.NotFound && code != codes.Canceled && code != codes.PermissionDenied && code != codes.Unauthenticated {

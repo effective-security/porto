@@ -25,6 +25,7 @@ Decoding is strict: unknown JSON fields are an error \(DecoderHandle\). DecodeBo
 
 ## Index
 
+- [func AcceptsGzip\(h http.Header\) bool](<#AcceptsGzip>)
 - [func Decode\(r io.Reader, result any\) error](<#Decode>)
 - [func DecodeBody\(w http.ResponseWriter, r \*http.Request, result any\) error](<#DecodeBody>)
 - [func DecodeBytes\(data \[\]byte, result any\) error](<#DecodeBytes>)
@@ -38,6 +39,15 @@ Decoding is strict: unknown JSON fields are an error \(DecoderHandle\). DecodeBo
 - [type PrettyPrintSetting](<#PrettyPrintSetting>)
 - [type WriteHTTPResponse](<#WriteHTTPResponse>)
 
+
+<a name="AcceptsGzip"></a>
+## func [AcceptsGzip](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L193>)
+
+```go
+func AcceptsGzip(h http.Header) bool
+```
+
+AcceptsGzip reports whether Accept\-Encoding permits gzip, considering all header lines and quality values. An explicit gzip entry overrides a wildcard; malformed or out\-of\-range quality values are treated as a refusal.
 
 <a name="Decode"></a>
 ## func [Decode](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/json.go#L106>)
@@ -103,7 +113,7 @@ func NewEncoder(w io.Writer, r *http.Request) *codec.Encoder
 NewEncoder returns a JSON encoder writing to w, pretty\-printing when the request URL has a "pp" query parameter. r must not be nil.
 
 <a name="NewRequest"></a>
-## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L329>)
+## func [NewRequest](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L332>)
 
 ```go
 func NewRequest(method string, url string, req any) (*http.Request, error)
@@ -128,7 +138,7 @@ marshal.WriteJSON(w, r, err, x)
 ```
 
 <a name="WritePlainJSON"></a>
-## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L318>)
+## func [WritePlainJSON](<https://github.com/effective-security/porto/blob/main/xhttp/marshal/marshal.go#L321>)
 
 ```go
 func WritePlainJSON(w http.ResponseWriter, statusCode int, body any, printSetting PrettyPrintSetting)

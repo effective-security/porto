@@ -37,7 +37,7 @@ type ResponseCapture struct {
 	delegate   http.ResponseWriter
 	// wroteHeader reports that the status was sent: by a final WriteHeader,
 	// or as 200 by a Write, a ReadFrom that copied a byte, or a flush
-	// before it.
+	// before it. A successful Hijack also marks the response started.
 	wroteHeader bool
 }
 
@@ -53,6 +53,12 @@ func NewResponseCapture(w http.ResponseWriter) *ResponseCapture {
 // when nothing was sent yet.
 func (r *ResponseCapture) StatusCode() int {
 	return r.statusCode
+}
+
+// Started reports whether a final status was sent or the connection was hijacked.
+// A started response cannot be replaced with an error response.
+func (r *ResponseCapture) Started() bool {
+	return r.wroteHeader
 }
 
 // BodySize returns in bytes the total number of bytes written to the response body so far.
@@ -156,5 +162,6 @@ func (r *ResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
+	r.wroteHeader = true
 	return conn, rw, nil
 }

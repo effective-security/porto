@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,7 +212,11 @@ func TestPanicCounted(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set(testRoleHeader, "admin")
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
+		if strings.Contains(path, "/partial/") {
+			assert.PanicsWithValue(t, http.ErrAbortHandler, func() { h.ServeHTTP(w, r) })
+		} else {
+			h.ServeHTTP(w, r)
+		}
 		return w
 	}
 

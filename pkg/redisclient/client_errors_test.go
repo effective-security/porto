@@ -83,10 +83,9 @@ func TestClosedClientErrors(t *testing.T) {
 		{name: "SRem", call: func() (any, error) {
 			return nil, c.SRem(ctx, "s", "m")
 		}, err: "unable to remove members from set s: "},
-		// FINDINGS P-104: the member is formatted with %s although it is any
 		{name: "SIsMember", call: func() (any, error) {
-			return c.SIsMember(ctx, "s", "m")
-		}, want: false, err: "unable to check if member m exists in set s: "},
+			return c.SIsMember(ctx, "s", 1)
+		}, want: false, err: "unable to check if member 1 exists in set s: "},
 		{name: "SMembers", call: func() (any, error) {
 			return c.SMembers(ctx, "s")
 		}, want: []string(nil), err: "unable to get members from set s: "},
@@ -96,21 +95,18 @@ func TestClosedClientErrors(t *testing.T) {
 		{name: "SAddWithEviction", call: func() (any, error) {
 			return nil, c.SAddWithEviction(ctx, "s", "sl", 3, "m")
 		}, err: "unable to add member to bounded set s: "},
-		// the sorted set helpers return the go-redis error unwrapped.
-		// FINDINGS P-104: unwrapped errors are recorded as a defect; once
-		// they are wrapped, add the expected messages to these four rows.
 		{name: "ZAdd", call: func() (any, error) {
 			return nil, c.ZAdd(ctx, "z", 1, "m")
-		}},
+		}, err: "unable to add member to sorted set z: "},
 		{name: "ZIncrBy", call: func() (any, error) {
 			return nil, c.ZIncrBy(ctx, "z", 1, "m")
-		}},
+		}, err: "unable to increment score in sorted set z: "},
 		{name: "ZRem", call: func() (any, error) {
 			return nil, c.ZRem(ctx, "z", "m")
-		}},
+		}, err: "unable to remove members from sorted set z: "},
 		{name: "ZRemRangeByRank", call: func() (any, error) {
 			return c.ZRemRangeByRank(ctx, "z", 0, -1)
-		}, want: int64(0)},
+		}, want: int64(0), err: "unable to remove range from sorted set z: "},
 		{name: "ZCard", call: func() (any, error) {
 			return c.ZCard(ctx, "z")
 		}, want: int64(0), err: "unable to get cardinality of sorted set z: "},
@@ -380,6 +376,8 @@ func TestUnmarshalStringCmd(t *testing.T) {
 		{name: "string", cmd: redis.NewStringResult("v", nil), target: new(string), want: "v"},
 		{name: "bytes", cmd: redis.NewStringResult("v", nil), target: new([]byte), want: []byte("v")},
 		{name: "JSON", cmd: redis.NewStringResult(`{"a":1}`, nil), target: new(obj), want: obj{A: 1}},
+		{name: "string command error", cmd: redis.NewStringResult("", boom), target: new(string), want: "", err: "failed to get key: boom", cause: boom},
+		{name: "string missing", cmd: redis.NewStringResult("", redis.Nil), target: new(string), want: "", err: "failed to get key: redis: nil", cause: redis.Nil},
 		{name: "bytes command error", cmd: redis.NewStringResult("", boom), target: new([]byte), want: []byte(nil), err: "failed to get key: boom", cause: boom},
 		{name: "JSON command error", cmd: redis.NewStringResult("", boom), target: new(obj), want: obj{}, err: "failed to get key: boom", cause: boom},
 		{name: "invalid JSON", cmd: redis.NewStringResult("{", nil), target: new(obj), want: obj{}, err: "failed to unmarshal value: unexpected end of JSON input"},
@@ -410,8 +408,7 @@ func TestIsNotFoundError(t *testing.T) {
 		{err: nil, want: false},
 		{err: redisclient.ErrNotFound, want: true},
 		{err: errors.WithMessage(redisclient.ErrNotFound, "get"), want: true},
-		// FINDINGS P-095: the substring match is recorded as a defect
-		{err: errors.New("user not found"), want: true},
+		{err: errors.New("user not found"), want: false},
 		{err: redis.Nil, want: false},
 		{err: errors.New("boom"), want: false},
 	} {

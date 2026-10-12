@@ -319,7 +319,7 @@ func (e *Server) errHandler(err error) {
 // Close gracefully shuts down all servers/listeners.
 // Client requests will be terminated with request timeout.
 // After timeout, enforce remaining requests be closed immediately.
-// It then closes the listeners and stops the TLS certificate reloader.
+// It then closes the services and listeners and stops the TLS certificate reloader.
 // The teardown runs once, so services are closed once; a later or
 // concurrent call returns after the teardown has finished.
 func (e *Server) Close() {
@@ -329,10 +329,6 @@ func (e *Server) Close() {
 // teardown is the body of Close; closeOnce serializes it.
 func (e *Server) teardown() {
 	logger.KV(xlog.INFO, "server", e.Name())
-
-	for _, svc := range e.services {
-		svc.Close()
-	}
 
 	close(e.stopc)
 
@@ -353,6 +349,10 @@ func (e *Server) teardown() {
 		sctx.cancel()
 	}
 
+	for _, svc := range e.services {
+		svc.Close()
+	}
+
 	for i := range e.Listeners {
 		if e.Listeners[i] != nil {
 			e.Listeners[i].Close()
@@ -365,24 +365,22 @@ func (e *Server) teardown() {
 }
 
 func stopServers(ctx context.Context, ss *servers) {
-	shutdownNow := func() {
-		// first, close the http.Server
-		_ = ss.http.Shutdown(ctx)
-		// then close grpc.Server; cancels all active RPCs
-		ss.grpc.Stop()
-	}
-
-	// do not grpc.Server.GracefulStop with TLS enabled server
-	// See https://github.com/grpc/grpc-go/issues/1384#issuecomment-317124531
+	// ServeHTTP transports cannot drain through GracefulStop: their Drain
+	// closes the stream immediately. Let HTTP drain them before stopping gRPC.
 	if ss.secure {
-		shutdownNow()
+		_ = ss.http.Shutdown(ctx)
+		ss.grpc.Stop()
+		_ = ss.http.Close()
 		return
 	}
 
-	// FINDINGS P-101: the HTTP server is shut down only on timeout, so
-	// its keep-alive connections keep serving after Close.
-	// FINDINGS P-102: on TLS, shutdownNow stops gRPC streams after the HTTP
-	// server, and the client sees a malformed response.
+	// Both protocols share the deadline. Shutdown closes idle keep-alive
+	// connections and drains active HTTP requests alongside the RPCs.
+	httpDone := make(chan struct{})
+	go func() {
+		defer close(httpDone)
+		_ = ss.http.Shutdown(ctx)
+	}()
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
@@ -397,11 +395,14 @@ func stopServers(ctx context.Context, ss *servers) {
 	case <-ctx.Done():
 		// took too long, manually close open transports
 		// e.g. watch streams
-		shutdownNow()
+		ss.grpc.Stop()
 
-		// concurrent GracefulStop should be interrupted
-		<-ch
+		// GracefulStop can still be waiting for a handler that ignores
+		// cancellation. Do not delay service cleanup on that handler.
 	}
+	<-httpDone
+	// Shutdown leaves active HTTP connections open when its context expires.
+	_ = ss.http.Close()
 }
 
 // Err returns the channel on which listener/serve errors are reported. The

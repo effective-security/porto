@@ -250,7 +250,7 @@ func WithHeaders(ctx context.Context, headers map[string]string) context.Context
 WithHeaders returns a copy of ctx carrying headers that a Client sets on every outgoing request made with that context \(overriding client\-level headers of the same name\). It replaces, not merges, headers stored by an earlier WithHeaders or PropagateHeadersFromRequest call. A nil ctx is treated as context.Background\(\).
 
 <a name="AuthToken"></a>
-## type [AuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L250-L264>)
+## type [AuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L249-L265>)
 
 AuthToken is a parsed access token as stored in .auth\_token or an environment variable; see ParseAuthToken.
 
@@ -262,7 +262,9 @@ type AuthToken struct {
     AccessToken string
     // RefreshToken is the optional refresh_token value.
     RefreshToken string
-    // TokenType is "Bearer" (default) or "DPoP".
+    // TokenType is the authorization scheme for an explicitly constructed token.
+    // ParseAuthToken sets "Bearer" and ignores token_type; clients select DPoP
+    // whenever DpopJkt is present, regardless of TokenType.
     TokenType string
     // DpopJkt is the thumbprint of the DPoP key bound to the token, if any;
     // it names the "<jkt>.jwk" file in Storage.
@@ -273,7 +275,7 @@ type AuthToken struct {
 ```
 
 <a name="LoadAuthToken"></a>
-### func [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L239>)
+### func [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L238>)
 
 ```go
 func LoadAuthToken(dir string) (*AuthToken, string, error)
@@ -282,7 +284,7 @@ func LoadAuthToken(dir string) (*AuthToken, string, error)
 LoadAuthToken reads and parses the ".auth\_token" file in dir. It returns the token, the file location \(also on error\) and an error when the file is missing or malformed. Expiry is not checked; use AuthToken.Expired.
 
 <a name="ParseAuthToken"></a>
-### func [ParseAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L277>)
+### func [ParseAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L278>)
 
 ```go
 func ParseAuthToken(rawToken, location string) (*AuthToken, string, error)
@@ -291,7 +293,7 @@ func ParseAuthToken(rawToken, location string) (*AuthToken, string, error)
 ParseAuthToken parses a token string. A value without "=" is an opaque Bearer access token; otherwise it is parsed as a query string with the keys access\_token \(or id\_token, or token\), refresh\_token, dpop\_jkt and exp \(unix seconds\). location is passed through for the caller's logging. Expiry is parsed but not validated.
 
 <a name="AuthToken.Expired"></a>
-### func \(\*AuthToken\) [Expired](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L268>)
+### func \(\*AuthToken\) [Expired](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L269>)
 
 ```go
 func (t *AuthToken) Expired() bool
@@ -1021,7 +1023,7 @@ type HeadRequester interface {
 ```
 
 <a name="KeyInfo"></a>
-## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L356-L367>)
+## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L359-L370>)
 
 KeyInfo describes a stored DPoP private key.
 
@@ -1041,7 +1043,7 @@ type KeyInfo struct {
 ```
 
 <a name="NewKeyInfo"></a>
-### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L371>)
+### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L374>)
 
 ```go
 func NewKeyInfo(k *jose.JSONWebKey) (*KeyInfo, error)
@@ -1322,16 +1324,16 @@ func (c *Storage) Folder() string
 Folder returns the storage folder path.
 
 <a name="Storage.ListKeys"></a>
-### func \(\*Storage\) [ListKeys](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L311>)
+### func \(\*Storage\) [ListKeys](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L313>)
 
 ```go
 func (c *Storage) ListKeys() ([]*KeyInfo, error)
 ```
 
-ListKeys returns the DPoP keys found in the storage folder \(walked recursively, "\*.jwk" files\). Unreadable or unsupported keys are skipped and a missing folder yields an empty list; the error is always nil.
+ListKeys returns the DPoP keys found in the storage folder \(walked recursively, "\*.jwk" files\). Unreadable or unsupported keys are skipped and unreadable subfolders are skipped. A missing or unreadable root folder yields an empty list; the error is always nil.
 
 <a name="Storage.LoadAuthToken"></a>
-### func \(\*Storage\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L232>)
+### func \(\*Storage\) [LoadAuthToken](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L231>)
 
 ```go
 func (c *Storage) LoadAuthToken() (*AuthToken, string, error)
@@ -1340,7 +1342,7 @@ func (c *Storage) LoadAuthToken() (*AuthToken, string, error)
 LoadAuthToken reads and parses the .auth\_token file in the storage folder; see the package\-level LoadAuthToken.
 
 <a name="Storage.LoadKey"></a>
-### func \(\*Storage\) [LoadKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L120>)
+### func \(\*Storage\) [LoadKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L119>)
 
 ```go
 func (c *Storage) LoadKey(label string) (*jose.JSONWebKey, string, error)
@@ -1364,10 +1366,10 @@ Marshal encodes v as JSON \(".json" suffix\) or YAML into file, relative to the 
 func (c *Storage) SaveAuthToken(token string) (string, error)
 ```
 
-SaveAuthToken writes the raw token to the .auth\_token file \(mode 0600\), creating the folder if needed, and returns the file location. An existing file or symlink is atomically replaced with a private regular file. The token can be an opaque string, or form encoded as access\_token=\{token\}&exp=\{unix\_time\}&dpop\_jkt=\{jkt\}&token\_type=\{Bearer|DPoP\} \(see ParseAuthToken\).
+SaveAuthToken writes the raw token to the .auth\_token file \(mode 0600\), creating the folder if needed, and returns the file location. An existing file or symlink is atomically replaced with a private regular file. The token can be an opaque string, or form encoded as access\_token=\{token\}&exp=\{unix\_time\}&dpop\_jkt=\{jkt\} \(see ParseAuthToken\). Only dpop\_jkt selects DPoP authorization; token\_type is ignored when parsed.
 
 <a name="Storage.SaveKey"></a>
-### func \(\*Storage\) [SaveKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L128>)
+### func \(\*Storage\) [SaveKey](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L127>)
 
 ```go
 func (c *Storage) SaveKey(k *jose.JSONWebKey) (string, error)

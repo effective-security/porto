@@ -202,6 +202,27 @@ func TestStorageListKeysSkipsUnreadableKey(t *testing.T) {
 	assert.Equal(t, k.KeyID, list[0].Thumbprint)
 }
 
+func TestStorageListKeysSkipsUnreadableFolder(t *testing.T) {
+	t.Parallel()
+	skipIfRoot(t)
+	folder := t.TempDir()
+	unreadable := filepath.Join(folder, "a")
+	require.NoError(t, os.Mkdir(unreadable, 0o700))
+	require.NoError(t, os.Chmod(unreadable, 0))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(unreadable, 0o700)) })
+	key, err := dpop.GenerateKey("")
+	require.NoError(t, err)
+	_, err = retriable.NewStorage(filepath.Join(folder, "z")).SaveKey(key)
+	require.NoError(t, err)
+	keys, err := retriable.NewStorage(folder).ListKeys()
+	require.NoError(t, err)
+	require.Len(t, keys, 1, "an unreadable subtree must not hide later siblings")
+	assert.Equal(t, key.KeyID, keys[0].Thumbprint)
+	keys, err = retriable.NewStorage(unreadable).ListKeys()
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
 func TestStorageMarshalUnmarshal(t *testing.T) {
 	t.Parallel()
 
@@ -261,6 +282,7 @@ func TestParseAuthToken(t *testing.T) {
 		err     string
 	}{
 		{name: "opaque", raw: "opaque-token", access: "opaque-token"},
+		{name: "token_type_ignored", raw: "access_token=at&token_type=DPoP", access: "at"},
 		{
 			name:    "form",
 			raw:     "access_token=at&refresh_token=rt&dpop_jkt=jkt&exp=1700000000",
