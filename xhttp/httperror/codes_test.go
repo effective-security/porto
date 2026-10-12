@@ -95,3 +95,131 @@ func Test_AuthStatusMapping(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, httperror.NewGrpc(codes.PermissionDenied, "denied").HTTPStatus)
 	assert.Equal(t, http.StatusUnauthorized, httperror.NewGrpc(codes.Unauthenticated, "who").HTTPStatus)
 }
+
+func Test_RPCCodeToHTTPStatus(t *testing.T) {
+	t.Parallel()
+	// gRPC code → HTTP status and httperror code (codeStatus, then httpCode).
+	// Several gRPC codes share one HTTP status; NewFromPb keeps the gRPC code
+	// on RPCStatus. A bare FailedPrecondition is 400 bad_request: 409 is
+	// AlreadyExists and Aborted, and 500 would label it unexpected.
+	cases := []struct {
+		rpc        codes.Code
+		httpStatus int
+		code       string
+	}{
+		{codes.OK, http.StatusOK, ""},
+		{codes.Canceled, http.StatusRequestTimeout, "request_timeout"},
+		{codes.Unknown, http.StatusInternalServerError, httperror.CodeUnexpected},
+		{codes.InvalidArgument, http.StatusBadRequest, "bad_request"},
+		{codes.DeadlineExceeded, http.StatusRequestTimeout, "request_timeout"},
+		{codes.NotFound, http.StatusNotFound, httperror.CodeNotFound},
+		{codes.AlreadyExists, http.StatusConflict, httperror.CodeConflict},
+		{codes.PermissionDenied, http.StatusForbidden, httperror.CodeForbidden},
+		{codes.ResourceExhausted, http.StatusTooManyRequests, "too_many_requests"},
+		{codes.FailedPrecondition, http.StatusBadRequest, "bad_request"},
+		{codes.Aborted, http.StatusConflict, httperror.CodeConflict},
+		{codes.OutOfRange, http.StatusBadRequest, "bad_request"},
+		{codes.Unimplemented, http.StatusNotImplemented, "not_implemented"},
+		{codes.Internal, http.StatusInternalServerError, httperror.CodeUnexpected},
+		{codes.Unavailable, http.StatusServiceUnavailable, "unavailable"},
+		{codes.DataLoss, http.StatusInternalServerError, httperror.CodeUnexpected},
+		{codes.Unauthenticated, http.StatusUnauthorized, httperror.CodeUnauthorized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rpc.String(), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.httpStatus, httperror.HTTPStatusFromRPC(tc.rpc))
+
+			viaGrpc := httperror.NewGrpc(tc.rpc, "msg")
+			assert.Equal(t, tc.httpStatus, viaGrpc.HTTPStatus)
+			assert.Equal(t, tc.code, viaGrpc.Code)
+			assert.Equal(t, tc.rpc, viaGrpc.RPCStatus)
+
+			if tc.rpc == codes.OK {
+				return
+			}
+			pbErr := status.Error(tc.rpc, "org state")
+			got := httperror.NewFromPb(pbErr)
+			assert.Equal(t, tc.httpStatus, got.HTTPStatus)
+			assert.Equal(t, tc.code, got.Code)
+			assert.Equal(t, tc.rpc, got.RPCStatus)
+			assert.Equal(t, "org state", got.Message)
+			assert.Equal(t, tc.httpStatus, httperror.Status(pbErr))
+		})
+	}
+
+	assert.Equal(t, 0, httperror.HTTPStatusFromRPC(codes.Code(99)))
+}
+
+func Test_ErrorCodeToRPCStatus(t *testing.T) {
+	t.Parallel()
+	// httperror code → gRPC code (statusCode), the reverse of Test_RPCCodeToHTTPStatus.
+	cases := []struct {
+		code string
+		rpc  codes.Code
+	}{
+		{httperror.CodeAccountNotFound, codes.NotFound},
+		{httperror.CodeBadNonce, codes.InvalidArgument},
+		{httperror.CodeConflict, codes.AlreadyExists},
+		{httperror.CodeConnection, codes.Unknown},
+		{httperror.CodeContentLengthRequired, codes.InvalidArgument},
+		{httperror.CodeFailedToReadRequestBody, codes.InvalidArgument},
+		{httperror.CodeForbidden, codes.PermissionDenied},
+		{httperror.CodeInvalidContentType, codes.InvalidArgument},
+		{httperror.CodeInvalidJSON, codes.InvalidArgument},
+		{httperror.CodeInvalidParam, codes.InvalidArgument},
+		{httperror.CodeInvalidRequest, codes.InvalidArgument},
+		{httperror.CodeMalformed, codes.InvalidArgument},
+		{httperror.CodeNotFound, codes.NotFound},
+		{httperror.CodeNotReady, codes.Unavailable},
+		{httperror.CodeRateLimitExceeded, codes.ResourceExhausted},
+		{httperror.CodeRequestFailed, codes.Unknown},
+		{httperror.CodeRequestTooLarge, codes.ResourceExhausted},
+		{httperror.CodeTimeout, codes.DeadlineExceeded},
+		{httperror.CodeTooEarly, codes.ResourceExhausted},
+		{httperror.CodeUnauthorized, codes.Unauthenticated},
+		{httperror.CodeUnexpected, codes.Internal},
+
+		{"bad_request", codes.InvalidArgument},
+		{"payment_required", codes.PermissionDenied},
+		{"not_allowed", codes.InvalidArgument},
+		{"not_acceptable", codes.InvalidArgument},
+		{"auth_required", codes.Unauthenticated},
+		{"request_timeout", codes.Canceled},
+		{"gone", codes.NotFound},
+		{"length_required", codes.InvalidArgument},
+		{"precondition_failed", codes.FailedPrecondition},
+		{"too_large", codes.InvalidArgument},
+		{"uri_too_long", codes.InvalidArgument},
+		{"unsupported_media_type", codes.InvalidArgument},
+		{"expectation_failed", codes.InvalidArgument},
+		{"teapot", codes.InvalidArgument},
+		{"misdirected", codes.InvalidArgument},
+		{"unprocessable", codes.InvalidArgument},
+		{"locked", codes.FailedPrecondition},
+		{"failed_dependency", codes.FailedPrecondition},
+		{"upgrade_required", codes.FailedPrecondition},
+		{"precondition_required", codes.FailedPrecondition},
+		{"too_many_requests", codes.ResourceExhausted},
+		{"legal_reason", codes.PermissionDenied},
+		{"not_implemented", codes.Unimplemented},
+		{"bad_gateway", codes.Unavailable},
+		{"unavailable", codes.Unavailable},
+		{"gateway_timeout", codes.Unavailable},
+		{"not_supported", codes.Unimplemented},
+		{"insufficient_storage", codes.ResourceExhausted},
+		{"loop_detected", codes.ResourceExhausted},
+		{"not_extended", codes.Unimplemented},
+		{"authentication_required", codes.Unauthenticated},
+
+		{"no_such_code", codes.OK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.code, func(t *testing.T) {
+			t.Parallel()
+			got := httperror.New(http.StatusBadRequest, tc.code, "m")
+			assert.Equal(t, tc.rpc, got.RPCStatus)
+			assert.Equal(t, tc.rpc, got.GRPCStatus().Code())
+		})
+	}
+}
