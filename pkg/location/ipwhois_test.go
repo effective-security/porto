@@ -514,7 +514,7 @@ func TestIPLocation(t *testing.T) {
 	t.Cleanup(srv.Close)
 	ctx := context.Background()
 
-	place := location.IPLocation(ctx, srv.URL, netip.MustParseAddr("8.8.8.8"))
+	place := location.FetchIPLocation(ctx, srv.URL, netip.MustParseAddr("8.8.8.8"))
 	assert.Equal(t, &location.Place{
 		City:        "Singapore",
 		Region:      "Singapore",
@@ -523,8 +523,8 @@ func TestIPLocation(t *testing.T) {
 	}, place)
 	assert.Equal(t, "Singapore", place.String())
 
-	assert.Nil(t, location.IPLocation(ctx, srv.URL, netip.MustParseAddr("1.1.1.1")))
-	assert.Nil(t, location.IPLocation(ctx, srv.URL, netip.MustParseAddr("192.168.1.1")))
+	assert.Nil(t, location.FetchIPLocation(ctx, srv.URL, netip.MustParseAddr("1.1.1.1")))
+	assert.Nil(t, location.FetchIPLocation(ctx, srv.URL, netip.MustParseAddr("192.168.1.1")))
 	assert.Equal(t, int32(2), hits.Load())
 }
 
@@ -538,11 +538,11 @@ func TestIPLocationLogsErrors(t *testing.T) {
 	ctx := context.Background()
 	google := netip.MustParseAddr("8.8.8.8")
 
-	assert.Nil(t, location.IPLocation(ctx, srv.URL, google))
-	assert.Nil(t, location.IPLocation(ctx, "ftp://ipwho.is", google))
+	assert.Nil(t, location.FetchIPLocation(ctx, srv.URL, google))
+	assert.Nil(t, location.FetchIPLocation(ctx, "ftp://ipwho.is", google))
 	// addresses without a location are neither looked up nor logged
-	assert.Nil(t, location.IPLocation(ctx, "ftp://ipwho.is", netip.Addr{}))
-	assert.Nil(t, location.IPLocation(ctx, "ftp://ipwho.is", netip.MustParseAddr("10.0.0.1")))
+	assert.Nil(t, location.FetchIPLocation(ctx, "ftp://ipwho.is", netip.Addr{}))
+	assert.Nil(t, location.FetchIPLocation(ctx, "ftp://ipwho.is", netip.MustParseAddr("10.0.0.1")))
 
 	var got []map[string]any
 	for line := range strings.SplitSeq(strings.TrimSpace(logs.String()), "\n") {
@@ -557,7 +557,7 @@ func TestIPLocationLogsErrors(t *testing.T) {
 		{
 			"level":  "W",
 			"pkg":    locationLogPkg,
-			"func":   "IPLocation",
+			"func":   "FetchIPLocation",
 			"reason": "ip_location",
 			"ip":     "8.8.8.8",
 			"err":    "location lookup of 8.8.8.8 returned status 429, retry after 1m0s: location lookup quota exceeded",
@@ -565,7 +565,7 @@ func TestIPLocationLogsErrors(t *testing.T) {
 		{
 			"level":  "W",
 			"pkg":    locationLogPkg,
-			"func":   "IPLocation",
+			"func":   "FetchIPLocation",
 			"reason": "ip_location",
 			"ip":     "8.8.8.8",
 			"err":    `invalid location base URL "ftp://ipwho.is": expected an http or https URL`,

@@ -43,6 +43,8 @@ const (
 	// maxQuotaBackoff caps Retry-After; ipwho.is restores access within a
 	// day.
 	maxQuotaBackoff = 24 * time.Hour
+	// defaultCacheSize is the number of locations to cache by default.
+	defaultCacheSize = 1000
 )
 
 // ErrQuotaExceeded is wrapped by the error of an IPWhoIs lookup that the
@@ -208,7 +210,7 @@ func (p *IPWhoIs) Location(ctx context.Context, addr netip.Addr) (*Place, error)
 	}, nil
 }
 
-// IPLocation looks up addr once with an ipwho.is provider at baseURL
+// FetchIPLocation looks up addr once with an ipwho.is provider at baseURL
 // (DefaultIPWhoIsURL when empty) and default settings. It is for callers
 // that show a location when one is available and carry on without it:
 // errors, including an invalid baseURL, are logged at WARNING and return
@@ -216,7 +218,7 @@ func (p *IPWhoIs) Location(ctx context.Context, addr netip.Addr) (*Place, error)
 // call builds a new provider, so the 429 backoff of IPWhoIs does not apply;
 // services that look up many addresses should keep one Provider wrapped in
 // a Cache instead.
-func IPLocation(ctx context.Context, baseURL string, addr netip.Addr) *Place {
+func FetchIPLocation(ctx context.Context, baseURL string, addr netip.Addr) *Place {
 	if !IsPublic(addr) {
 		return nil
 	}
