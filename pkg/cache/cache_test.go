@@ -398,6 +398,8 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 
 	err := p.Get(ctx, "notfound", &strVal)
 	assert.True(t, cache.IsNotFoundError(err))
+	assert.ErrorIs(t, err, cache.ErrNotFound)
+	assert.NotNil(t, errors.Unwrap(err), "a cache miss must carry a stack")
 
 	tcases := []struct {
 		name string
@@ -956,11 +958,13 @@ func TestRedisSubscribeCloseDuringSetup(t *testing.T) {
 }
 
 func TestIsNotFoundError(t *testing.T) {
+	t.Parallel()
+	assert.False(t, cache.IsNotFoundError(nil))
 	err := cache.ErrNotFound
 	assert.True(t, cache.IsNotFoundError(err))
 	assert.True(t, cache.IsNotFoundError(errors.WithMessage(err, "wrapped")))
 	assert.True(t, cache.IsNotFoundError(errors.Wrap(err, "wrapped")))
 	assert.True(t, cache.IsNotFoundError(errors.WithStack(err)))
-	assert.True(t, cache.IsNotFoundError(errors.New("key not found")))
+	assert.False(t, cache.IsNotFoundError(errors.New("key not found")))
 	assert.False(t, cache.IsNotFoundError(errors.New("invalid key")))
 }

@@ -69,17 +69,18 @@ func TestGetOrSetWritesWithProviderDefaultTTL(t *testing.T) {
 func TestGetOrSetErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	backendErr := errors.New("backend failed")
+	backendErr := errors.New("backend credentials not found")
 	getterErr := errors.New("getter failed")
 
 	t.Run("read error", func(t *testing.T) {
 		p := &recordingProvider{Provider: cache.NewMemoryProvider("read-error"), getErr: backendErr}
-		var value string
+		value := "unchanged"
 		err := cache.GetOrSet(ctx, p, "key", &value, func() (any, error) {
 			t.Fatal("getter called after read error")
 			return nil, nil
 		})
 		require.ErrorIs(t, err, backendErr)
+		assert.Equal(t, "unchanged", value)
 		assert.Zero(t, p.setCount)
 	})
 

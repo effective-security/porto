@@ -40,6 +40,7 @@ Metrics are emitted through porto/metricskey \(HTTPReqPerf, HTTPReqByRole\) keye
   - [func \(r \*ResponseCapture\) Header\(\) http.Header](<#ResponseCapture.Header>)
   - [func \(r \*ResponseCapture\) Hijack\(\) \(net.Conn, \*bufio.ReadWriter, error\)](<#ResponseCapture.Hijack>)
   - [func \(r \*ResponseCapture\) ReadFrom\(src io.Reader\) \(int64, error\)](<#ResponseCapture.ReadFrom>)
+  - [func \(r \*ResponseCapture\) Started\(\) bool](<#ResponseCapture.Started>)
   - [func \(r \*ResponseCapture\) StatusCode\(\) int](<#ResponseCapture.StatusCode>)
   - [func \(r \*ResponseCapture\) Unwrap\(\) http.ResponseWriter](<#ResponseCapture.Unwrap>)
   - [func \(r \*ResponseCapture\) Write\(data \[\]byte\) \(int, error\)](<#ResponseCapture.Write>)
@@ -192,7 +193,7 @@ func NewResponseCapture(w http.ResponseWriter) *ResponseCapture
 NewResponseCapture returns a new ResponseCapture instance that delegates writes to the supplied ResponseWriter
 
 <a name="ResponseCapture.BodySize"></a>
-### func \(\*ResponseCapture\) [BodySize](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L59>)
+### func \(\*ResponseCapture\) [BodySize](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L65>)
 
 ```go
 func (r *ResponseCapture) BodySize() uint64
@@ -201,7 +202,7 @@ func (r *ResponseCapture) BodySize() uint64
 BodySize returns in bytes the total number of bytes written to the response body so far.
 
 <a name="ResponseCapture.Flush"></a>
-### func \(\*ResponseCapture\) [Flush](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L130>)
+### func \(\*ResponseCapture\) [Flush](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L136>)
 
 ```go
 func (r *ResponseCapture) Flush()
@@ -210,7 +211,7 @@ func (r *ResponseCapture) Flush()
 Flush sends any buffered data to the client when the delegate chain supports flushing. It implements http.Flusher, which cannot report errors, so a failed or unsupported flush is ignored; use FlushError, or http.ResponseController.Flush, which calls it, to see the error.
 
 <a name="ResponseCapture.FlushError"></a>
-### func \(\*ResponseCapture\) [FlushError](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L139>)
+### func \(\*ResponseCapture\) [FlushError](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L145>)
 
 ```go
 func (r *ResponseCapture) FlushError() error
@@ -219,7 +220,7 @@ func (r *ResponseCapture) FlushError() error
 FlushError flushes like Flush and returns the delegate chain's error: an error wrapping http.ErrNotSupported when no writer in the chain can flush, or the write error after the client went away. http.ResponseController.Flush calls it, so streaming handlers see the error through the ResponseCapture.
 
 <a name="ResponseCapture.Header"></a>
-### func \(\*ResponseCapture\) [Header](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L74>)
+### func \(\*ResponseCapture\) [Header](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L80>)
 
 ```go
 func (r *ResponseCapture) Header() http.Header
@@ -228,7 +229,7 @@ func (r *ResponseCapture) Header() http.Header
 Header returns the underlying writers Header instance
 
 <a name="ResponseCapture.Hijack"></a>
-### func \(\*ResponseCapture\) [Hijack](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L154>)
+### func \(\*ResponseCapture\) [Hijack](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L160>)
 
 ```go
 func (r *ResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error)
@@ -237,13 +238,22 @@ func (r *ResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error)
 Hijack lets the caller take over the connection, as http.Hijacker, when the delegate chain supports it \(HTTP/1.x\). Otherwise, for example on HTTP/2, it returns an error wrapping http.ErrNotSupported.
 
 <a name="ResponseCapture.ReadFrom"></a>
-### func \(\*ResponseCapture\) [ReadFrom](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L89>)
+### func \(\*ResponseCapture\) [ReadFrom](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L95>)
 
 ```go
 func (r *ResponseCapture) ReadFrom(src io.Reader) (int64, error)
 ```
 
 ReadFrom copies src to the response, as io.ReaderFrom, and counts the bytes copied. It calls the delegate's ReadFrom when the delegate implements io.ReaderFrom, and copies through its Write otherwise; like Write, it returns the delegate's error as is.
+
+<a name="ResponseCapture.Started"></a>
+### func \(\*ResponseCapture\) [Started](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L60>)
+
+```go
+func (r *ResponseCapture) Started() bool
+```
+
+Started reports whether a final status was sent or the connection was hijacked. A started response cannot be replaced with an error response.
 
 <a name="ResponseCapture.StatusCode"></a>
 ### func \(\*ResponseCapture\) [StatusCode](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L54>)
@@ -255,7 +265,7 @@ func (r *ResponseCapture) StatusCode() int
 StatusCode returns the HTTP status the response was sent with, or 200 when nothing was sent yet.
 
 <a name="ResponseCapture.Unwrap"></a>
-### func \(\*ResponseCapture\) [Unwrap](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L65>)
+### func \(\*ResponseCapture\) [Unwrap](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L71>)
 
 ```go
 func (r *ResponseCapture) Unwrap() http.ResponseWriter
@@ -264,7 +274,7 @@ func (r *ResponseCapture) Unwrap() http.ResponseWriter
 Unwrap returns the delegate ResponseWriter; http.ResponseController uses it to reach the delegate's optional interfaces.
 
 <a name="ResponseCapture.Write"></a>
-### func \(\*ResponseCapture\) [Write](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L79>)
+### func \(\*ResponseCapture\) [Write](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L85>)
 
 ```go
 func (r *ResponseCapture) Write(data []byte) (int, error)
@@ -273,7 +283,7 @@ func (r *ResponseCapture) Write(data []byte) (int, error)
 Write the supplied data to the response \(tracking the number of bytes written as we go\)
 
 <a name="ResponseCapture.WriteHeader"></a>
-### func \(\*ResponseCapture\) [WriteHeader](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L108>)
+### func \(\*ResponseCapture\) [WriteHeader](<https://github.com/effective-security/porto/blob/main/restserver/telemetry/response_capture.go#L114>)
 
 ```go
 func (r *ResponseCapture) WriteHeader(sc int)

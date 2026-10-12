@@ -126,8 +126,10 @@ func TestX509KeyPairKeyTypes(t *testing.T) {
 		name    string
 		cert    []byte
 		key     []byte
-		wantKey crypto.PrivateKey
-		err     string
+		wantKey interface {
+			Equal(crypto.PrivateKey) bool
+		}
+		err string
 	}{
 		{name: "rsa pkcs8", cert: rsaCert, key: pkcs8PEM(t, rsaKey), wantKey: rsaKey},
 		{name: "ecdsa pkcs8", cert: ecCert, key: pkcs8PEM(t, ecKey), wantKey: ecKey},
@@ -156,7 +158,8 @@ func TestX509KeyPairKeyTypes(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, pair.Leaf)
 			assert.Equal(t, pair.Certificate[0], pair.Leaf.Raw)
-			assert.Equal(t, tc.wantKey, pair.PrivateKey)
+			// P-106: compare key material, not RSA's internal precomputation.
+			assert.True(t, tc.wantKey.Equal(pair.PrivateKey))
 		})
 	}
 }

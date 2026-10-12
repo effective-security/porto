@@ -2,7 +2,6 @@ package correlation
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -13,7 +12,9 @@ import (
 	"github.com/effective-security/xlog"
 	"github.com/effective-security/xpki/certutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 var logger = xlog.NewPackageLogger("github.com/effective-security/porto/xhttp", "correlation")
@@ -82,7 +83,7 @@ func NewHandler(delegate http.Handler) http.Handler {
 // NewAuthUnaryInterceptor returns a grpc.UnaryServerInterceptor that adds the
 // correlation ID (from incoming metadata or newly generated) to the context
 // and xlog fields, and recovers panics from the handler, logging them and
-// returning an "unhandled exception" error.
+// returning an Internal status with message "unhandled exception".
 func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, si *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (res any, err error) {
 		defer func() {
@@ -92,8 +93,8 @@ func NewAuthUnaryInterceptor() grpc.UnaryServerInterceptor {
 					"action", si.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
-				// FINDINGS P-098: a plain error reaches the client as Unknown.
-				err = errors.New("unhandled exception")
+				// httperror depends on correlation, so use a gRPC status here.
+				err = status.Error(codes.Internal, "unhandled exception")
 			}
 		}()
 
@@ -127,8 +128,8 @@ func NewStreamServerInterceptor() grpc.StreamServerInterceptor {
 					"action", info.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
-				// FINDINGS P-098: a plain error reaches the client as Unknown.
-				err = errors.New("unhandled exception")
+				// httperror depends on correlation, so use a gRPC status here.
+				err = status.Error(codes.Internal, "unhandled exception")
 			}
 		}()
 

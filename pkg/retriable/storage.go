@@ -101,10 +101,9 @@ func (c *Storage) Marshal(file string, v any) error {
 // creating the folder if needed, and returns the file location. An existing
 // file or symlink is atomically replaced with a private regular file.
 // The token can be an opaque string, or form encoded as
-// access_token={token}&exp={unix_time}&dpop_jkt={jkt}&token_type={Bearer|DPoP}
-// (see ParseAuthToken).
+// access_token={token}&exp={unix_time}&dpop_jkt={jkt} (see ParseAuthToken).
+// Only dpop_jkt selects DPoP authorization; token_type is ignored when parsed.
 func (c *Storage) SaveAuthToken(token string) (string, error) {
-	// FINDINGS P-097: ParseAuthToken ignores token_type.
 	location := filepath.Join(c.folder, authTokenFileName)
 	if err := c.ensurePrivateFolder(); err != nil {
 		return location, err
@@ -254,7 +253,9 @@ type AuthToken struct {
 	AccessToken string
 	// RefreshToken is the optional refresh_token value.
 	RefreshToken string
-	// TokenType is "Bearer" (default) or "DPoP".
+	// TokenType is the authorization scheme for an explicitly constructed token.
+	// ParseAuthToken sets "Bearer" and ignores token_type; clients select DPoP
+	// whenever DpopJkt is present, regardless of TokenType.
 	TokenType string
 	// DpopJkt is the thumbprint of the DPoP key bound to the token, if any;
 	// it names the "<jkt>.jwk" file in Storage.
@@ -307,7 +308,8 @@ func ParseAuthToken(rawToken, location string) (*AuthToken, string, error) {
 
 // ListKeys returns the DPoP keys found in the storage folder (walked
 // recursively, "*.jwk" files). Unreadable or unsupported keys are skipped
-// and a missing folder yields an empty list; the error is always nil.
+// and unreadable subfolders are skipped. A missing or unreadable root folder
+// yields an empty list; the error is always nil.
 func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 	list := []*KeyInfo{}
 
@@ -315,9 +317,10 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 	err := filepath.Walk(c.folder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			logger.KV(xlog.DEBUG, "path", path, "err", err.Error())
-			// FINDINGS P-096: this stops the walk at an unreadable
-			// sub-folder, and ListKeys still returns nil.
-			return err
+			if info != nil && info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if info.IsDir() || !strings.HasSuffix(info.Name(), ".jwk") {
 			logger.KV(xlog.DEBUG, "skip", path)

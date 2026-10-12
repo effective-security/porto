@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -534,16 +535,9 @@ func panicInterceptor() grpc.UnaryServerInterceptor {
 func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
 	if otherHandler == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					logger.ContextKV(r.Context(), xlog.ERROR,
-						"reason", "panic",
-						"err", rec,
-						"stack", string(debug.Stack()))
-					http.Error(w, unhandledException, http.StatusInternalServerError)
-				}
-			}()
-			grpcServer.ServeHTTP(w, r)
+			capture := telemetry.NewResponseCapture(w)
+			defer recoverHTTPPanic(capture, r)
+			serveGRPCHTTP(grpcServer, capture, r)
 		})
 	}
 
@@ -564,21 +558,9 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The metrics handler of configureHandlers has already counted a
-		// panicking REST handler, as 500 when it sent no status, when the
-		// panic reaches this recover. FINDINGS P-100: the 500 is written
-		// even into a started response, and http.ErrAbortHandler is not
-		// re-panicked. FINDINGS P-102: gRPC streams that Close stops
-		// after Timeout.Request end with a malformed HTTP response.
-		defer func() {
-			if rec := recover(); rec != nil {
-				logger.ContextKV(r.Context(), xlog.ERROR,
-					"reason", "panic",
-					"err", rec,
-					"stack", string(debug.Stack()))
-				http.Error(w, unhandledException, http.StatusInternalServerError)
-			}
-		}()
+		capture := telemetry.NewResponseCapture(w)
+		defer recoverHTTPPanic(capture, r)
+		w = capture
 
 		if len(sctx.cfg.HTTPHeaders) > 0 {
 			wh := w.Header()
@@ -652,10 +634,8 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 				// header.XGRPCStream header; gzip-ing a stream forces the body
 				// to be buffered (fixed Content-Length) and swallows per-message
 				// flushes, which breaks streaming.
-				// Accept-Encoding is matched by substring, so q-values are
-				// ignored (FINDINGS P-076).
 				isStream := r.Header.Get(header.XGRPCStream) != ""
-				compress := !isStream && strings.Contains(r.Header.Get(header.AcceptEncoding), header.Gzip)
+				compress := !isStream && marshal.AcceptsGzip(r.Header)
 				grw := newGrpcWebResponse(w, ct, compress)
 				grw.exposeHeaders = corsEnabled && origin != ""
 				w = grw
@@ -681,7 +661,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 					"proto_ver_major", r.ProtoMajor,
 					"url", r.URL.String())
 			}
-			grpcServer.ServeHTTP(w, r)
+			serveGRPCHTTP(grpcServer, w, r)
 			if grpcWeb {
 				grw := w.(*grpcWebResponse)
 				grw.finishRequest()
@@ -713,6 +693,40 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	})
 
 	return handler
+}
+
+// recoverHTTPPanic preserves net/http's silent abort behavior and never appends
+// an error body to a response that has already started.
+func recoverHTTPPanic(w *telemetry.ResponseCapture, r *http.Request) {
+	if rec := recover(); rec != nil {
+		if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+			panic(http.ErrAbortHandler)
+		}
+		logger.ContextKV(r.Context(), xlog.ERROR,
+			"reason", "panic",
+			"err", rec,
+			"stack", string(debug.Stack()))
+		if w.Started() {
+			panic(http.ErrAbortHandler)
+		}
+		http.Error(w, unhandledException, http.StatusInternalServerError)
+	}
+}
+
+// serveGRPCHTTP completes a stopped ServeHTTP transport with Unavailable.
+// grpc-go can return without sending headers or a final status when Stop
+// closes that transport; emitting HTTP 200 with no gRPC status is malformed.
+func serveGRPCHTTP(gs *grpc.Server, w http.ResponseWriter, r *http.Request) {
+	capture := telemetry.NewResponseCapture(w)
+	gs.ServeHTTP(capture, r)
+	h := w.Header()
+	if capture.StatusCode() == http.StatusOK && h.Get(header.GRPCStatus) == "" {
+		if !capture.Started() {
+			h.Set(header.ContentType, r.Header.Get(header.ContentType))
+		}
+		h.Set(header.GRPCStatus, strconv.Itoa(int(codes.Unavailable)))
+		h.Set(header.GRPCMessage, "server stopped")
+	}
 }
 
 // clearStreamReadDeadline removes the HTTP/2 per-stream ReadTimeout from a
@@ -756,9 +770,8 @@ func NewRequestValidationUnaryInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-// validate calls v.Validate and turns a panic into the Internal error that
-// panicInterceptor returns, which the inner recover of the correlation
-// interceptor would otherwise report as Unknown (FINDINGS P-098).
+// validate calls v.Validate and converts a panic to Internal before returning
+// to the log interceptor, so validation failures are logged and counted.
 func validate(ctx context.Context, v Validator, si *grpc.UnaryServerInfo) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {

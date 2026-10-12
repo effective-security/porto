@@ -65,6 +65,10 @@ const (
     ContentType = "Content-Type"
     // Gzip content type for "gzip"
     Gzip = "gzip"
+    // GRPCStatus carries the final gRPC status code in response trailers.
+    GRPCStatus = "Grpc-Status"
+    // GRPCMessage carries the final gRPC status message in response trailers.
+    GRPCMessage = "Grpc-Message"
     // IfMatch is HTTP header for "If-Match"
     IfMatch = "If-Match"
     // Link is HTTP header for "Link"

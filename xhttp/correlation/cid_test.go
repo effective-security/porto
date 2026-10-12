@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 func TestCorrelationID(t *testing.T) {
@@ -188,8 +190,7 @@ func TestCorrelationIDHandler(t *testing.T) {
 
 // TestInterceptorsRecoverPanics checks that both gRPC interceptors give the
 // handler a correlation ID and turn a handler panic into an error instead
-// of letting it reach the server. FINDINGS P-098: the error is a plain
-// error, which clients receive as codes.Unknown.
+// of letting it reach the server. Clients receive codes.Internal.
 func TestInterceptorsRecoverPanics(t *testing.T) {
 	t.Parallel()
 	const incomingID = "panic-test-1" // IDSize characters, kept whole
@@ -210,7 +211,8 @@ func TestInterceptorsRecoverPanics(t *testing.T) {
 		})
 		assert.Equal(t, incomingID, seen)
 		assert.Nil(t, res)
-		assert.EqualError(t, err, "unhandled exception")
+		assert.Equal(t, codes.Internal, status.Code(err))
+		assert.Equal(t, "unhandled exception", status.Convert(err).Message())
 	})
 
 	t.Run("stream", func(t *testing.T) {
@@ -226,7 +228,8 @@ func TestInterceptorsRecoverPanics(t *testing.T) {
 			})
 		})
 		assert.Equal(t, incomingID, seen)
-		assert.EqualError(t, err, "unhandled exception")
+		assert.Equal(t, codes.Internal, status.Code(err))
+		assert.Equal(t, "unhandled exception", status.Convert(err).Message())
 	})
 }
 

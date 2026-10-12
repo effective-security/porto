@@ -274,7 +274,7 @@ func createIdentityContext(ctx context.Context, methodFullMethod string, identit
 // the call with codes.Unauthenticated and the generic "invalid identity"
 // message, unless it is (or wraps) an *httperror.Error with an HTTP status
 // and a gRPC mapping, which is returned as is. Panics in the handler are recovered, logged and
-// returned as an "unhandled exception" error. The optional trusted policy
+// returned as an Internal gRPC error with message "unhandled exception". The optional trusted policy
 // (only the first value is used) is stored with WithTrustedProxies; a nil or
 // omitted policy keeps any policy already in the context.
 func NewAuthUnaryInterceptor(identityMapper ProviderFromContext, trusted ...*TrustedProxies) grpc.UnaryServerInterceptor {
@@ -289,8 +289,7 @@ func NewAuthUnaryInterceptor(identityMapper ProviderFromContext, trusted ...*Tru
 					"action", si.FullMethod,
 					"err", rec,
 					"stack", string(debug.Stack()))
-				// FINDINGS P-098: a plain error reaches the client as Unknown.
-				err = errors.New("unhandled exception")
+				err = httperror.NewGrpcFromCtx(ctx, codes.Internal, "unhandled exception")
 			}
 		}()
 		ctx, err = createIdentityContext(ctx, si.FullMethod, identityMapper)

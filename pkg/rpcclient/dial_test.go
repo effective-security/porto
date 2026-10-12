@@ -75,8 +75,8 @@ func TestNewDialCanceledContext(t *testing.T) {
 		DialTimeout: time.Minute,
 	})
 	require.Nil(t, client)
-	// FINDINGS P-103: the context error is dropped
 	require.ErrorContains(t, err, `failed to connect to "`+target+`"`)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestNewDialTimeoutExpires(t *testing.T) {
@@ -95,7 +95,8 @@ func TestNewDialTimeoutExpires(t *testing.T) {
 		DialTimeout: timeout,
 	})
 	require.Nil(t, client)
-	require.EqualError(t, err, `failed to connect to "`+addr+`" within 200ms`)
+	require.EqualError(t, err, `failed to connect to "`+addr+`": context deadline exceeded`)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.GreaterOrEqual(t, time.Since(started), timeout)
 }
 

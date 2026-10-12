@@ -1,7 +1,9 @@
 package gserver
 
 import (
+	"compress/gzip"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -13,6 +15,55 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
+
+func TestGrpcWebGzipNegotiation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		values []string
+		stream bool
+		gzip   bool
+	}{
+		{name: "absent"},
+		{name: "gzip", values: []string{"gzip"}, gzip: true},
+		{name: "refused", values: []string{"gzip;q=0"}},
+		{name: "substring", values: []string{"xgzip"}},
+		{name: "second line", values: []string{"br", "gzip;q=0.5"}, gzip: true},
+		{name: "wildcard", values: []string{"*;q=0.5"}, gzip: true},
+		{name: "explicit refusal", values: []string{"*", "gzip;q=0"}},
+		{name: "invalid quality", values: []string{"gzip;q=invalid"}},
+		{name: "stream", values: []string{"gzip"}, stream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gs := grpc.NewServer()
+			t.Cleanup(gs.Stop)
+			sctx := &serveCtx{cfg: &Config{}}
+			h := sctx.grpcHandlerFunc(gs, http.NotFoundHandler())
+			r := httptest.NewRequest(http.MethodPost, "/test.Service/Missing", nil)
+			r.Header.Set(header.ContentType, header.ApplicationGRPCWebProto)
+			r.Header[header.AcceptEncoding] = tc.values
+			if tc.stream {
+				r.Header.Set(header.XGRPCStream, "true")
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			body := w.Body.Bytes()
+			if tc.gzip {
+				assert.Equal(t, header.Gzip, w.Header().Get(header.ContentEncoding))
+				gz, err := gzip.NewReader(w.Body)
+				require.NoError(t, err)
+				body, err = io.ReadAll(gz)
+				require.NoError(t, err)
+				require.NoError(t, gz.Close())
+			} else {
+				assert.NotContains(t, w.Header(), header.ContentEncoding)
+			}
+			assert.Empty(t, body)
+			assert.Equal(t, "12", w.Header().Get(header.GRPCStatus))
+		})
+	}
+}
 
 func TestGrpcHandlerFunc(t *testing.T) {
 	enabled := true

@@ -60,6 +60,16 @@
 
 ### Correctness and interoperability
 
+- B33 / P-101, P-102: `gserver.Close` always drains HTTP alongside plaintext gRPC and closes idle keep-alive connections. Services close after the drain or timeout, so draining requests keep their dependencies. TLS gRPC streams interrupted by shutdown end with `Unavailable`, including when no response headers were sent. After the timeout, handlers that ignore cancellation may still run; service cleanup proceeds so `Service.Close` can release them.
+
+- B34 / P-098, P-099: recovered gRPC handler panics return `Internal`; logging and metrics use the status clients receive (`Unknown` for plain application errors). Unary and stream calls that panic through the log interceptor are recorded, including on skipped paths.
+
+- B35 / P-076, P-100: unary gRPC-Web gzip negotiation uses the shared `marshal.AcceptsGzip`, honoring quality values, exact coding names and every `Accept-Encoding` header line. A panicking REST handler on TLS gets a 500 only before the response starts; a partial response is aborted, and `http.ErrAbortHandler` remains a silent abort. `telemetry.ResponseCapture.Started` reports a final response or a successful hijack.
+
+- B36 / P-093, P-096, P-097, P-103: `rpcclient.New` returns an error for a stored public-only DPoP key and preserves cancellation/deadline errors from a blocking dial. `retriable.Storage.ListKeys` skips unreadable subdirectories and continues listing later keys. Token-storage comments now reflect parsing: `token_type` is ignored, and clients select DPoP from `dpop_jkt`.
+
+- B37 / P-094, P-104: `redisclient.UnmarshalStringCmd` reports command errors before touching string, byte or JSON destinations. Sorted-set command errors wrap their cause with key context, and `SIsMember` formats non-string members correctly.
+
 - B32 / P-092: gRPC DPoP authentication works again with xpki 1.0. Clients sign `POST https://<authority><full-method-path>` using grpc-go's credential audience authority and full RPC method; servers verify against incoming `:authority` and the dispatched method. TLS server-name/authority overrides and Unix TLS targets follow the same convention. Missing or ambiguous authority, an authority that is not host[:port], relative-path proofs and mismatched authority/method/key bindings fail authentication. HTTPS port 443 and host case use xpki URI normalization; IPv6 zone authorities (sent escaped as `%25`) match.
 
 - Return REST server HTTP bind errors from `StartHTTP`, support `Config()` and IPv6 bind addresses (`HostName()` returns IPv6 hosts without brackets; `GetServerURL` and `GetServerBaseURL` add them), and make `StopHTTP` safe before start and on repeated calls.
@@ -116,6 +126,10 @@
 - B19: `gserver/roles` caches STS rejections of an AWS4 token for 30s, so a repeated bad token no longer calls STS each time: 4xx responses except 408, 429 and throttling (STS throttles with HTTP 400 and code `Throttling`), and undecodable responses. Transport errors, timeouts, throttling and 5xx are not cached. Concurrent requests with the same uncached token share one STS call; if it panics, the requests waiting for it fail with `STS lookup panicked`. The CSRF check ignores spaces around the cookie value as it did around the header value. `xhttp/header` adds `XCSRFToken`.
 
 ## Breaking changes: what clients must change
+
+- B33–B35: `gserver.Service.Close` now runs after requests drain or the shutdown timeout expires. A handler that needs `Service.Close` to finish holds shutdown until that timeout. Panicking gRPC handlers now return `Internal` instead of `Unknown`; plain application errors are counted as `Unknown` instead of `Internal`. Clients reading a REST response cut short by a panic on TLS now receive an aborted response instead of an apparently complete partial body with an appended error message.
+
+- B37 / P-095: `redisclient.Get`/`HGet` and cache providers now wrap `ErrNotFound` with a stack. Compare with `errors.Is(err, ErrNotFound)` or `IsNotFoundError`, not `==`. Both packages' `IsNotFoundError` match only that sentinel through `errors.Is`; unrelated errors containing "not found" are no longer cache misses. Custom cache providers must wrap `cache.ErrNotFound` for misses; `GetOrSet` now returns other provider errors without calling the getter or writing a replacement.
 
 - B32 / P-092: custom gRPC DPoP clients must replace relative `htu` values such as `/pkg.Service/Method` with `https://<authority>/pkg.Service/Method` and `htm: POST`. Use the request's HTTP/2 `:authority`, including any authority override, rather than the dial address or TLS peer address. Upgrade porto clients and servers together: old relative proofs do not authenticate on the new server, and older servers expecting a relative proof do not accept the new format. Proxies must preserve the proof's authority and method path; forwarded host/proto headers are not used to reconstruct the gRPC URI. Direct callers of per-RPC credentials must provide grpc-go's HTTPS audience URI and `credentials.RequestInfo` with the full method. `xhttp/header.Authority` names the metadata key.
 

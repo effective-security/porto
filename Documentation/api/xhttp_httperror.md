@@ -166,7 +166,7 @@ func GRPCMessage(err error) string
 GRPCMessage returns the status message of a gRPC error, or err.Error\(\) for other errors.
 
 <a name="HTTPStatusFromRPC"></a>
-## func [HTTPStatusFromRPC](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L268>)
+## func [HTTPStatusFromRPC](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L273>)
 
 ```go
 func HTTPStatusFromRPC(c codes.Code) int
@@ -300,7 +300,7 @@ func Forbidden(msgFormat string, vals ...any) *Error
 Forbidden returns Error instance with Forbidden code
 
 <a name="FromOAuth"></a>
-### func [FromOAuth](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L338>)
+### func [FromOAuth](<https://github.com/effective-security/porto/blob/main/xhttp/httperror/codes.go#L343>)
 
 ```go
 func FromOAuth(code, descr string) *Error

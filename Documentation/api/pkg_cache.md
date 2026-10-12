@@ -92,7 +92,7 @@ var NowFunc = time.Now
 ```
 
 <a name="GetOrSet"></a>
-## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L141>)
+## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L140>)
 
 ```go
 func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error
@@ -101,16 +101,16 @@ func GetOrSet(ctx context.Context, p Provider, key string, value any, getter fun
 GetOrSet decodes the cached value for key into value \(a non\-nil pointer\). On a miss it calls getter, which must return a pointer, and copies the pointed\-to result into value. A successful result is also stored with the provider's default TTL \(Set with ttl 0\). A cache write failure is returned without changing value. Interface destinations are unsupported on a miss because providers cannot reliably restore the getter's concrete type. Concurrent misses may call getter more than once. Errors other than a miss are returned as\-is.
 
 <a name="IsNotFoundError"></a>
-## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L221>)
+## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L219>)
 
 ```go
 func IsNotFoundError(err error) bool
 ```
 
-IsNotFoundError reports whether err is \(or wraps\) ErrNotFound, or whose message contains "not found".
+IsNotFoundError reports whether err is or wraps ErrNotFound.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L29-L34>)
+## type [Config](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L28-L33>)
 
 Config specifies configuration of the cache. The package does not switch on Provider itself; callers choose NewMemoryProvider or NewRedisProvider\(\*Config.Redis, prefix\).
 
@@ -124,7 +124,7 @@ type Config struct {
 ```
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L82-L131>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L81-L130>)
 
 Provider is the cache interface implemented by the memory, Redis and proxy providers. Implementations are safe for concurrent use. A key is cleaned as a rooted path and stored under the provider prefix, so ".." cannot leave the prefix.
 
@@ -209,7 +209,7 @@ func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error)
 NewRedisProvider returns a Provider backed by Redis. cfg.Server is parsed with redis.ParseURL, and a malformed URL is reported without the URL, which may embed a password; cfg.ClientTLS files \(if set\) configure TLS and cfg.Password overrides the URL credentials. An empty prefix becomes "/"; a zero cfg.TTL becomes 1h. Maintenance notifications are disabled. The connection is established lazily, so a bad address only fails later.
 
 <a name="RedisConfig"></a>
-## type [RedisConfig](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L37-L48>)
+## type [RedisConfig](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L36-L47>)
 
 RedisConfig specifies the Redis connection used by NewRedisProvider.
 
@@ -229,7 +229,7 @@ type RedisConfig struct {
 ```
 
 <a name="Subscription"></a>
-## type [Subscription](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L59-L76>)
+## type [Subscription](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L58-L75>)
 
 Subscription is a channel subscription returned by Provider.Subscribe. Delivery is at most once: a subscriber that has fallen more than 100 messages behind misses messages; see Provider.Publish.
 

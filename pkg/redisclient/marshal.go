@@ -29,24 +29,17 @@ func Marshal(v any) (any, error) {
 // UnmarshalStringCmd unmarshals the value from Redis storage into the provided variable.
 // string and []byte are converted as-is, while JSON is unmarshaled into the target type.
 func UnmarshalStringCmd(val *redis.StringCmd, v any) error {
+	if err := val.Err(); err != nil {
+		return errors.WithMessage(err, "failed to get key")
+	}
 	switch t := v.(type) {
 	case *string:
-		// FINDINGS P-094: val.Err() is not checked here.
 		*t = val.Val()
 	case *[]byte:
-		b, err := val.Bytes()
-		if err != nil {
-			return errors.Wrapf(err, "failed to get key")
-		}
-		*t = b
+		*t = []byte(val.Val())
 	default:
-		b, err := val.Bytes()
-		if err != nil {
-			return errors.Wrapf(err, "failed to get key")
-		}
-		err = json.Unmarshal(b, v)
-		if err != nil {
-			return errors.Wrapf(err, "failed to unmarshal value")
+		if err := json.Unmarshal([]byte(val.Val()), v); err != nil {
+			return errors.WithMessage(err, "failed to unmarshal value")
 		}
 	}
 	return nil

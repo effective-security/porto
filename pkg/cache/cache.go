@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -216,11 +215,7 @@ func (s *failedSub) ReceiveMessage(_ context.Context) (string, error) {
 	return "", s.err
 }
 
-// IsNotFoundError reports whether err is (or wraps) ErrNotFound, or whose
-// message contains "not found".
+// IsNotFoundError reports whether err is or wraps ErrNotFound.
 func IsNotFoundError(err error) bool {
-	// FINDINGS P-095: the message match makes GetOrSet treat unrelated
-	// errors as a miss.
-	return err != nil &&
-		(err == ErrNotFound || errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found"))
+	return errors.Is(err, ErrNotFound)
 }

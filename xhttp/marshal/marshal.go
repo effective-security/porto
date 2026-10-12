@@ -100,7 +100,7 @@ func WriteJSON(w http.ResponseWriter, r *http.Request, bodies ...any) {
 		addVaryAcceptEncoding(h)
 		var out io.Writer = w
 		var compressed *thresholdGzipWriter
-		if acceptsGzip(r.Header) {
+		if AcceptsGzip(r.Header) {
 			compressed = &thresholdGzipWriter{w: w}
 			out = compressed
 		}
@@ -187,7 +187,10 @@ func addVaryAcceptEncoding(h http.Header) {
 	h.Add(header.Vary, header.AcceptEncoding)
 }
 
-func acceptsGzip(h http.Header) bool {
+// AcceptsGzip reports whether Accept-Encoding permits gzip, considering all
+// header lines and quality values. An explicit gzip entry overrides a wildcard;
+// malformed or out-of-range quality values are treated as a refusal.
+func AcceptsGzip(h http.Header) bool {
 	var gzipQuality, wildcardQuality float64
 	var gzipSeen, wildcardSeen bool
 	for _, field := range h.Values(header.AcceptEncoding) {

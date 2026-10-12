@@ -46,6 +46,8 @@ const (
 	echoInternal      = "internal"       // *httperror.Error with a cause
 	echoMany          = "many"           // *httperror.ManyError
 	echoStatus        = "status"         // a FailedPrecondition gRPC status
+	echoPlain         = "plain"          // an untyped application error
+	echoWrapped       = "wrapped"        // a wrapped httperror
 	echoLarge         = "large"          // a response of largeMessageSize bytes
 
 	watchCount       = 3
@@ -76,7 +78,10 @@ type echoServer struct {
 	// calls counts the Echo handler invocations
 	calls atomic.Int32
 	// blocked receives a value when a Block stream starts
-	blocked chan struct{}
+	blocked        chan struct{}
+	closed         atomic.Bool
+	blockHeaders   bool
+	releaseOnClose chan struct{}
 }
 
 func newEchoServer() *echoServer {
@@ -85,7 +90,12 @@ func newEchoServer() *echoServer {
 
 func (s *echoServer) Name() string  { return "echo" }
 func (s *echoServer) IsReady() bool { return true }
-func (s *echoServer) Close()        {}
+func (s *echoServer) Close() {
+	s.closed.Store(true)
+	if s.releaseOnClose != nil {
+		close(s.releaseOnClose)
+	}
+}
 
 func (s *echoServer) RegisterGRPC(gs *grpc.Server) {
 	gs.RegisterService(&grpc.ServiceDesc{
@@ -130,7 +140,16 @@ func (s *echoServer) RegisterGRPC(gs *grpc.Server) {
 				StreamName:    "Block",
 				ServerStreams: true,
 				Handler: func(_ any, stream grpc.ServerStream) error {
+					if s.blockHeaders {
+						if err := stream.SendMsg(wrapperspb.Bytes(nil)); err != nil {
+							return err
+						}
+					}
 					s.blocked <- struct{}{}
+					if s.releaseOnClose != nil {
+						<-s.releaseOnClose
+						return nil
+					}
 					<-stream.Context().Done()
 					return stream.Context().Err()
 				},
@@ -153,6 +172,10 @@ func (s *echoServer) echo(_ context.Context, in *echoRequest) (*wrapperspb.Bytes
 			Add("value", httperror.InvalidRequest("bad value"))
 	case echoStatus:
 		return nil, status.Error(codes.FailedPrecondition, "echo precondition failed")
+	case echoPlain:
+		return nil, errors.New("backend failed")
+	case echoWrapped:
+		return nil, errors.WithStack(httperror.InvalidRequest("bad value"))
 	case echoLarge:
 		return wrapperspb.Bytes(make([]byte, largeMessageSize)), nil
 	}
@@ -279,6 +302,7 @@ func TestGRPCInterceptorChain(t *testing.T) {
 	// A panicking handler fails its call and the server keeps serving.
 	_, err = callEcho(ctx, conn, []byte(echoPanic))
 	require.Error(t, err)
+	assert.Equal(t, codes.Internal, status.Code(err))
 	assert.Equal(t, "unhandled exception", status.Convert(err).Message())
 	assert.Equal(t, int32(2), svc.calls.Load())
 	got, err = callEcho(ctx, conn, []byte("after panic"))
@@ -415,7 +439,7 @@ func rpcMetric(api string, code codes.Code) map[string]int {
 // TestGRPCRequestMetrics checks the metrics recorded by the logging
 // interceptors: one sample and one counter per call labelled with the
 // method and the status code of its error, including calls that fail or
-// panic in Validate (FINDINGS P-099), a single counter under "unknown" and
+// panic in Validate or in the handler, a single counter under "unknown" and
 // "404" for NotFound, and nothing for a successful call on a skipped path.
 // It installs the process-global metrics sink, so it is not parallel.
 func TestGRPCRequestMetrics(t *testing.T) {
@@ -440,6 +464,9 @@ func TestGRPCRequestMetrics(t *testing.T) {
 		{echoStatus, codes.FailedPrecondition},
 		{echoInvalid, codes.InvalidArgument},
 		{echoValidatePanic, codes.Internal},
+		{echoPanic, codes.Internal},
+		{echoPlain, codes.Unknown},
+		{echoWrapped, codes.InvalidArgument},
 	} {
 		_, err := callEcho(ctx, conn, []byte(tt.value))
 		require.Equal(t, tt.code, status.Code(err), "%s: %v", tt.value, err)
@@ -454,6 +481,9 @@ func TestGRPCRequestMetrics(t *testing.T) {
 		grpcMetricsName + "_rpc_requests_role;api=unknown;status=404;role=" + roles.GuestRoleName: 1,
 	}
 	for _, m := range []map[string]int{
+		rpcMetric(echoMethod, codes.Internal),
+		rpcMetric(echoMethod, codes.Unknown),
+		rpcMetric(echoMethod, codes.InvalidArgument),
 		rpcMetric(echoMethod, codes.OK),
 		rpcMetric(echoMethod, codes.Internal),
 		rpcMetric(echoMethod, codes.Internal),
@@ -479,11 +509,19 @@ func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 	// cmux.Serve returns an error while Close drains; the setup cleanup of
 	// serve must not stop the gRPC server then.
 	tcases := []struct {
-		name      string
-		serverTLS *gserver.TLSInfo
+		name         string
+		serverTLS    *gserver.TLSInfo
+		headers      bool
+		waitForClose bool
 	}{
 		{name: "plaintext"},
+		{name: "handler waiting for service close", waitForClose: true},
 		{name: "tls", serverTLS: &gserver.TLSInfo{
+			CertFile:      "testdata/test-server.pem",
+			KeyFile:       "testdata/test-server-key.pem",
+			TrustedCAFile: "testdata/test-server-rootca.pem",
+		}},
+		{name: "tls after headers", headers: true, serverTLS: &gserver.TLSInfo{
 			CertFile:      "testdata/test-server.pem",
 			KeyFile:       "testdata/test-server-key.pem",
 			TrustedCAFile: "testdata/test-server-rootca.pem",
@@ -496,6 +534,10 @@ func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 			cfg := &gserver.Config{ServerTLS: tc.serverTLS}
 			cfg.Timeout.Request = requestTimeout
 			svc := newEchoServer()
+			svc.blockHeaders = tc.headers
+			if tc.waitForClose {
+				svc.releaseOnClose = make(chan struct{})
+			}
 			srv, conn := startEcho(t, cfg, svc)
 			ctx, cancel := context.WithTimeout(context.Background(), echoTimeout)
 			defer cancel()
@@ -504,6 +546,9 @@ func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, stream.SendMsg(wrapperspb.Bytes(nil)))
 			require.NoError(t, stream.CloseSend())
+			if tc.headers {
+				require.NoError(t, stream.RecvMsg(&wrapperspb.BytesValue{}))
+			}
 			select {
 			case <-svc.blocked:
 			case <-ctx.Done():
@@ -513,16 +558,13 @@ func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 			start := time.Now()
 			srv.Close()
 			elapsed := time.Since(start)
+			assert.True(t, svc.closed.Load())
 			assert.GreaterOrEqual(t, elapsed, requestTimeout, "Close must wait for the graceful stop first")
 			assert.Less(t, elapsed, echoTimeout)
 
 			err = stream.RecvMsg(&wrapperspb.BytesValue{})
 			require.Error(t, err)
-			if tc.serverTLS == nil {
-				assert.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
-			}
-			// FINDINGS P-102: on TLS listeners the stream ends with a
-			// malformed HTTP response, which the client reports as Unknown.
+			assert.Equal(t, codes.Unavailable, status.Code(err), "%v", err)
 		})
 	}
 }

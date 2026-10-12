@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/redisclient"
 	"github.com/effective-security/xlog"
 	"github.com/moby/moby/api/types/container"
@@ -261,6 +262,8 @@ func Test_Redis(t *testing.T) {
 
 		_, err = client.HGet(ctx, "test_hash", "field1")
 		require.EqualError(t, err, "not found")
+		assert.ErrorIs(t, err, redisclient.ErrNotFound)
+		assert.NotNil(t, errors.Unwrap(err), "a missing field must carry a stack")
 
 		err = client.Del(ctx, "test_hash")
 		require.NoError(t, err)
@@ -1027,6 +1030,7 @@ func Test_Redis(t *testing.T) {
 		err := client.Get(ctx, "get_missing", &s)
 		require.EqualError(t, err, "not found")
 		assert.ErrorIs(t, err, redisclient.ErrNotFound)
+		assert.NotNil(t, errors.Unwrap(err), "a missing key must carry a stack")
 		assert.True(t, redisclient.IsNotFoundError(err))
 
 		// a non-JSON value cannot be decoded into a non-string target

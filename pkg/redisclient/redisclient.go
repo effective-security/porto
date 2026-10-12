@@ -152,12 +152,9 @@ type Config struct {
 // ErrNotFound is returned by Get and HGet for a missing key or field.
 var ErrNotFound = errors.New("not found")
 
-// IsNotFoundError reports whether err is (or wraps) ErrNotFound, or whose
-// message contains "not found".
+// IsNotFoundError reports whether err is or wraps ErrNotFound.
 func IsNotFoundError(err error) bool {
-	// FINDINGS P-095: == and the message match are redundant or too broad.
-	return err != nil &&
-		(err == ErrNotFound || errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), "not found"))
+	return errors.Is(err, ErrNotFound)
 }
 
 // RedisClient implements Provider on top of an embedded *redis.Client.
@@ -361,8 +358,7 @@ func (c *RedisClient) Get(ctx context.Context, key string, v any) error {
 	err := val.Err()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			// FINDINGS P-095: the sentinel is not wrapped.
-			return ErrNotFound
+			return errors.WithStack(ErrNotFound)
 		}
 		return errors.Wrapf(err, "failed to get key: %s", key)
 	}
@@ -577,8 +573,7 @@ func (c *RedisClient) SRem(ctx context.Context, key string, members ...any) erro
 func (c *RedisClient) SIsMember(ctx context.Context, key string, member any) (bool, error) {
 	val, err := c.Client.SIsMember(ctx, c.Key(key), member).Result()
 	if err != nil {
-		// FINDINGS P-104: %s misformats a non-string member.
-		return false, errors.WithMessagef(err, "unable to check if member %s exists in set %s", member, key)
+		return false, errors.WithMessagef(err, "unable to check if member %v exists in set %s", member, key)
 	}
 	return val, nil
 }
@@ -686,8 +681,7 @@ func (c *RedisClient) HGet(ctx context.Context, key string, field string) (strin
 	val, err := c.Client.HGet(ctx, c.Key(key), field).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			// FINDINGS P-095: the sentinel is not wrapped.
-			return "", ErrNotFound
+			return "", errors.WithStack(ErrNotFound)
 		}
 		return "", errors.WithMessagef(err, "unable to get field %s from hash %s", field, key)
 	}
@@ -780,25 +774,24 @@ return n
 // Sorted Set (ZSet) operations
 
 // ZAdd adds member with score to the sorted set at key, updating the score
-// if the member exists. The go-redis error is returned unwrapped.
+// if the member exists. Errors include the key.
 func (c *RedisClient) ZAdd(ctx context.Context, key string, score float64, member string) error {
 	_, err := c.Client.ZAdd(ctx, c.Key(key), redis.Z{Score: score, Member: member}).Result()
-	// FINDINGS P-104: here and in ZIncrBy, ZRem and ZRemRangeByRank.
-	return err
+	return errors.Wrapf(err, "unable to add member to sorted set %s", key)
 }
 
 // ZIncrBy adds increment to the score of member in the sorted set at key.
-// The go-redis error is returned unwrapped.
+// Errors include the key.
 func (c *RedisClient) ZIncrBy(ctx context.Context, key string, increment float64, member string) error {
 	_, err := c.Client.ZIncrBy(ctx, c.Key(key), increment, member).Result()
-	return err
+	return errors.Wrapf(err, "unable to increment score in sorted set %s", key)
 }
 
 // ZRem removes members from the sorted set at key.
-// The go-redis error is returned unwrapped.
+// Errors include the key.
 func (c *RedisClient) ZRem(ctx context.Context, key string, members ...any) error {
 	_, err := c.Client.ZRem(ctx, c.Key(key), members...).Result()
-	return err
+	return errors.Wrapf(err, "unable to remove members from sorted set %s", key)
 }
 
 // ZRevRangeWithScores returns the elements of the sorted set at key between
@@ -827,11 +820,10 @@ func (c *RedisClient) ZCard(ctx context.Context, key string) (int64, error) {
 
 // ZRemRangeByRank removes the elements of the sorted set at key between the
 // start and stop ranks (0-based, ascending by score) and returns the count
-// removed. Use (0, -N-1) to keep only the top N. The go-redis error is
-// returned unwrapped.
+// removed. Use (0, -N-1) to keep only the top N. Errors include the key.
 func (c *RedisClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {
 	val, err := c.Client.ZRemRangeByRank(ctx, c.Key(key), start, stop).Result()
-	return val, err
+	return val, errors.Wrapf(err, "unable to remove range from sorted set %s", key)
 }
 
 // Distributed Lock implementations
