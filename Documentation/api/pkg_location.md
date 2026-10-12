@@ -45,9 +45,11 @@ IPLocation is a one\-off lookup that logs and drops errors, for callers that car
   - [func \(p \*IPWhoIs\) Location\(ctx context.Context, addr netip.Addr\) \(\*Place, error\)](<#IPWhoIs.Location>)
 - [type IPWhoIsConfig](<#IPWhoIsConfig>)
 - [type Place](<#Place>)
-  - [func IPLocation\(ctx context.Context, baseURL string, addr netip.Addr\) \*Place](<#IPLocation>)
+  - [func FetchIPLocation\(ctx context.Context, baseURL string, addr netip.Addr\) \*Place](<#FetchIPLocation>)
+  - [func Location\(ctx context.Context, addr netip.Addr\) \(\*Place, error\)](<#Location>)
   - [func \(p \*Place\) String\(\) string](<#Place.String>)
 - [type Provider](<#Provider>)
+  - [func GetDefaultProvider\(\) \(Provider, error\)](<#GetDefaultProvider>)
 
 
 ## Constants
@@ -95,7 +97,7 @@ var ErrQuotaExceeded = errors.New("location lookup quota exceeded")
 ```
 
 <a name="IsPublic"></a>
-## func [IsPublic](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L95>)
+## func [IsPublic](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L99>)
 
 ```go
 func IsPublic(addr netip.Addr) bool
@@ -104,7 +106,7 @@ func IsPublic(addr netip.Addr) bool
 IsPublic reports whether addr can have a location: a global unicast address \(in 2000::/3 for IPv6\) that is not private \(RFC 1918, RFC 4193\), carrier\-grade NAT, or another special\-purpose range. An IPv4\-mapped IPv6 address is checked as IPv4 and an IPv6 zone is ignored. Providers return no location for other addresses without a lookup.
 
 <a name="ParsePublicIP"></a>
-## func [ParsePublicIP](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L118>)
+## func [ParsePublicIP](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L122>)
 
 ```go
 func ParsePublicIP(raw string) (netip.Addr, bool)
@@ -223,7 +225,7 @@ type CacheConfig struct {
 ```
 
 <a name="IPWhoIs"></a>
-## type [IPWhoIs](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L80-L87>)
+## type [IPWhoIs](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L82-L89>)
 
 IPWhoIs is a Provider backed by the ipwho.is JSON API. It sends one request per call; wrap it in a Cache to share answers. After an HTTP 429 it fails every lookup with ErrQuotaExceeded, without a request, until the Retry\-After the service sent has passed. It is safe for concurrent use.
 
@@ -234,7 +236,7 @@ type IPWhoIs struct {
 ```
 
 <a name="NewIPWhoIs"></a>
-### func [NewIPWhoIs](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L103>)
+### func [NewIPWhoIs](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L105>)
 
 ```go
 func NewIPWhoIs(cfg IPWhoIsConfig) (*IPWhoIs, error)
@@ -243,7 +245,7 @@ func NewIPWhoIs(cfg IPWhoIsConfig) (*IPWhoIs, error)
 NewIPWhoIs returns an ipwho.is Provider. It returns an error when cfg.BaseURL is not an absolute http or https URL, or cfg.Timeout is negative.
 
 <a name="IPWhoIs.Location"></a>
-### func \(\*IPWhoIs\) [Location](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L143>)
+### func \(\*IPWhoIs\) [Location](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L145>)
 
 ```go
 func (p *IPWhoIs) Location(ctx context.Context, addr netip.Addr) (*Place, error)
@@ -252,7 +254,7 @@ func (p *IPWhoIs) Location(ctx context.Context, addr netip.Addr) (*Place, error)
 Location implements Provider. It looks up public addresses only, in canonical form \(see ParsePublicIP\). A non\-200 status is an error, one that wraps ErrQuotaExceeded for 429; an answer with "success": false for an invalid address or a reserved range is no location, any other one an error.
 
 <a name="IPWhoIsConfig"></a>
-## type [IPWhoIsConfig](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L63-L74>)
+## type [IPWhoIsConfig](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L65-L76>)
 
 IPWhoIsConfig configures NewIPWhoIs. The zero value uses the free ipwho.is endpoint.
 
@@ -272,7 +274,7 @@ type IPWhoIsConfig struct {
 ```
 
 <a name="Place"></a>
-## type [Place](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L23-L28>)
+## type [Place](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L27-L32>)
 
 Place is the location a Provider reports for an IP address. Any field may be empty.
 
@@ -285,17 +287,26 @@ type Place struct {
 }
 ```
 
-<a name="IPLocation"></a>
-### func [IPLocation](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L219>)
+<a name="FetchIPLocation"></a>
+### func [FetchIPLocation](<https://github.com/effective-security/porto/blob/main/pkg/location/ipwhois.go#L221>)
 
 ```go
-func IPLocation(ctx context.Context, baseURL string, addr netip.Addr) *Place
+func FetchIPLocation(ctx context.Context, baseURL string, addr netip.Addr) *Place
 ```
 
-IPLocation looks up addr once with an ipwho.is provider at baseURL \(DefaultIPWhoIsURL when empty\) and default settings. It is for callers that show a location when one is available and carry on without it: errors, including an invalid baseURL, are logged at WARNING and return nil, as does an address without a location, which is not looked up. Each call builds a new provider, so the 429 backoff of IPWhoIs does not apply; services that look up many addresses should keep one Provider wrapped in a Cache instead.
+FetchIPLocation looks up addr once with an ipwho.is provider at baseURL \(DefaultIPWhoIsURL when empty\) and default settings. It is for callers that show a location when one is available and carry on without it: errors, including an invalid baseURL, are logged at WARNING and return nil, as does an address without a location, which is not looked up. Each call builds a new provider, so the 429 backoff of IPWhoIs does not apply; services that look up many addresses should keep one Provider wrapped in a Cache instead.
+
+<a name="Location"></a>
+### func [Location](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L176>)
+
+```go
+func Location(ctx context.Context, addr netip.Addr) (*Place, error)
+```
+
+Location returns the place of addr from the default provider.
 
 <a name="Place.String"></a>
-### func \(\*Place\) [String](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L33>)
+### func \(\*Place\) [String](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L37>)
 
 ```go
 func (p *Place) String() string
@@ -304,7 +315,7 @@ func (p *Place) String() string
 String returns "City, Region, Country" for display, skipping blank names and a name repeated next to itself \(a city\-state such as Singapore\). A nil Place returns "".
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L12-L19>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L16-L23>)
 
 Provider resolves the geographic location of an IP address. IPWhoIs looks it up over HTTP; Cache wraps any Provider and shares answers between addresses of the same network.
 
@@ -318,5 +329,14 @@ type Provider interface {
     Location(ctx context.Context, addr netip.Addr) (*Place, error)
 }
 ```
+
+<a name="GetDefaultProvider"></a>
+### func [GetDefaultProvider](<https://github.com/effective-security/porto/blob/main/pkg/location/location.go#L154>)
+
+```go
+func GetDefaultProvider() (Provider, error)
+```
+
+GetDefaultProvider returns the default provider. It is initialized on the first call and cached for subsequent calls.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

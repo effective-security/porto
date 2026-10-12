@@ -1,6 +1,7 @@
 package location_test
 
 import (
+	"context"
 	"net/netip"
 	"testing"
 
@@ -176,4 +177,25 @@ func TestIsPublic(t *testing.T) {
 	assert.True(t, location.IsPublic(netip.MustParseAddr("::ffff:8.8.8.8")))
 	assert.False(t, location.IsPublic(netip.MustParseAddr("::ffff:10.0.0.1")))
 	assert.True(t, location.IsPublic(netip.MustParseAddr("2001:4860::1%eth0")))
+}
+
+func TestGetDefaultProvider(t *testing.T) {
+	t.Parallel()
+
+	provider, err := location.GetDefaultProvider()
+	assert.NoError(t, err)
+	assert.NotNil(t, provider)
+
+	provider2, err := location.GetDefaultProvider()
+	assert.NoError(t, err)
+	assert.NotNil(t, provider2)
+
+	assert.Equal(t, provider, provider2)
+}
+
+func TestLocationSkipsNonPublic(t *testing.T) {
+	t.Parallel()
+	place, err := location.Location(context.Background(), netip.MustParseAddr("127.0.0.1"))
+	assert.NoError(t, err)
+	assert.Nil(t, place)
 }

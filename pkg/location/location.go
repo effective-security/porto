@@ -4,6 +4,10 @@ import (
 	"context"
 	"net/netip"
 	"strings"
+	"sync"
+
+	"github.com/cockroachdb/errors"
+	"github.com/effective-security/xlog"
 )
 
 // Provider resolves the geographic location of an IP address. IPWhoIs looks
@@ -138,4 +142,41 @@ func parseHostAddr(raw string) (netip.Addr, bool) {
 	}
 	addrPort, err := netip.ParseAddrPort(raw)
 	return addrPort.Addr(), err == nil
+}
+
+var (
+	defProvInitOnce sync.Once
+	defProvider     Provider
+)
+
+// GetDefaultProvider returns the default provider. It is initialized on the
+// first call and cached for subsequent calls.
+func GetDefaultProvider() (Provider, error) {
+	defProvInitOnce.Do(func() {
+		whois, err := NewIPWhoIs(IPWhoIsConfig{BaseURL: DefaultIPWhoIsURL, Timeout: DefaultTimeout, UserAgent: DefaultUserAgent})
+		if err != nil {
+			logger.KV(xlog.ERROR, "reason", "NewIPWhoIs", "err", err.Error())
+			return
+		}
+		locations, err := NewCache(whois, CacheConfig{Size: defaultCacheSize})
+		if err != nil {
+			logger.KV(xlog.ERROR, "reason", "NewCache", "err", err.Error())
+			return
+		}
+
+		defProvider = locations
+	})
+	if defProvider == nil {
+		return nil, errors.New("default provider not initialized")
+	}
+	return defProvider, nil
+}
+
+// Location returns the place of addr from the default provider.
+func Location(ctx context.Context, addr netip.Addr) (*Place, error) {
+	provider, err := GetDefaultProvider()
+	if err != nil {
+		return nil, err
+	}
+	return provider.Location(ctx, addr)
 }
