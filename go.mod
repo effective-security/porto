@@ -5,11 +5,11 @@ go 1.27.2
 require (
 	github.com/cockroachdb/errors v1.14.0
 	github.com/didip/tollbooth/v7 v7.0.2
-	github.com/effective-security/metrics v0.10.153
-	github.com/effective-security/x v0.18.106
-	github.com/effective-security/xdb v0.25.164
+	github.com/effective-security/metrics v0.10.154
+	github.com/effective-security/x v1.0.109
+	github.com/effective-security/xdb v0.25.165
 	github.com/effective-security/xlog v1.0.69
-	github.com/effective-security/xpki v1.0.313
+	github.com/effective-security/xpki v1.0.314
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
@@ -85,7 +85,7 @@ require (
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
-	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
