@@ -38,6 +38,13 @@
   bad credential) is logged with the same client IP and counted as
   `guest`. The gRPC `API_ERROR` and `INTERNAL_ERROR` lines now have
   `remote` too.
+- `pkg/revocation` no longer runs Redis `KEYS` when it refreshes its
+  snapshot of revoked token IDs (every 5 minutes per process, on the
+  first `Validate` after the snapshot is stale). `KEYS` blocks the Redis
+  server while it walks the whole keyspace. The reload now pages through
+  `/revoked/*` with `cache.Provider.ListKeys`, one `SCAN` with
+  `COUNT 1000` per call, until the iteration ends. A failed page fails
+  the reload and keeps the previous snapshot, as a failed `KEYS` did.
 
 ## Breaking changes (log fields and metric labels)
 
@@ -83,8 +90,49 @@ User-Agent. Update log queries and dashboards that use the old names:
   interceptors, so concurrent `FromRequest` calls in a handler are
   race-free for callers without a client IP or User-Agent.
 
+## Breaking changes (cache key listing)
+
+- `cache.Provider` has a new method `ListKeys(ctx, pattern, cursor,
+  count) (keys, next, err)`. Implementations of `Provider` outside this
+  module must add it; the memory, Redis and proxy providers implement it.
+- `cache.Provider.Keys` is deprecated: on Redis it runs `KEYS`, which
+  blocks the server for the whole keyspace and returns every match at
+  once. It still works unchanged; `golangci-lint` (staticcheck SA1019)
+  now reports its callers. Replace `keys, err := p.Keys(ctx, "user:*")`
+  with a loop that stops when the returned cursor is empty:
+
+```go
+cursor := ""
+for {
+	keys, next, err := p.ListKeys(ctx, "user:*", cursor, 100)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		handle(key) // on Redis a page may be empty or repeat a key
+	}
+	if next == "" {
+		break
+	}
+	cursor = next
+}
+```
+
 ## New features
 
+- `cache.Provider.ListKeys` lists the keys that match a Redis glob
+  pattern one page at a time, with the same pattern syntax, namespacing
+  and results as `Keys`. Start with an empty cursor and pass the returned
+  cursor back until it is empty; `count <= 0` means 100. The Redis
+  provider runs one `SCAN ... MATCH ... COUNT count` per call, so each
+  call does bounded work on the server; as with `SCAN`, a page may hold
+  fewer keys than `count` (even none before the end) or more, and a key
+  may be listed twice. The memory provider returns at most `count` keys
+  per page in key order, each once per iteration, and returns the
+  context error when ctx is already done; each call walks every entry,
+  so a full iteration walks the store once per page. A key that exists
+  for the whole iteration is always listed. Cursors are opaque and
+  belong to the provider that returned them.
 - `restserver/telemetry.NoAgent` (`no-agent`): the agent the REST request
   logger logs and matches for a request without a User-Agent. The
   `gserver` gRPC, rate-limit, CORS and debug lines log it too.

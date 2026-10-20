@@ -14,9 +14,9 @@ type proxyProv struct {
 
 // NewProxyProvider returns a Provider that stores every key under prefix in
 // prov, which cleans the combined key again; like a key, prefix cannot
-// leave prov's namespace. Keys strips prefix again. Its Close is a no-op
-// (the parent owns the connection) and Publish/Subscribe pass channels
-// through unprefixed.
+// leave prov's namespace. ListKeys and Keys strip prefix again. Its Close
+// is a no-op (the parent owns the connection) and Publish/Subscribe pass
+// channels through unprefixed.
 func NewProxyProvider(prefix string, prov Provider) Provider {
 	p := &proxyProv{
 		// prov lists its keys without a leading slash, so the proxy
@@ -83,6 +83,19 @@ func (p *proxyProv) Keys(ctx context.Context, pattern string) ([]string, error) 
 		list[i] = p.ns.rel(key)
 	}
 	return list, nil
+}
+
+// ListKeys returns one page of the keys, relative to the proxy, that match
+// the Redis glob pattern in prov; the cursor is prov's.
+func (p *proxyProv) ListKeys(ctx context.Context, pattern, cursor string, count int) ([]string, string, error) {
+	list, next, err := p.prov.ListKeys(ctx, p.ns.pattern(pattern), cursor, count)
+	if err != nil {
+		return nil, "", err
+	}
+	for i, key := range list {
+		list[i] = p.ns.rel(key)
+	}
+	return list, next, nil
 }
 
 // Subscribe subscribes to channel

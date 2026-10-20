@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -244,6 +245,40 @@ func (p *redisProv) Keys(ctx context.Context, pattern string) ([]string, error) 
 		}
 	}
 	return keys, nil
+}
+
+// ListKeys runs one SCAN from cursor with the Redis glob pattern and COUNT
+// count, and returns the keys it found, relative to the provider, as Keys
+// lists them. The cursor is the decimal SCAN cursor, "" for the first page
+// and for the end of the iteration.
+func (p *redisProv) ListKeys(ctx context.Context, pattern, cursor string, count int) ([]string, string, error) {
+	var start uint64
+	if cursor != "" {
+		var err error
+		start, err = strconv.ParseUint(cursor, 10, 64)
+		if err != nil {
+			return nil, "", errors.WithMessage(err, "invalid cursor")
+		}
+	}
+	if count <= 0 {
+		count = defaultListCount
+	}
+
+	list, next, err := p.client.Scan(ctx, start, p.ns.pattern(pattern), int64(count)).Result()
+	if err != nil {
+		return nil, "", errors.Wrapf(err, "failed to scan keys: %s", pattern)
+	}
+	keys := make([]string, 0, len(list))
+	for _, name := range list {
+		if rel, ok := p.ns.listed(pattern, name); ok {
+			keys = append(keys, rel)
+		}
+	}
+	nextCursor := ""
+	if next != 0 {
+		nextCursor = strconv.FormatUint(next, 10)
+	}
+	return keys, nextCursor, nil
 }
 
 // Publish publishes message to channel. Redis never waits for subscribers.

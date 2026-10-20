@@ -10,7 +10,7 @@ Package cache provides a small key/value cache abstraction \(Provider\) with a T
 
 Values are JSON encoded on Set and decoded into the pointer passed to Get, so both backends behave the same. A missing or expired entry is reported as ErrNotFound \(test with IsNotFoundError\).
 
-Keys: a key is cleaned as a rooted path and joined with the provider prefix, so "x", "/x" and "x/" name the same entry and ".." cannot leave the prefix \("../x" is "\<prefix\>/x"\); a proxy prefix is cleaned the same way. Keys takes a Redis glob pattern relative to the provider \('\*' and '?' also match '/', "\[...\]" sets, '\\' escapes\), matches the prefix literally and returns the matching unexpired keys relative to the provider, in the form Get accepts \(the key "" only for an empty pattern\); the memory provider implements the Redis matcher, so both backends list the same keys.
+Keys: a key is cleaned as a rooted path and joined with the provider prefix, so "x", "/x" and "x/" name the same entry and ".." cannot leave the prefix \("../x" is "\<prefix\>/x"\); a proxy prefix is cleaned the same way. ListKeys takes a Redis glob pattern relative to the provider \('\*' and '?' also match '/', "\[...\]" sets, '\\' escapes\), matches the prefix literally and returns the matching unexpired keys relative to the provider, in the form Get accepts \(the key "" only for an empty pattern\); the memory provider implements the Redis matcher, so both backends list the same keys. ListKeys returns one page per call and a cursor for the next one, until the cursor comes back empty: Redis runs one SCAN with COUNT count, so a page can be empty or repeat a key; the memory provider returns up to count keys in order, each once. Keys, which runs Redis KEYS over the whole keyspace in one call, is deprecated.
 
 ```
 var p cache.Provider
@@ -25,6 +25,22 @@ err = p.Get(ctx, "user:1", &u)
 
 // scope a shared provider to a sub-namespace
 users := cache.NewProxyProvider("users", p)
+
+// page through the keys "user:*"
+cursor := ""
+for {
+	keys, next, err := p.ListKeys(ctx, "user:*", cursor, 100)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		handle(key) // may see a key twice on Redis
+	}
+	if next == "" {
+		break
+	}
+	cursor = next
+}
 ```
 
 Config YAML/JSON fields: provider \(redis|memory\) and redis \{server, ttl, client\_tls \{cert, key, trusted\_ca\}, user, password\}. The package does not itself switch on Config.Provider; the caller picks the constructor.
@@ -92,7 +108,7 @@ var NowFunc = time.Now
 ```
 
 <a name="GetOrSet"></a>
-## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L140>)
+## func [GetOrSet](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L163>)
 
 ```go
 func GetOrSet(ctx context.Context, p Provider, key string, value any, getter func() (any, error)) error
@@ -101,7 +117,7 @@ func GetOrSet(ctx context.Context, p Provider, key string, value any, getter fun
 GetOrSet decodes the cached value for key into value \(a non\-nil pointer\). On a miss it calls getter, which must return a pointer, and copies the pointed\-to result into value. A successful result is also stored with the provider's default TTL \(Set with ttl 0\). A cache write failure is returned without changing value. Interface destinations are unsupported on a miss because providers cannot reliably restore the getter's concrete type. Concurrent misses may call getter more than once. Errors other than a miss are returned as\-is.
 
 <a name="IsNotFoundError"></a>
-## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L219>)
+## func [IsNotFoundError](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L242>)
 
 ```go
 func IsNotFoundError(err error) bool
@@ -124,7 +140,7 @@ type Config struct {
 ```
 
 <a name="Provider"></a>
-## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L81-L130>)
+## type [Provider](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L84-L153>)
 
 Provider is the cache interface implemented by the memory, Redis and proxy providers. Implementations are safe for concurrent use. A key is cleaned as a rooted path and stored under the provider prefix, so ".." cannot leave the prefix.
 
@@ -155,7 +171,27 @@ type Provider interface {
     // only for an empty pattern. The memory provider matches as Redis KEYS
     // does (ranges with bytes >= 0x80 compare unsigned).
     // It scans the whole keyspace and is meant for tests.
+    //
+    // Deprecated: Keys runs Redis KEYS, which blocks the server while it
+    // walks the whole keyspace, and returns every match at once.
+    // Use ListKeys, which pages through the keys with SCAN.
     Keys(ctx context.Context, pattern string) ([]string, error)
+    // ListKeys returns one page of the unexpired keys, relative to the
+    // provider, that match the Redis glob pattern (matched and listed as
+    // by Keys), and the cursor of the next page. Start with an empty
+    // cursor and pass the returned one back with the same pattern until it
+    // is empty. A cursor is opaque and only valid for the provider that
+    // returned it (a proxy passes its parent's cursor through).
+    // count <= 0 means 100. The Redis provider runs one SCAN with COUNT
+    // count, which bounds the server's work per call, so a page may hold
+    // fewer keys than count, none while the cursor is not empty, or more,
+    // and a key may be returned more than once. For the memory provider
+    // count is the page size: it returns at most count keys, in the byte
+    // order of their stored names, each once per iteration, and walks
+    // every entry on each call. A key that exists during the whole
+    // iteration is returned; a key added or removed meanwhile may or may
+    // not be.
+    ListKeys(ctx context.Context, pattern, cursor string, count int) (keys []string, next string, err error)
 
     // IsLocal returns true when the cache lives in this process only.
     IsLocal() bool
@@ -181,8 +217,63 @@ type Provider interface {
 }
 ```
 
+<details><summary>Example (List Keys)</summary>
+<p>
+
+
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/effective-security/porto/pkg/cache"
+)
+
+func main() {
+	ctx := context.Background()
+	p := cache.NewMemoryProvider("/myapp")
+	for _, key := range []string{"user/1", "user/2", "user/3", "order/1"} {
+		if err := p.Set(ctx, key, "v", time.Minute); err != nil {
+			panic(err)
+		}
+	}
+
+	// start with an empty cursor and stop when the returned one is empty;
+	// a Redis page may be empty, or repeat a key, before the end
+	cursor := ""
+	for {
+		keys, next, err := p.ListKeys(ctx, "user/*", cursor, 2)
+		if err != nil {
+			panic(err)
+		}
+		for _, key := range keys {
+			fmt.Println(key)
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+}
+```
+
+#### Output
+
+```
+user/1
+user/2
+user/3
+```
+
+</p>
+</details>
+
 <a name="NewMemoryProvider"></a>
-### func [NewMemoryProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/memory.go#L43>)
+### func [NewMemoryProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/memory.go#L45>)
 
 ```go
 func NewMemoryProvider(prefix string) Provider
@@ -197,10 +288,10 @@ NewMemoryProvider returns an in\-process Provider whose keys are stored under pr
 func NewProxyProvider(prefix string, prov Provider) Provider
 ```
 
-NewProxyProvider returns a Provider that stores every key under prefix in prov, which cleans the combined key again; like a key, prefix cannot leave prov's namespace. Keys strips prefix again. Its Close is a no\-op \(the parent owns the connection\) and Publish/Subscribe pass channels through unprefixed.
+NewProxyProvider returns a Provider that stores every key under prefix in prov, which cleans the combined key again; like a key, prefix cannot leave prov's namespace. ListKeys and Keys strip prefix again. Its Close is a no\-op \(the parent owns the connection\) and Publish/Subscribe pass channels through unprefixed.
 
 <a name="NewRedisProvider"></a>
-### func [NewRedisProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/redis.go#L44>)
+### func [NewRedisProvider](<https://github.com/effective-security/porto/blob/main/pkg/cache/redis.go#L45>)
 
 ```go
 func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error)
@@ -229,7 +320,7 @@ type RedisConfig struct {
 ```
 
 <a name="Subscription"></a>
-## type [Subscription](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L58-L75>)
+## type [Subscription](<https://github.com/effective-security/porto/blob/main/pkg/cache/cache.go#L61-L78>)
 
 Subscription is a channel subscription returned by Provider.Subscribe. Delivery is at most once: a subscriber that has fallen more than 100 messages behind misses messages; see Provider.Publish.
 

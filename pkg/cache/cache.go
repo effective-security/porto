@@ -52,6 +52,9 @@ type RedisConfig struct {
 // message channel size for Redis subscriptions.
 const subscriberBufferSize = 100
 
+// defaultListCount is the page size of ListKeys when count <= 0.
+const defaultListCount = 100
+
 // Subscription is a channel subscription returned by Provider.Subscribe.
 // Delivery is at most once: a subscriber that has fallen more than 100
 // messages behind misses messages; see Provider.Publish.
@@ -104,7 +107,27 @@ type Provider interface {
 	// only for an empty pattern. The memory provider matches as Redis KEYS
 	// does (ranges with bytes >= 0x80 compare unsigned).
 	// It scans the whole keyspace and is meant for tests.
+	//
+	// Deprecated: Keys runs Redis KEYS, which blocks the server while it
+	// walks the whole keyspace, and returns every match at once.
+	// Use ListKeys, which pages through the keys with SCAN.
 	Keys(ctx context.Context, pattern string) ([]string, error)
+	// ListKeys returns one page of the unexpired keys, relative to the
+	// provider, that match the Redis glob pattern (matched and listed as
+	// by Keys), and the cursor of the next page. Start with an empty
+	// cursor and pass the returned one back with the same pattern until it
+	// is empty. A cursor is opaque and only valid for the provider that
+	// returned it (a proxy passes its parent's cursor through).
+	// count <= 0 means 100. The Redis provider runs one SCAN with COUNT
+	// count, which bounds the server's work per call, so a page may hold
+	// fewer keys than count, none while the cursor is not empty, or more,
+	// and a key may be returned more than once. For the memory provider
+	// count is the page size: it returns at most count keys, in the byte
+	// order of their stored names, each once per iteration, and walks
+	// every entry on each call. A key that exists during the whole
+	// iteration is returned; a key added or removed meanwhile may or may
+	// not be.
+	ListKeys(ctx context.Context, pattern, cursor string, count int) (keys []string, next string, err error)
 
 	// IsLocal returns true when the cache lives in this process only.
 	IsLocal() bool

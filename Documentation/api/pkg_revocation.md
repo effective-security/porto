@@ -44,7 +44,7 @@ var (
 ```
 
 <a name="New"></a>
-## func [New](<https://github.com/effective-security/porto/blob/main/pkg/revocation/revocaction.go#L56>)
+## func [New](<https://github.com/effective-security/porto/blob/main/pkg/revocation/revocaction.go#L60>)
 
 ```go
 func New(cache cache.Provider) jwt.Revocation

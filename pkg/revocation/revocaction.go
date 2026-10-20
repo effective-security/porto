@@ -24,6 +24,10 @@ var (
 // snapshotTTL is how long a Redis scan of revoked token IDs is reused.
 const snapshotTTL = 5 * time.Minute
 
+// reloadPageSize is the count of each cache.Provider.ListKeys call of a
+// reload.
+const reloadPageSize = 1000
+
 // provider is a process-local cache of revoked token IDs in front of Redis.
 //
 // Validate runs on every authenticated request and Revoke runs alongside it.
@@ -42,7 +46,7 @@ type provider struct {
 	local    map[string]struct{}
 	loadedAt time.Time
 	// inflight is the shared reload. Concurrent Validates wait for it
-	// instead of each running a Redis KEYS scan.
+	// instead of each running a Redis SCAN.
 	inflight *reloadCall
 }
 
@@ -101,17 +105,25 @@ func (p *provider) load(ctx context.Context) error {
 }
 
 func (p *provider) reload(ctx context.Context) error {
-	keys, err := p.cache.Keys(ctx, "/revoked/*")
-	if err != nil {
-		return err
-	}
-	revoked := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		idx := strings.LastIndex(key, "/")
-		if idx < 0 {
-			continue
+	revoked := make(map[string]bool)
+	cursor := ""
+	for {
+		keys, next, err := p.cache.ListKeys(ctx, "/revoked/*", cursor, reloadPageSize)
+		if err != nil {
+			return err
 		}
-		revoked[key[idx+1:]] = true
+		// a Redis SCAN may return a key twice; the map keeps it once
+		for _, key := range keys {
+			idx := strings.LastIndex(key, "/")
+			if idx < 0 {
+				continue
+			}
+			revoked[key[idx+1:]] = true
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
 	}
 
 	p.mu.Lock()

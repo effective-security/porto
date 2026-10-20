@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,6 +33,11 @@ func TestMemProv_CleanExpired(t *testing.T) {
 	keys, err := p.Keys(ctx, "*")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"live"}, keys)
+	// nor does ListKeys, and the expired entry leaves no page to follow
+	keys, next, err := p.ListKeys(ctx, "*", "", 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"live"}, keys)
+	assert.Empty(t, next)
 
 	p.CleanExpired(ctx)
 
@@ -63,6 +70,206 @@ func TestMemProv_KeysRoot(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, keys, prefix)
 		assert.Empty(t, keys, prefix)
+
+		keys, next, err := p.ListKeys(ctx, "*", "", 1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"x"}, keys, prefix)
+		assert.Empty(t, next, prefix)
+		keys, next, err = p.ListKeys(ctx, "", "", 1)
+		require.NoError(t, err)
+		assert.Equal(t, []string{""}, keys, prefix)
+		assert.Empty(t, next, prefix)
+		keys, next, err = p.ListKeys(ctx, "none*", "", 1)
+		require.NoError(t, err)
+		assert.NotNil(t, keys, prefix)
+		assert.Empty(t, keys, prefix)
+		assert.Empty(t, next, prefix)
+	}
+}
+
+func TestMemProv_ListKeys(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	p := NewMemoryProvider("list")
+	for _, key := range []string{"e", "a", "d", "b", "c", "x/1"} {
+		require.NoError(t, p.Set(ctx, key, "v", time.Minute))
+	}
+
+	// pages hold count keys in stored-name order; the cursor is the
+	// stored name of the last key
+	keys, next, err := p.ListKeys(ctx, "?", "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, keys)
+	assert.Equal(t, "list/b", next)
+	keys, next, err = p.ListKeys(ctx, "?", next, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c", "d"}, keys)
+	assert.Equal(t, "list/d", next)
+	keys, next, err = p.ListKeys(ctx, "?", next, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"e"}, keys)
+	assert.Empty(t, next)
+
+	// a full last page ends the iteration without an empty page
+	keys, next, err = p.ListKeys(ctx, "?", "list/c", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"d", "e"}, keys)
+	assert.Empty(t, next)
+
+	// between pages: a key added after the cursor is listed, one added
+	// before it is not, and a deleted key is gone
+	keys, next, err = p.ListKeys(ctx, "*", "", 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, keys)
+	require.NoError(t, p.Set(ctx, "a2", "v", time.Minute))
+	require.NoError(t, p.Set(ctx, "c2", "v", time.Minute))
+	require.NoError(t, p.Delete(ctx, "c"))
+	keys, next, err = p.ListKeys(ctx, "*", next, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c2", "d"}, keys)
+	keys, next, err = p.ListKeys(ctx, "*", next, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"e", "x/1"}, keys)
+	assert.Empty(t, next)
+
+	// count <= 0 is the default page size
+	big := NewMemoryProvider("")
+	for i := range defaultListCount + 1 {
+		require.NoError(t, big.Set(ctx, fmt.Sprintf("k%03d", i), "v", time.Minute))
+	}
+	for _, count := range []int{0, -1} {
+		keys, next, err = big.ListKeys(ctx, "*", "", count)
+		require.NoError(t, err)
+		assert.Len(t, keys, defaultListCount, count)
+		assert.Equal(t, "/k099", next, count)
+		keys, next, err = big.ListKeys(ctx, "*", next, count)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"k100"}, keys, count)
+		assert.Empty(t, next, count)
+	}
+
+	// a count that cannot overflow the page bound
+	keys, next, err = p.ListKeys(ctx, "?", "", math.MaxInt)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b", "d", "e"}, keys)
+	assert.Empty(t, next)
+
+	// through a proxy, the cursor is the parent's stored name
+	proxy := NewProxyProvider("x", p)
+	keys, next, err = proxy.ListKeys(ctx, "*", "", 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1"}, keys)
+	assert.Empty(t, next)
+
+	// a done ctx stops a paging loop, also through a proxy
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	for _, prov := range []Provider{p, proxy} {
+		keys, next, err = prov.ListKeys(canceled, "*", "", 1)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.EqualError(t, err, "context canceled")
+		assert.Nil(t, keys)
+		assert.Empty(t, next)
+	}
+}
+
+// TestMemProv_ListKeysPageBound checks the page bound on fresh providers:
+// sync.Map visits entries in a random order per map, so one provider would
+// test only one order.
+func TestMemProv_ListKeysPageBound(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	for range 64 {
+		p := NewMemoryProvider("")
+		for _, key := range []string{"c", "a", "b"} {
+			require.NoError(t, p.Set(ctx, key, "v", time.Minute))
+		}
+		tcases := []struct {
+			cursor string
+			count  int
+			keys   []string
+			next   string
+		}{
+			{cursor: "", count: 1, keys: []string{"a"}, next: "/a"},
+			{cursor: "", count: 2, keys: []string{"a", "b"}, next: "/b"},
+			{cursor: "", count: 3, keys: []string{"a", "b", "c"}, next: ""},
+			{cursor: "/a", count: 1, keys: []string{"b"}, next: "/b"},
+			{cursor: "/a", count: 2, keys: []string{"b", "c"}, next: ""},
+		}
+		for _, tc := range tcases {
+			keys, next, err := p.ListKeys(ctx, "*", tc.cursor, tc.count)
+			require.NoError(t, err)
+			require.Equal(t, tc.keys, keys, "cursor %q count %d", tc.cursor, tc.count)
+			require.Equal(t, tc.next, next, "cursor %q count %d", tc.cursor, tc.count)
+		}
+	}
+}
+
+// TestMemProv_ListKeysConcurrent pages through the keys while other
+// goroutines add and delete keys: every key that exists during the whole
+// iteration is listed exactly once. Run with -race.
+func TestMemProv_ListKeysConcurrent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	p := NewMemoryProvider("race")
+	const stable = 200
+	want := make([]string, stable)
+	for i := range stable {
+		want[i] = fmt.Sprintf("s%03d", i)
+		require.NoError(t, p.Set(ctx, want[i], "v", time.Minute))
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+	for w := range 4 {
+		wg.Go(func() {
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				// churn keys sort before, between and after the stable ones
+				key := fmt.Sprintf("%c%d-%d", "asz"[i%3], w, i%50)
+				if err := p.Set(ctx, key, "v", time.Minute); err != nil {
+					t.Errorf("set %s: %v", key, err)
+					return
+				}
+				if err := p.Delete(ctx, key); err != nil {
+					t.Errorf("delete %s: %v", key, err)
+					return
+				}
+			}
+		})
+	}
+
+	for range 20 {
+		seen := map[string]int{}
+		cursor := ""
+		for {
+			keys, next, err := p.ListKeys(ctx, "*", cursor, 7)
+			require.NoError(t, err)
+			for _, key := range keys {
+				seen[key]++
+			}
+			if next == "" {
+				break
+			}
+			cursor = next
+		}
+		for key, n := range seen {
+			assert.Equal(t, 1, n, "listed %s %d times", key, n)
+		}
+		for _, key := range want {
+			assert.Contains(t, seen, key)
+		}
 	}
 }
 

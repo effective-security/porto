@@ -2,9 +2,11 @@ package cache_test
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"net"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/xpki/certutil"
 	"github.com/moby/moby/api/types/container"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -280,6 +283,74 @@ func TestProvider(t *testing.T) {
 		keys, err = slash.Keys(ctx, root+"-*")
 		require.NoError(t, err)
 		assert.Equal(t, []string{abs}, keys)
+
+		listed := unique(flatten(listPages(ctx, t, dot, "*", 10)))
+		assert.Contains(t, listed, rel)
+		for _, key := range listed {
+			assert.False(t, strings.HasPrefix(key, "/"), "listed %q, which Get cannot read", key)
+		}
+		listed = unique(flatten(listPages(ctx, t, slash, root+"-*", 10)))
+		assert.Equal(t, []string{abs}, listed)
+	})
+
+	t.Run("redis list keys", func(t *testing.T) {
+		// SCAN COUNT bounds the keys a call looks at, matching or not, so
+		// the page sizes asserted here need a database with only these keys
+		listDB := host + "/1"
+		r, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   listDB,
+			Password: "redis",
+		}, root+"/list")
+		require.NoError(t, err)
+
+		const n = 250
+		want := make([]string, n)
+		defer func() {
+			assert.NoError(t, r.Delete(ctx, want...))
+			assert.NoError(t, r.Close())
+		}()
+		for i := range n {
+			want[i] = "k" + strconv.Itoa(i)
+			require.NoError(t, r.Set(ctx, want[i], "v", time.Minute))
+		}
+
+		// one call is one SCAN, not the whole iteration, also for the
+		// default count; SCAN stops after visiting COUNT keys (or 10*COUNT
+		// buckets), so with only matching keys in the database the first
+		// page holds at least count (or the default) keys
+		for _, count := range []int{10, 0, -1} {
+			pages := listPages(ctx, t, r, "k*", count)
+			assert.Greater(t, len(pages), 1, "count %d", count)
+			assert.Less(t, len(pages[0]), n, "count %d", count)
+			assert.GreaterOrEqual(t, len(pages[0]), cmp.Or(max(count, 0), cache.DefaultListCount), "count %d", count)
+			assert.ElementsMatch(t, want, unique(flatten(pages)), "count %d", count)
+		}
+		// COUNT 1000 visits this whole small keyspace in one call
+		pages := listPages(ctx, t, r, "k*", 1000)
+		require.Len(t, pages, 1)
+		assert.ElementsMatch(t, want, unique(pages[0]))
+
+		_, _, err = r.ListKeys(ctx, "*", "next", 10)
+		assert.EqualError(t, err, `invalid cursor: strconv.ParseUint: parsing "next": invalid syntax`)
+		_, _, err = r.ListKeys(ctx, "*", "-1", 10)
+		assert.EqualError(t, err, `invalid cursor: strconv.ParseUint: parsing "-1": invalid syntax`)
+		// a proxy returns its parent's error as is
+		keys, next, err := cache.NewProxyProvider("p", r).ListKeys(ctx, "*", "next", 10)
+		assert.EqualError(t, err, `invalid cursor: strconv.ParseUint: parsing "next": invalid syntax`)
+		assert.Nil(t, keys)
+		assert.Empty(t, next)
+
+		closed, err := cache.NewRedisProvider(cache.RedisConfig{
+			Server:   listDB,
+			Password: "redis",
+		}, root+"/list")
+		require.NoError(t, err)
+		require.NoError(t, closed.Close())
+		keys, next, err = closed.ListKeys(ctx, "k*", "", 10)
+		assert.ErrorIs(t, err, redis.ErrClosed)
+		assert.EqualError(t, err, "failed to scan keys: k*: redis: client is closed")
+		assert.Nil(t, keys)
+		assert.Empty(t, next)
 	})
 
 	t.Run("memory namespace", func(t *testing.T) {
@@ -322,6 +393,26 @@ func keysParity(t *testing.T, r, m cache.Provider) {
 		mkeys, err := m.Keys(ctx, pattern)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, rkeys, mkeys, "pattern %q", pattern)
+
+		// ListKeys lists the same keys over every page size; the memory
+		// provider fills each page but the last, in key order, once each
+		for _, count := range []int{1, 3, 0} {
+			listed := listPages(ctx, t, r, pattern, count)
+			assert.ElementsMatch(t, rkeys, unique(flatten(listed)), "pattern %q count %d", pattern, count)
+
+			listed = listPages(ctx, t, m, pattern, count)
+			mlisted := flatten(listed)
+			assert.ElementsMatch(t, mkeys, mlisted, "pattern %q count %d", pattern, count)
+			assert.True(t, slices.IsSorted(mlisted), "pattern %q count %d: %q", pattern, count, mlisted)
+			size := cmp.Or(count, cache.DefaultListCount)
+			for i, page := range listed {
+				if i < len(listed)-1 {
+					assert.Len(t, page, size, "pattern %q count %d page %d", pattern, count, i)
+				} else {
+					assert.LessOrEqual(t, len(page), size, "pattern %q count %d last page", pattern, count)
+				}
+			}
+		}
 	}
 
 	// the relative keys round-trip through Get
@@ -369,10 +460,48 @@ func namespaceTest(t *testing.T, a, b cache.Provider) {
 	assert.Empty(t, keys)
 	assert.NotNil(t, keys)
 
+	assert.ElementsMatch(t, []string{"x", "y"}, unique(flatten(listPages(ctx, t, escape, "*", 1))))
+	assert.ElementsMatch(t, []string{"tenant-b/x", "tenant-b/y"}, unique(flatten(listPages(ctx, t, a, "*", 1))))
+	assert.Empty(t, flatten(listPages(ctx, t, b, "*", 1)))
+
 	require.NoError(t, a.Delete(ctx, "tenant-b/x", "../tenant-b/y"))
 	keys, err = a.Keys(ctx, "*")
 	require.NoError(t, err)
 	assert.Empty(t, keys)
+}
+
+// maxListPages stops listPages when a cursor never ends the iteration.
+const maxListPages = 10000
+
+// listPages pages through ListKeys from the empty cursor with count and
+// returns the pages in order.
+func listPages(ctx context.Context, t *testing.T, p cache.Provider, pattern string, count int) [][]string {
+	t.Helper()
+	var pages [][]string
+	cursor := ""
+	for range maxListPages {
+		keys, next, err := p.ListKeys(ctx, pattern, cursor, count)
+		require.NoError(t, err)
+		require.NotNil(t, keys)
+		pages = append(pages, keys)
+		if next == "" {
+			return pages
+		}
+		cursor = next
+	}
+	require.FailNow(t, "ListKeys did not end", "pattern %q count %d", pattern, count)
+	return nil
+}
+
+// flatten returns the keys of pages in order, non-nil.
+func flatten(pages [][]string) []string {
+	return append([]string{}, slices.Concat(pages...)...)
+}
+
+// unique returns the sorted keys without the repeats a Redis SCAN may
+// return.
+func unique(keys []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(keys)))
 }
 
 func TestRedisProviderConfigSecrets(t *testing.T) {
@@ -503,6 +632,8 @@ func provTest(t *testing.T, p cache.Provider, root string) {
 	keys, err = p.Keys(ctx, "strin?*")
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"string", "strings"}, keys)
+	assert.ElementsMatch(t, names, unique(flatten(listPages(ctx, t, p, "*", 3))))
+	assert.ElementsMatch(t, []string{"string", "strings"}, unique(flatten(listPages(ctx, t, p, "strin?*", 0))))
 
 	p.CleanExpired(ctx)
 
