@@ -2,10 +2,12 @@ package cache
 
 import (
 	"cmp"
+	"container/heap"
 	"context"
 	"encoding/json"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -151,6 +153,88 @@ func (p *memProv) Keys(_ context.Context, pattern string) ([]string, error) {
 		return true
 	})
 	return list, nil
+}
+
+// listedKey is a key that ListKeys found, with its stored name, which
+// orders the pages and is the cursor.
+type listedKey struct {
+	name string
+	key  string
+}
+
+// pageHeap is a max-heap of listed keys by stored name (container/heap),
+// so ListKeys keeps only the smallest names instead of sorting every match.
+type pageHeap []listedKey
+
+func (h pageHeap) Len() int           { return len(h) }
+func (h pageHeap) Less(i, j int) bool { return h[i].name > h[j].name }
+func (h pageHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+// Push adds x, a listedKey.
+func (h *pageHeap) Push(x any) {
+	*h = append(*h, x.(listedKey))
+}
+
+// Pop removes the last element, which container/heap made the largest.
+func (h *pageHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return last
+}
+
+// ListKeys returns up to count live keys, relative to the provider, whose
+// stored names sort after cursor and match the Redis glob pattern as in
+// Keys. The keys are in the byte order of their stored names, and the next
+// cursor is the stored name of the last one, or "" when no match follows.
+// It returns ctx.Err() when ctx is already done.
+func (p *memProv) ListKeys(ctx context.Context, pattern, cursor string, count int) ([]string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", errors.WithStack(err)
+	}
+	if count <= 0 {
+		count = defaultListCount
+	}
+	glob := p.ns.pattern(pattern)
+	now := NowFunc()
+	// keep the count+1 smallest matching names: the extra one tells that
+	// another page follows
+	var found pageHeap
+	p.cache.Range(func(key any, value any) bool {
+		name := key.(string)
+		// a stored name is never empty, so the empty cursor lists them all;
+		// a full heap only takes a name below its largest
+		if name <= cursor || (len(found) > count && name >= found[0].name) {
+			return true
+		}
+		if !value.(*entry).live(now) || !globMatch(glob, name) {
+			return true
+		}
+		if rel, ok := p.ns.listed(pattern, name); ok {
+			heap.Push(&found, listedKey{
+				name: name,
+				key:  rel,
+			})
+			if len(found)-1 > count {
+				heap.Pop(&found)
+			}
+		}
+		return true
+	})
+	slices.SortFunc(found, func(a, b listedKey) int {
+		return strings.Compare(a.name, b.name)
+	})
+
+	next := ""
+	if len(found) > count {
+		found = found[:count]
+		next = found[count-1].name
+	}
+	keys := make([]string, len(found))
+	for i, f := range found {
+		keys[i] = f.key
+	}
+	return keys, next, nil
 }
 
 // Publish delivers message to every current subscriber of channel without

@@ -9,12 +9,16 @@
 // Keys: a key is cleaned as a rooted path and joined with the provider
 // prefix, so "x", "/x" and "x/" name the same entry and ".." cannot leave
 // the prefix ("../x" is "<prefix>/x"); a proxy prefix is cleaned the same
-// way. Keys takes a Redis glob pattern relative to the provider ('*' and
-// '?' also match '/', "[...]" sets, '\' escapes), matches the prefix
+// way. ListKeys takes a Redis glob pattern relative to the provider ('*'
+// and '?' also match '/', "[...]" sets, '\' escapes), matches the prefix
 // literally and returns the matching unexpired keys relative to the
 // provider, in the form Get accepts (the key "" only for an empty pattern);
 // the memory provider implements the Redis matcher, so both backends list
-// the same keys.
+// the same keys. ListKeys returns one page per call and a cursor for the
+// next one, until the cursor comes back empty: Redis runs one SCAN with
+// COUNT count, so a page can be empty or repeat a key; the memory provider
+// returns up to count keys in order, each once. Keys, which runs Redis
+// KEYS over the whole keyspace in one call, is deprecated.
 //
 //	var p cache.Provider
 //	if cfg.Provider == "redis" {
@@ -28,6 +32,22 @@
 //
 //	// scope a shared provider to a sub-namespace
 //	users := cache.NewProxyProvider("users", p)
+//
+//	// page through the keys "user:*"
+//	cursor := ""
+//	for {
+//		keys, next, err := p.ListKeys(ctx, "user:*", cursor, 100)
+//		if err != nil {
+//			return err
+//		}
+//		for _, key := range keys {
+//			handle(key) // may see a key twice on Redis
+//		}
+//		if next == "" {
+//			break
+//		}
+//		cursor = next
+//	}
 //
 // Config YAML/JSON fields: provider (redis|memory) and redis {server, ttl,
 // client_tls {cert, key, trusted_ca}, user, password}. The package does not

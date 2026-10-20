@@ -106,6 +106,70 @@ func TestConcurrentValidateAndRevoke(t *testing.T) {
 	}
 }
 
+func TestReloadPages(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := cache.NewMemoryProvider("test")
+
+	// revoked by another process: only a reload that follows the cursor
+	// past the first page finds every ID
+	const n = 2*reloadPageSize + 1
+	exp := time.Now().Add(time.Hour)
+	for i := range n {
+		key, _ := cacheKey("token", claimsFor(strconv.Itoa(i)))
+		require.NoError(t, mem.Set(ctx, key, exp.Format(time.RFC3339), time.Hour))
+	}
+
+	store := &gatingCache{Provider: mem}
+	p := New(store)
+	for i := range n {
+		assert.EqualError(t, p.Validate(ctx, "token", claimsFor(strconv.Itoa(i))), "token revoked", i)
+	}
+	assert.NoError(t, p.Validate(ctx, "token", claimsFor("other")))
+	assert.Equal(t, 1, store.callCount())
+	assert.Equal(t, 3, store.pageCount())
+}
+
+func TestReloadPageErrorKeepsSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := cache.NewMemoryProvider("test")
+
+	// two pages, so the second can fail after the first succeeded
+	const n = reloadPageSize + 1
+	exp := time.Now().Add(time.Hour)
+	for i := range n {
+		key, _ := cacheKey("token", claimsFor(strconv.Itoa(i)))
+		require.NoError(t, mem.Set(ctx, key, exp.Format(time.RFC3339), time.Hour))
+	}
+
+	store := &gatingCache{Provider: mem}
+	p := New(store)
+	require.EqualError(t, p.Validate(ctx, "token", claimsFor("0")), "token revoked")
+	ageSnapshot(p)
+	prov := p.(*provider)
+	prov.mu.RLock()
+	published, loadedAt := prov.revoked, prov.loadedAt
+	prov.mu.RUnlock()
+	require.Len(t, published, n)
+
+	// a failed later page fails the reload: nothing of the first page is
+	// published and the stale snapshot stays as it was
+	store.setPageErr(errors.New("redis down"))
+	assert.EqualError(t, p.Validate(ctx, "token", claimsFor("0")), "redis down")
+	prov.mu.RLock()
+	assert.Equal(t, loadedAt, prov.loadedAt)
+	assert.Equal(t, published, prov.revoked)
+	prov.mu.RUnlock()
+	assert.Equal(t, 2, store.callCount())
+
+	// the next Validate scans again
+	store.setPageErr(nil)
+	assert.EqualError(t, p.Validate(ctx, "token", claimsFor("0")), "token revoked")
+	assert.Equal(t, 3, store.callCount())
+	assert.Equal(t, 6, store.pageCount())
+}
+
 func TestReloadKeepsRevokeStartedBeforeStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
@@ -243,13 +307,17 @@ func ageSnapshot(p jwt.Revocation) {
 	prov.mu.Unlock()
 }
 
-// gatingCache counts Keys calls and can hold a scan open so tests can
-// revoke while that scan is in flight.
+// gatingCache counts the scans (ListKeys calls from an empty cursor) and the
+// pages, can hold the first page of a scan open so tests can revoke while
+// that scan is in flight, and can fail the pages after the first.
 type gatingCache struct {
 	cache.Provider
 	mu    sync.Mutex
 	calls int
+	pages int
 	gate  *keyGate
+	// pageErr is returned for every page after the first.
+	pageErr error
 }
 
 type keyGate struct {
@@ -257,7 +325,7 @@ type keyGate struct {
 	started chan struct{}
 	release chan struct{}
 	err     error
-	// freeze returns the key list captured when Keys began, so a revoke
+	// freeze returns the page captured when the scan began, so a revoke
 	// stored while the scan is blocked is absent from the result.
 	freeze bool
 }
@@ -268,36 +336,59 @@ func (g *gatingCache) setGate(gate *keyGate) {
 	g.mu.Unlock()
 }
 
+func (g *gatingCache) setPageErr(err error) {
+	g.mu.Lock()
+	g.pageErr = err
+	g.mu.Unlock()
+}
+
 func (g *gatingCache) callCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.calls
 }
 
-func (g *gatingCache) Keys(ctx context.Context, pattern string) ([]string, error) {
+func (g *gatingCache) pageCount() int {
 	g.mu.Lock()
-	g.calls++
-	gate := g.gate
+	defer g.mu.Unlock()
+	return g.pages
+}
+
+func (g *gatingCache) ListKeys(ctx context.Context, pattern, cursor string, count int) ([]string, string, error) {
+	g.mu.Lock()
+	g.pages++
+	var gate *keyGate
+	if cursor == "" {
+		g.calls++
+		gate = g.gate
+	}
+	pageErr := g.pageErr
 	g.mu.Unlock()
+	if cursor != "" && pageErr != nil {
+		return nil, "", pageErr
+	}
 	if gate == nil {
-		return g.Provider.Keys(ctx, pattern)
+		return g.Provider.ListKeys(ctx, pattern, cursor, count)
 	}
 
-	var keys []string
-	var err error
+	var (
+		keys []string
+		next string
+		err  error
+	)
 	if gate.freeze {
-		keys, err = g.Provider.Keys(ctx, pattern)
+		keys, next, err = g.Provider.ListKeys(ctx, pattern, cursor, count)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	gate.once.Do(func() { close(gate.started) })
 	<-gate.release
 	if gate.err != nil {
-		return nil, gate.err
+		return nil, "", gate.err
 	}
 	if gate.freeze {
-		return keys, nil
+		return keys, next, nil
 	}
-	return g.Provider.Keys(ctx, pattern)
+	return g.Provider.ListKeys(ctx, pattern, cursor, count)
 }
