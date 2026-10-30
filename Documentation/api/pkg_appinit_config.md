@@ -40,7 +40,7 @@ The "cloudwatch" key has no omitempty tag and is always emitted on marshal.
 
 
 <a name="CloudWatch"></a>
-## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L63-L80>)
+## type [CloudWatch](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L65-L82>)
 
 CloudWatch configures the CloudWatch sink.
 
@@ -115,7 +115,7 @@ func (c *Metrics) GetDisabled() bool
 GetDisabled reports whether Disabled is set to true.
 
 <a name="Prometheus"></a>
-## type [Prometheus](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L49-L60>)
+## type [Prometheus](<https://github.com/effective-security/porto/blob/main/pkg/appinit/config/config.go#L49-L62>)
 
 Prometheus configures the Prometheus sink.
 
@@ -126,7 +126,9 @@ type Prometheus struct {
     // Expiration is the duration a metric is valid for, after which it will be
     // untracked. If the value is zero, a default expiration applied
     Expiration time.Duration `json:"expiration,omitempty" yaml:"expiration,omitempty"`
-    // Timeouts configures HTTP read deadlines; zero fields select shared defaults.
+    // Timeouts configures HTTP read deadlines (zero fields select shared
+    // defaults) and, with Handler set, the scrape timeout: a scrape that
+    // takes longer is answered 503.
     Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
     // MaxRequestBody limits HTTP request bytes; zero uses the shared default,
     // and a negative value disables it.

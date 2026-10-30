@@ -52,7 +52,9 @@ type Prometheus struct {
 	// Expiration is the duration a metric is valid for, after which it will be
 	// untracked. If the value is zero, a default expiration applied
 	Expiration time.Duration `json:"expiration,omitempty" yaml:"expiration,omitempty"`
-	// Timeouts configures HTTP read deadlines; zero fields select shared defaults.
+	// Timeouts configures HTTP read deadlines (zero fields select shared
+	// defaults) and, with Handler set, the scrape timeout: a scrape that
+	// takes longer is answered 503.
 	Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
 	// MaxRequestBody limits HTTP request bytes; zero uses the shared default,
 	// and a negative value disables it.

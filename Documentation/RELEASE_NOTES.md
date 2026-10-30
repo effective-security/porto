@@ -120,6 +120,40 @@ for {
 
 ## New features
 
+- Server-side request deadline: `limits.Timeouts.Handler` (`timeouts.handler`
+  in the `gserver` and `prometheus` YAML blocks; `WithTimeouts` for
+  `restserver`) bounds the execution of every REST request and gRPC and
+  gRPC-Web call, streams included. The request context expires after it
+  unless the client asked for an earlier deadline, which is kept. It is off
+  by default; set it above the longest operation the server performs. Until
+  now a request ran as long as the client's deadline allowed, and without
+  one until the client went away: the listener `timeouts` were read
+  deadlines only. For gRPC and gRPC-Web the deadline is the transport
+  stream deadline (a tap handle on plaintext listeners, a cap on the
+  `grpc-timeout` header on TLS listeners), so a stream handler blocked in
+  `RecvMsg` or `SendMsg` behind a client that stopped sending or reading
+  is released: with a `DeadlineExceeded` status on plaintext listeners and
+  for a receive on TLS listeners; a send blocked on the client's
+  flow-control window on a TLS listener is released one second after the
+  deadline by a per-stream write deadline that resets the stream (the send
+  fails with `Unavailable`, the client sees `Internal`, since no trailers
+  can follow an aborted write). On the `prometheus` endpoint the deadline
+  is the scrape timeout of `promhttp` (a slower scrape is answered 503),
+  because promhttp does not consult the request context. A gRPC handler that returns
+  its expired context error, wrapped or not, now fails the call with
+  `DeadlineExceeded` (`Canceled` when the client went away) instead of
+  `Unknown`, with the handler's error logged as the cause; errors that
+  carry a gRPC status are unchanged. Handlers must honor their context
+  otherwise: one that ignores it outlives the deadline, as it does a client
+  deadline. grpc-go decodes a unary request before the interceptors run, so
+  the bound starts after the decode. `xhttp/header` adds `GRPCTimeout`.
+- `gserver` `timeout.shutdown` is the new name of `timeout.request`: how
+  long `Close` waits for in-flight requests before stopping them. Its
+  default is now 10s (previously 3s); set it explicitly to keep a shorter
+  shutdown budget. It never bounded a request while the server was
+  serving; the name suggested otherwise. `timeout.request` is still read
+  when `timeout.shutdown` is zero, `Config.Timeout.Request` is deprecated,
+  and `Start` rejects a configuration that sets both.
 - `cache.Provider.ListKeys` lists the keys that match a Redis glob
   pattern one page at a time, with the same pattern syntax, namespacing
   and results as `Keys`. Start with an empty cursor and pass the returned

@@ -29,7 +29,8 @@ var (
 // comma-separated list of "prometheus", "cloudwatch" and "inmem"; an empty
 // provider or Disabled=true is a no-op returning (nil, nil). Prometheus
 // registers with the default registry and, when Prometheus.Addr is set,
-// binds synchronously and serves promhttp with bounded HTTP read deadlines.
+// binds synchronously and serves promhttp with bounded HTTP read deadlines
+// and, with Prometheus.Timeouts.Handler set, a scrape timeout.
 // Bind errors are returned; unexpected serve errors are logged. The returned
 // closer stops the HTTP endpoint, including active connections.
 // CloudWatch starts a publishing goroutine; the returned closer stops it and

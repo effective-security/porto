@@ -66,13 +66,13 @@ func Logs(flags *LogConfig, serviceName string) (io.Closer, error)
 Logs configures the process\-global xlog formatter from flags and logs a "service\_starting" line with os.Args. When LogDir is set, log rotation is initialized under LogDir/\<serviceName\>.log and the returned closer must be closed at shutdown; otherwise the closer is nil. LogDir "/dev/null" discards all output.
 
 <a name="Metrics"></a>
-## func [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/metrics.go#L43>)
+## func [Metrics](<https://github.com/effective-security/porto/blob/main/pkg/appinit/metrics.go#L44>)
 
 ```go
 func Metrics(cfg *config.Metrics, svcName, clusterName string, version string, commitNumber int, describe []*metrics.Describe) (closer io.Closer, err error)
 ```
 
-Metrics initializes the global metrics pipeline from cfg. Provider is a comma\-separated list of "prometheus", "cloudwatch" and "inmem"; an empty provider or Disabled=true is a no\-op returning \(nil, nil\). Prometheus registers with the default registry and, when Prometheus.Addr is set, binds synchronously and serves promhttp with bounded HTTP read deadlines. Bind errors are returned; unexpected serve errors are logged. The returned closer stops the HTTP endpoint, including active connections. CloudWatch starts a publishing goroutine; the returned closer stops it and waits for its final publish. With a Prometheus or CloudWatch sink, EnableRuntimeMetrics starts a runtime stats collector; the returned closer signals it to stop. GlobalTags accepts "service", "cluster\_id" and "node" \(from $NODE\_NAME\). describe lists the caller's metric descriptors, merged with metricskey.Metrics for Prometheus help text. It returns an error if a sink is already initialized or a provider is unknown.
+Metrics initializes the global metrics pipeline from cfg. Provider is a comma\-separated list of "prometheus", "cloudwatch" and "inmem"; an empty provider or Disabled=true is a no\-op returning \(nil, nil\). Prometheus registers with the default registry and, when Prometheus.Addr is set, binds synchronously and serves promhttp with bounded HTTP read deadlines and, with Prometheus.Timeouts.Handler set, a scrape timeout. Bind errors are returned; unexpected serve errors are logged. The returned closer stops the HTTP endpoint, including active connections. CloudWatch starts a publishing goroutine; the returned closer stops it and waits for its final publish. With a Prometheus or CloudWatch sink, EnableRuntimeMetrics starts a runtime stats collector; the returned closer signals it to stop. GlobalTags accepts "service", "cluster\_id" and "node" \(from $NODE\_NAME\). describe lists the caller's metric descriptors, merged with metricskey.Metrics for Prometheus help text. It returns an error if a sink is already initialized or a provider is unknown.
 
 <a name="Flags"></a>
 ## type [Flags](<https://github.com/effective-security/porto/blob/main/pkg/appinit/init.go#L32-L49>)

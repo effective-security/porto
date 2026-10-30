@@ -9,6 +9,7 @@ import (
 	"github.com/effective-security/porto/pkg/appinit/config"
 	"github.com/effective-security/porto/xhttp/marshal"
 	"github.com/effective-security/xlog"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -26,13 +27,27 @@ func newPrometheusServer(cfg *config.Prometheus) (*prometheusServer, error) {
 		return nil, errors.Wrapf(err, "unable to listen for Prometheus on %s", cfg.Addr)
 	}
 	server := &http.Server{
-		Handler: marshal.LimitRequestBody(promhttp.Handler(), cfg.MaxRequestBody),
+		Handler: prometheusHandler(cfg, prometheus.DefaultRegisterer, prometheus.DefaultGatherer),
 	}
 	cfg.Timeouts.ApplyHTTP(server)
 	return &prometheusServer{
 		server:   server,
 		listener: listener,
 	}, nil
+}
+
+// prometheusHandler serves the metrics of gatherer as promhttp.Handler does
+// (instrumented in registerer), with the request body bounded by
+// cfg.MaxRequestBody. With cfg.Timeouts.Handler set, a scrape that takes
+// longer is answered 503 through promhttp.HandlerOpts.Timeout
+// (http.TimeoutHandler, which also bounds the request context): promhttp
+// gathers without consulting the request context, so a context deadline
+// alone would not end a slow scrape. The collection itself still finishes
+// in the background.
+func prometheusHandler(cfg *config.Prometheus, registerer prometheus.Registerer, gatherer prometheus.Gatherer) http.Handler {
+	handler := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{Timeout: cfg.Timeouts.Handler})
+	handler = promhttp.InstrumentMetricHandler(registerer, handler)
+	return marshal.LimitRequestBody(handler, cfg.MaxRequestBody)
 }
 
 func (p *prometheusServer) start() {

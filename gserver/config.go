@@ -1,6 +1,7 @@
 package gserver
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"net/url"
@@ -41,6 +42,10 @@ const (
 	// an expired bucket is recreated with a full burst, so a shorter TTL
 	// would grant a burst that often instead of RequestsPerSecond.
 	minRateLimitTTL = time.Second
+
+	// defaultShutdownTimeout is how long Close waits for in-flight requests
+	// when Timeout.Shutdown is zero.
+	defaultShutdownTimeout = 10 * time.Second
 )
 
 // rateIPLookups lists the RateLimit.HeadersIPLookups values tollbooth
@@ -100,9 +105,17 @@ type Config struct {
 	// By default, only the socket address is used for client IP and scheme.
 	TrustedProxyCIDRs []string `json:"trusted_proxy_cidrs,omitempty" yaml:"trusted_proxy_cidrs,omitempty"`
 
-	// Timeouts bounds HTTP reads, cmux detection and eager TLS handshakes.
-	// Zero fields select limits defaults; negative fields disable deadlines.
-	// Read does not apply to native gRPC streams, on any listener.
+	// Timeouts bounds HTTP reads, cmux detection and eager TLS handshakes,
+	// and, with Handler set, the execution of every request on the server.
+	// Zero read deadlines select limits defaults; negative fields disable
+	// them. Read does not apply to native gRPC streams, on any listener.
+	// Handler is the server-side maximum deadline of REST requests and of
+	// gRPC and gRPC-Web calls, streams included: a request's context expires
+	// after it unless the client asked for an earlier deadline, and a stream
+	// handler blocked in RecvMsg or SendMsg behind a stalled client is
+	// released (with DeadlineExceeded; a send on a TLS listener fails with
+	// Unavailable one second later, when the stream is reset). It is off by
+	// default; set it above the longest operation the server performs.
 	Timeouts limits.Timeouts `json:"timeouts,omitempty" yaml:"timeouts,omitempty"`
 
 	// MaxRequestBody limits HTTP body bytes, including TLS gRPC/gRPC-Web streams.
@@ -110,10 +123,19 @@ type Config struct {
 	// Native gRPC on plain listeners uses MaxRecvMsgSize instead.
 	MaxRequestBody int64 `json:"max_request_body,omitempty" yaml:"max_request_body,omitempty"`
 
-	// Timeout settings
+	// Timeout holds the shutdown timeout. The bound on a request while the
+	// server is serving is Timeouts.Handler.
 	Timeout struct {
-		// Request is how long Close waits for in-flight requests to finish
-		// before forcing shutdown; default 3s.
+		// Shutdown is how long Close waits for in-flight requests to finish
+		// before stopping the remaining ones; default 10s. It does not bound
+		// a request while the server is serving: see Timeouts.Handler.
+		Shutdown time.Duration `json:"shutdown,omitempty" yaml:"shutdown,omitempty"`
+
+		// Request is the former name of Shutdown and is read when Shutdown
+		// is zero; Validate rejects a configuration that sets both. Despite
+		// its name it never bounded a request while the server was serving.
+		//
+		// Deprecated: use Shutdown.
 		Request time.Duration `json:"request,omitempty" yaml:"request,omitempty"`
 	} `json:"timeout" yaml:"timeout"`
 
@@ -236,12 +258,19 @@ type CORS struct {
 
 // Validate returns an error for a configuration Start cannot serve safely: an
 // invalid TrustedProxyCIDRs entry, an invalid CORS block (see CORS.Validate),
-// an invalid enabled RateLimit block (see RateLimit.Validate) or, while CORS
-// is enabled, an HTTPHeaders entry that would set an Access-Control-* header
+// an invalid enabled RateLimit block (see RateLimit.Validate), a Timeout block
+// that sets both Shutdown and its former name Request or, while CORS is
+// enabled, an HTTPHeaders entry that would set an Access-Control-* header
 // outside the CORS policy. Start runs the same checks.
 func (c *Config) Validate() error {
 	_, err := c.validate()
 	return err
+}
+
+// shutdownTimeout returns how long Close waits for in-flight requests:
+// Timeout.Shutdown, its former name Timeout.Request, or defaultShutdownTimeout.
+func (c *Config) shutdownTimeout() time.Duration {
+	return cmp.Or(c.Timeout.Shutdown, c.Timeout.Request, defaultShutdownTimeout)
 }
 
 // validate implements Validate and returns the parsed trusted proxy policy,
@@ -256,6 +285,9 @@ func (c *Config) validate() (*identity.TrustedProxies, error) {
 	}
 	if err := c.RateLimit.Validate(); err != nil {
 		return nil, err
+	}
+	if c.Timeout.Shutdown != 0 && c.Timeout.Request != 0 {
+		return nil, errors.New("timeout: set shutdown or its former name request, not both")
 	}
 	if c.CORS.GetEnabled() {
 		for _, name := range slices.Sorted(maps.Keys(c.HTTPHeaders)) {
