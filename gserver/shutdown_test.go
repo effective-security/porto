@@ -36,7 +36,7 @@ func startShutdownServer(t *testing.T, secure bool, svc *shutdownService, timeou
 		ListenURLs: []string{"http://127.0.0.1:0"},
 		Services:   []string{svc.Name()},
 	}
-	cfg.Timeout.Request = timeout
+	cfg.Timeout.Shutdown = timeout
 	if secure {
 		cfg.ListenURLs = []string{"https://127.0.0.1:0"}
 		cfg.ServerTLS = lifecycleTLS

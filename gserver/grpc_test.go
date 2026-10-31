@@ -15,6 +15,7 @@ import (
 	"github.com/effective-security/porto/gserver/roles"
 	"github.com/effective-security/porto/pkg/discovery"
 	"github.com/effective-security/porto/pkg/tlsconfig"
+	"github.com/effective-security/porto/restserver"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/tests/mockappcontainer"
 	"github.com/effective-security/porto/xhttp/httperror"
@@ -32,12 +33,19 @@ import (
 // The echo service is registered from a hand-written ServiceDesc. Echo
 // returns its request value unless the value selects one of the echo*
 // behaviors; Watch streams the request value back watchCount times, or
-// fails for echoStatus; Block waits until its stream ends.
+// fails for echoStatus; Block waits until its stream ends; Collect receives
+// until the client closes its send side and answers with the message count,
+// reporting a failed RecvMsg on collectErr; Flood sends messages of
+// floodMessageSize bytes until SendMsg fails, reporting the error on
+// floodErr. Its only REST route, GET deadlinePath, answers like echoDeadline.
 const (
 	echoServiceName = "porto.test.Echo"
 	echoMethod      = "/porto.test.Echo/Echo"
 	watchMethod     = "/porto.test.Echo/Watch"
 	blockMethod     = "/porto.test.Echo/Block"
+	collectMethod   = "/porto.test.Echo/Collect"
+	floodMethod     = "/porto.test.Echo/Flood"
+	deadlinePath    = "/v1/deadline"
 
 	echoInvalid       = "invalid"        // rejected by echoRequest.Validate
 	echoValidatePanic = "validate-panic" // echoRequest.Validate panics
@@ -49,9 +57,21 @@ const (
 	echoPlain         = "plain"          // an untyped application error
 	echoWrapped       = "wrapped"        // a wrapped httperror
 	echoLarge         = "large"          // a response of largeMessageSize bytes
+	echoWait          = "wait"           // waits for the context, then returns its wrapped error
+	echoWaitStatus    = "wait-status"    // waits for the context, then returns a FailedPrecondition status
+	echoDeadline      = "deadline"       // the remaining time of the context deadline, or noDeadline
+
+	// noDeadline is the echoDeadline answer of a context without deadline.
+	noDeadline = "none"
 
 	watchCount       = 3
 	largeMessageSize = 2048
+	floodMessageSize = 16 * 1024
+	// floodWindowSize is the static HTTP/2 stream window of a client that
+	// stops reading a Flood stream: the server blocks in SendMsg once it has
+	// sent that many bytes. The default window grows with the measured
+	// bandwidth-delay product, which would let it send far more first.
+	floodWindowSize  = 64 * 1024
 	smallMessageSize = 512
 	messageSizeLimit = 1024
 	echoTimeout      = 5 * time.Second
@@ -78,14 +98,22 @@ type echoServer struct {
 	// calls counts the Echo handler invocations
 	calls atomic.Int32
 	// blocked receives a value when a Block stream starts
-	blocked        chan struct{}
+	blocked chan struct{}
+	// collectErr receives the error that ended a Collect handler's RecvMsg
+	collectErr chan error
+	// floodErr receives the error that ended a Flood handler's SendMsg
+	floodErr       chan error
 	closed         atomic.Bool
 	blockHeaders   bool
 	releaseOnClose chan struct{}
 }
 
 func newEchoServer() *echoServer {
-	return &echoServer{blocked: make(chan struct{}, 1)}
+	return &echoServer{
+		blocked:    make(chan struct{}, 1),
+		collectErr: make(chan error, 1),
+		floodErr:   make(chan error, 1),
+	}
 }
 
 func (s *echoServer) Name() string  { return "echo" }
@@ -137,6 +165,40 @@ func (s *echoServer) RegisterGRPC(gs *grpc.Server) {
 				},
 			},
 			{
+				StreamName:    "Collect",
+				ClientStreams: true,
+				Handler: func(_ any, stream grpc.ServerStream) error {
+					var count int32
+					for {
+						err := stream.RecvMsg(&wrapperspb.BytesValue{})
+						if errors.Is(err, io.EOF) {
+							return stream.SendMsg(wrapperspb.Int32(count))
+						}
+						if err != nil {
+							s.collectErr <- err
+							return err
+						}
+						count++
+					}
+				},
+			},
+			{
+				StreamName:    "Flood",
+				ServerStreams: true,
+				Handler: func(_ any, stream grpc.ServerStream) error {
+					if err := stream.RecvMsg(&wrapperspb.BytesValue{}); err != nil {
+						return err
+					}
+					msg := wrapperspb.Bytes(make([]byte, floodMessageSize))
+					for {
+						if err := stream.SendMsg(msg); err != nil {
+							s.floodErr <- err
+							return err
+						}
+					}
+				},
+			},
+			{
 				StreamName:    "Block",
 				ServerStreams: true,
 				Handler: func(_ any, stream grpc.ServerStream) error {
@@ -158,9 +220,34 @@ func (s *echoServer) RegisterGRPC(gs *grpc.Server) {
 	}, s)
 }
 
-func (s *echoServer) echo(_ context.Context, in *echoRequest) (*wrapperspb.BytesValue, error) {
+// RegisterRoute registers GET deadlinePath, which writes the remaining time
+// of the request deadline, or noDeadline.
+func (s *echoServer) RegisterRoute(r restserver.Router) {
+	r.GET(deadlinePath, func(w http.ResponseWriter, req *http.Request, _ restserver.Params) {
+		_, _ = io.WriteString(w, deadlineText(req.Context()))
+	})
+}
+
+// deadlineText returns the remaining time of the ctx deadline, or noDeadline.
+func deadlineText(ctx context.Context) string {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return noDeadline
+	}
+	return time.Until(deadline).String()
+}
+
+func (s *echoServer) echo(ctx context.Context, in *echoRequest) (*wrapperspb.BytesValue, error) {
 	s.calls.Add(1)
 	switch string(in.GetValue()) {
+	case echoWait:
+		<-ctx.Done()
+		return nil, errors.WithMessage(ctx.Err(), "echo wait")
+	case echoWaitStatus:
+		<-ctx.Done()
+		return nil, status.Error(codes.FailedPrecondition, "echo wait precondition failed")
+	case echoDeadline:
+		return wrapperspb.Bytes([]byte(deadlineText(ctx))), nil
 	case echoPanic:
 		panic("echo handler panic")
 	case echoNotFound:
@@ -188,15 +275,9 @@ func (s *echoServer) echo(_ context.Context, in *echoRequest) (*wrapperspb.Bytes
 // Services.
 func startEcho(t *testing.T, cfg *gserver.Config, svc *echoServer, opts ...gserver.Option) (gserver.GServer, *grpc.ClientConn) {
 	t.Helper()
-	creds := insecure.NewCredentials()
 	cfg.ListenURLs = []string{"http://127.0.0.1:0"}
 	if cfg.ServerTLS != nil {
 		cfg.ListenURLs = []string{"https://127.0.0.1:0"}
-		clientTLS, err := tlsconfig.NewClientTLSFromFiles("", "", cfg.ServerTLS.TrustedCAFile)
-		require.NoError(t, err)
-		// the legacy test fixture has no SANs
-		clientTLS.InsecureSkipVerify = true
-		creds = credentials.NewTLS(clientTLS)
 	}
 	cfg.Services = []string{svc.Name()}
 	factories := map[string]gserver.ServiceFactory{
@@ -210,12 +291,34 @@ func startEcho(t *testing.T, cfg *gserver.Config, svc *echoServer, opts ...gserv
 	srv, err := gserver.Start("echo", cfg, container, factories, opts...)
 	require.NoError(t, err)
 	t.Cleanup(srv.Close)
+	return srv, dialEcho(t, srv, cfg)
+}
 
+// echoClientCredentials returns the transport credentials of a client of
+// the echo server started with cfg.
+func echoClientCredentials(t *testing.T, cfg *gserver.Config) credentials.TransportCredentials {
+	t.Helper()
+	if cfg.ServerTLS == nil {
+		return insecure.NewCredentials()
+	}
+	clientTLS, err := tlsconfig.NewClientTLSFromFiles("", "", cfg.ServerTLS.TrustedCAFile)
+	require.NoError(t, err)
+	// the legacy test fixture has no SANs
+	clientTLS.InsecureSkipVerify = true
+	return credentials.NewTLS(clientTLS)
+}
+
+// dialEcho returns a client connection to the first listener of the echo
+// server srv started with cfg, closed when the test ends; opts follow the
+// transport credentials.
+func dialEcho(t *testing.T, srv gserver.GServer, cfg *gserver.Config, opts ...grpc.DialOption) *grpc.ClientConn {
+	t.Helper()
 	addr := srv.(*gserver.Server).Listeners[0].Addr().String()
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	opts = append([]grpc.DialOption{grpc.WithTransportCredentials(echoClientCredentials(t, cfg))}, opts...)
+	conn, err := grpc.NewClient(addr, opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
-	return srv, conn
+	return conn
 }
 
 func callEcho(ctx context.Context, conn *grpc.ClientConn, value []byte) ([]byte, error) {
@@ -500,8 +603,8 @@ func TestGRPCRequestMetrics(t *testing.T) {
 }
 
 // TestCloseStopsStreamsAfterRequestTimeout checks that Close waits up to
-// Timeout.Request for active RPCs on plaintext and TLS listeners, then stops
-// the gRPC server, which ends the remaining streams.
+// Timeout.Shutdown for active RPCs on plaintext and TLS listeners, then
+// stops the gRPC server, which ends the remaining streams.
 func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 	t.Parallel()
 	// Closing a cmux child listener (GracefulStop on plaintext listeners,
@@ -532,7 +635,7 @@ func TestCloseStopsStreamsAfterRequestTimeout(t *testing.T) {
 			t.Parallel()
 			const requestTimeout = 200 * time.Millisecond
 			cfg := &gserver.Config{ServerTLS: tc.serverTLS}
-			cfg.Timeout.Request = requestTimeout
+			cfg.Timeout.Shutdown = requestTimeout
 			svc := newEchoServer()
 			svc.blockHeaders = tc.headers
 			if tc.waitForClose {

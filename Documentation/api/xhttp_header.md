@@ -69,6 +69,9 @@ const (
     GRPCStatus = "Grpc-Status"
     // GRPCMessage carries the final gRPC status message in response trailers.
     GRPCMessage = "Grpc-Message"
+    // GRPCTimeout carries the client's deadline of a gRPC or gRPC-Web call as
+    // a duration in the gRPC wire format (digits and a unit, e.g. "30S").
+    GRPCTimeout = "Grpc-Timeout"
     // IfMatch is HTTP header for "If-Match"
     IfMatch = "If-Match"
     // Link is HTTP header for "Link"

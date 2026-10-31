@@ -377,6 +377,11 @@ func configureHandlers(s *Server, handler http.Handler) http.Handler {
 	// preflights (rate-limit rejections are counted by rateLimiter.httpHandler)
 	handler = telemetry.NewRequestMetrics(handler)
 
+	// bounds the request context by Timeouts.Handler, identity extraction
+	// included; gRPC and gRPC-Web calls on TLS listeners do not pass here
+	// and are bounded by the deadline interceptors of grpcServer
+	handler = s.cfg.Timeouts.ApplyHandler(handler)
+
 	// Add correlationID
 	handler = correlation.NewHandler(handler)
 
@@ -434,10 +439,25 @@ func grpcServer(s *Server, tls *tls.Config, rl *rateLimiter, gopts ...grpc.Serve
 		opts = append(opts, grpc.Creds(bundle.TransportCredentials()))
 	}
 
+	handlerBounded := s.cfg.Timeouts.Handler > 0
+	if handlerBounded {
+		// the stream deadline of the native HTTP/2 transport (plaintext
+		// listeners); TLS listeners serve through ServeHTTP, for which
+		// grpcHandlerFunc caps the grpc-timeout header and sets a stream
+		// write deadline
+		opts = append(opts, grpc.InTapHandle(deadlineTapHandle(s.cfg.Timeouts)))
+	}
+
 	chainUnaryInterceptors := []grpc.UnaryServerInterceptor{
 		panicInterceptor(),
 		correlation.NewAuthUnaryInterceptor(),
 		s.newLogUnaryInterceptor(),
+	}
+	// The deadline interceptor runs inside the log interceptor, which then
+	// logs and counts the DeadlineExceeded it returns, and bounds every
+	// later interceptor and the handler.
+	if handlerBounded {
+		chainUnaryInterceptors = append(chainUnaryInterceptors, deadlineUnaryInterceptor(s.cfg.Timeouts))
 	}
 	// The limiter rejects calls after the log interceptor, which records
 	// them, and before validation and identity extraction do any work for
@@ -467,6 +487,9 @@ func grpcServer(s *Server, tls *tls.Config, rl *rateLimiter, gopts ...grpc.Serve
 	chainStreamInterceptors := []grpc.StreamServerInterceptor{
 		s.newLogStreamServerInterceptor(),
 		correlation.NewStreamServerInterceptor(),
+	}
+	if handlerBounded {
+		chainStreamInterceptors = append(chainStreamInterceptors, deadlineStreamInterceptor(s.cfg.Timeouts))
 	}
 	if rl != nil {
 		chainStreamInterceptors = append(chainStreamInterceptors, rl.streamInterceptor())
@@ -542,6 +565,7 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 	}
 
 	corsEnabled := sctx.cfg.CORS.GetEnabled()
+	handlerTimeout := sctx.cfg.Timeouts.Handler
 	var allowedOrigins []string
 	exposedHeaders := ""
 	allowCredentials := false
@@ -571,6 +595,18 @@ func (sctx *serveCtx) grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http
 
 		ct := r.Header.Get(header.ContentType)
 		if strings.HasPrefix(ct, header.ApplicationGRPC) {
+			if handlerTimeout > 0 {
+				// grpc-go makes the header the stream deadline, which
+				// releases a handler blocked in RecvMsg; bounding the
+				// request context instead would make it drop the status.
+				capGRPCTimeout(r.Header, handlerTimeout)
+				// a send blocked on the client's window is released by
+				// the per-stream write deadline, before gRPC-Web rewrites
+				// the protocol of an HTTP/1.1 request
+				if r.ProtoMajor == 2 {
+					setStreamWriteDeadline(w, r, handlerTimeout+deadlineWriteGrace)
+				}
+			}
 			origin := r.Header.Get("Origin")
 			grpcWeb := (ct == header.ApplicationGRPCWebProto || ct == header.ApplicationGRPCWebText)
 			wh := w.Header()

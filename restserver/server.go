@@ -223,9 +223,11 @@ func (server *HTTPServer) WithShutdownTimeout(timeout time.Duration) *HTTPServer
 	return server
 }
 
-// WithTimeouts configures HTTP read deadlines before StartHTTP. Zero fields
-// select limits defaults; negative fields disable their deadlines. TLS uses
-// net/http's smaller positive Header or Read deadline for its handshake.
+// WithTimeouts configures HTTP read deadlines and the handler deadline
+// before StartHTTP. Zero read deadlines select limits defaults; negative
+// fields disable them. TLS uses net/http's smaller positive Header or Read
+// deadline for its handshake. A positive Handler bounds the context of every
+// request, custom muxes included; it is off by default.
 func (server *HTTPServer) WithTimeouts(timeouts limits.Timeouts) *HTTPServer {
 	server.timeouts = timeouts
 	return server
@@ -388,8 +390,10 @@ func (server *HTTPServer) StartHTTP() error {
 
 	httpHandler := server.muxFactory.NewMux()
 	if server.muxFactory != server {
-		// Custom muxes do not pass through NewMux's proxy policy wrapper.
+		// Custom muxes do not pass through NewMux's body, deadline and proxy
+		// policy wrappers.
 		httpHandler = marshal.LimitRequestBody(httpHandler, server.maxRequestBody)
+		httpHandler = server.timeouts.ApplyHandler(httpHandler)
 		httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
 	}
 	httpServer := &http.Server{
@@ -556,8 +560,10 @@ func (server *HTTPServer) NewMux() http.Handler {
 	// metrics wrapper; also counts the identity handler's rejections
 	httpHandler = telemetry.NewRequestMetrics(httpHandler)
 
-	// Bound request bodies, then add correlationID
+	// Bound request bodies and, with Timeouts.Handler set, the request
+	// context, then add correlationID
 	httpHandler = marshal.LimitRequestBody(httpHandler, server.maxRequestBody)
+	httpHandler = server.timeouts.ApplyHandler(httpHandler)
 	httpHandler = correlation.NewHandler(httpHandler)
 	httpHandler = identity.NewTrustedProxyHandler(httpHandler, server.trustedProxies)
 

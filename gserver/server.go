@@ -91,9 +91,8 @@ type GServer interface {
 	// Err returns error channel
 	Err() <-chan error
 	// Close gracefully shuts down all servers/listeners and stops the TLS
-	// certificate reloader.
-	// Client requests will be terminated with request timeout.
-	// After timeout, enforce remaining requests be closed immediately.
+	// certificate reloader. It waits up to Config.Timeout.Shutdown (default
+	// 10s) for in-flight requests to finish, then stops the remaining ones.
 	// The teardown runs once: later or concurrent calls return after it
 	// has finished.
 	Close()
@@ -316,12 +315,12 @@ func (e *Server) errHandler(err error) {
 	}
 }
 
-// Close gracefully shuts down all servers/listeners.
-// Client requests will be terminated with request timeout.
-// After timeout, enforce remaining requests be closed immediately.
-// It then closes the services and listeners and stops the TLS certificate reloader.
-// The teardown runs once, so services are closed once; a later or
-// concurrent call returns after the teardown has finished.
+// Close gracefully shuts down all servers/listeners. It waits up to
+// Config.Timeout.Shutdown (default 10s) for in-flight requests to finish,
+// then stops the remaining ones. It then closes the services and listeners
+// and stops the TLS certificate reloader. The teardown runs once, so
+// services are closed once; a later or concurrent call returns after the
+// teardown has finished.
 func (e *Server) Close() {
 	e.closeOnce.Do(e.teardown)
 }
@@ -332,11 +331,8 @@ func (e *Server) teardown() {
 
 	close(e.stopc)
 
-	// close client requests with request timeout
-	timeout := 3 * time.Second
-	if e.cfg.Timeout.Request != 0 {
-		timeout = e.cfg.Timeout.Request
-	}
+	// drain in-flight requests for the shutdown timeout, then stop them
+	timeout := e.cfg.shutdownTimeout()
 	for _, sctx := range e.sctxs {
 		for ss := range sctx.serversC {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)

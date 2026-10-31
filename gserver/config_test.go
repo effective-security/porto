@@ -287,6 +287,16 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "rate_limit: requests_per_second must be positive when enabled, got 0",
 		},
 		{
+			name: "shutdown timeout under both names",
+			cfg: func() *Config {
+				cfg := &Config{}
+				cfg.Timeout.Shutdown = time.Second
+				cfg.Timeout.Request = time.Second
+				return cfg
+			}(),
+			wantErr: "timeout: set shutdown or its former name request, not both",
+		},
+		{
 			name: "invalid CORS block",
 			cfg: &Config{
 				CORS: &CORS{

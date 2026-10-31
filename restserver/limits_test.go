@@ -133,3 +133,84 @@ func TestDefaultMuxBodyLimit(t *testing.T) {
 	assert.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"))
 	assert.NotEmpty(t, resp.Header.Get(header.XCorrelationID))
 }
+
+// deadlineText returns the remaining time of the ctx deadline, or "none".
+func deadlineText(ctx context.Context) string {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return "none"
+	}
+	return time.Until(deadline).String()
+}
+
+// deadlineMux is a custom mux that answers every request with deadlineText.
+type deadlineMux struct{}
+
+func (deadlineMux) NewMux() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, deadlineText(r.Context()))
+	})
+}
+
+// deadlineService registers GET /v1/deadline, which answers with deadlineText.
+type deadlineService struct{}
+
+func (deadlineService) Name() string  { return "deadline" }
+func (deadlineService) IsReady() bool { return true }
+func (deadlineService) Close()        {}
+func (deadlineService) Register(r rest.Router) {
+	r.GET("/v1/deadline", func(w http.ResponseWriter, req *http.Request, _ rest.Params) {
+		_, _ = io.WriteString(w, deadlineText(req.Context()))
+	})
+}
+
+// TestHandlerTimeout checks that WithTimeouts' Handler bounds the request
+// context of the default mux and of a custom mux, and that an unset Handler
+// leaves it unbounded.
+func TestHandlerTimeout(t *testing.T) {
+	t.Parallel()
+	const handler = time.Second
+	for _, tc := range []struct {
+		name    string
+		custom  bool
+		handler time.Duration
+	}{
+		{name: "default mux", handler: handler},
+		{name: "custom mux", custom: true, handler: handler},
+		{name: "default mux unset"},
+		{name: "custom mux unset", custom: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := testutils.CreateBindAddr("127.0.0.1")
+			srv, err := rest.New("test", "127.0.0.1", &serverConfig{BindAddr: addr}, nil)
+			require.NoError(t, err)
+			srv.WithTimeouts(limits.Timeouts{Handler: tc.handler})
+			if tc.custom {
+				srv.WithMuxFactory(deadlineMux{})
+			} else {
+				srv.AddService(deadlineService{})
+			}
+			require.NoError(t, srv.StartHTTP())
+			t.Cleanup(srv.StopHTTP)
+
+			client := &http.Client{Timeout: 2 * time.Second}
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+addr+"/v1/deadline", nil)
+			require.NoError(t, err)
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			if tc.handler == 0 {
+				assert.Equal(t, "none", string(body))
+				return
+			}
+			remaining, err := time.ParseDuration(string(body))
+			require.NoError(t, err, "a deadline is expected, got %q", body)
+			assert.Greater(t, remaining, time.Duration(0))
+			assert.LessOrEqual(t, remaining, tc.handler)
+		})
+	}
+}

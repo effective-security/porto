@@ -6,13 +6,21 @@
 import "github.com/effective-security/porto/xhttp/limits"
 ```
 
-Package limits defines shared server network limits. Zero values select conservative defaults; negative values explicitly disable individual limits. Configure limits before starting a server.
+Package limits defines shared server network limits. Zero read deadlines and body sizes select conservative defaults; negative values explicitly disable individual limits. The handler deadline \(Timeouts.Handler\) has no default: it bounds each request's context only when set. Configure limits before starting a server:
+
+```
+timeouts := limits.Timeouts{Handler: 2 * time.Minute}
+srv := &http.Server{Handler: timeouts.ApplyHandler(handler)}
+timeouts.ApplyHTTP(srv)
+```
 
 ## Index
 
 - [Constants](<#constants>)
 - [type Timeouts](<#Timeouts>)
   - [func \(t Timeouts\) ApplyHTTP\(s \*http.Server\)](<#Timeouts.ApplyHTTP>)
+  - [func \(t Timeouts\) ApplyHandler\(handler http.Handler\) http.Handler](<#Timeouts.ApplyHandler>)
+  - [func \(t Timeouts\) HandlerContext\(ctx context.Context\) \(context.Context, context.CancelFunc\)](<#Timeouts.HandlerContext>)
   - [func \(t Timeouts\) WithDefaults\(\) Timeouts](<#Timeouts.WithDefaults>)
 
 
@@ -36,9 +44,9 @@ const (
 ```
 
 <a name="Timeouts"></a>
-## type [Timeouts](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L25-L36>)
+## type [Timeouts](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L28-L49>)
 
-Timeouts configures server read deadlines. Zero selects the default for that field; a negative duration disables it. These are read deadlines, not handler execution or response write deadlines. Streaming callers may need to raise or disable Read.
+Timeouts configures server deadlines. Header, Read, Idle and Handshake are read deadlines: zero selects the default for that field and a negative duration disables it. Handler is the server\-side bound on a request's execution; it has no default and is off unless set. There is no response write deadline. Streaming callers may need to raise or disable Read and leave Handler unset, or set it above their longest stream.
 
 ```go
 type Timeouts struct {
@@ -52,25 +60,53 @@ type Timeouts struct {
     // Handshake limits cmux detection and transport's eager TLS handshake.
     // net/http TLS listeners use the smaller positive Header or Read deadline.
     Handshake time.Duration `json:"handshake,omitempty" yaml:"handshake,omitempty"`
+    // Handler bounds the execution of each request: its context expires
+    // Handler after the server starts handling it, unless the client asked
+    // for an earlier deadline, which is kept. Zero and negative leave
+    // requests bounded only by the client's deadline (the default). It
+    // applies to REST requests and to gRPC and gRPC-Web calls, streams
+    // included; a handler that ignores its context outlives the deadline.
+    // It is not a net/http setting, so ApplyHTTP does not apply it: servers
+    // wrap their handler chain with ApplyHandler and gRPC interceptors use
+    // HandlerContext.
+    Handler time.Duration `json:"handler,omitempty" yaml:"handler,omitempty"`
 }
 ```
 
 <a name="Timeouts.ApplyHTTP"></a>
-### func \(Timeouts\) [ApplyHTTP](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L57>)
+### func \(Timeouts\) [ApplyHTTP](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L72>)
 
 ```go
 func (t Timeouts) ApplyHTTP(s *http.Server)
 ```
 
-ApplyHTTP sets the read deadlines on a server before it starts serving. Negative values are preserved to disable net/http's fallback deadlines.
+ApplyHTTP sets the read deadlines on a server before it starts serving. Negative values are preserved to disable net/http's fallback deadlines. Handler is not a server setting; see ApplyHandler.
+
+<a name="Timeouts.ApplyHandler"></a>
+### func \(Timeouts\) [ApplyHandler](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L95>)
+
+```go
+func (t Timeouts) ApplyHandler(handler http.Handler) http.Handler
+```
+
+ApplyHandler returns handler served with each request's context bounded by t.Handler \(see HandlerContext\). When Handler is not positive it returns handler itself. Servers call it on their handler chain before serving.
+
+<a name="Timeouts.HandlerContext"></a>
+### func \(Timeouts\) [HandlerContext](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L84>)
+
+```go
+func (t Timeouts) HandlerContext(ctx context.Context) (context.Context, context.CancelFunc)
+```
+
+HandlerContext returns ctx bounded by t.Handler: when Handler is positive, the returned context expires after Handler unless ctx already has an earlier deadline, which is kept. Otherwise ctx is returned unchanged with a cancel function that does nothing. The caller must call cancel when the request ends to release the timer.
 
 <a name="Timeouts.WithDefaults"></a>
-### func \(Timeouts\) [WithDefaults](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L39>)
+### func \(Timeouts\) [WithDefaults](<https://github.com/effective-security/porto/blob/main/xhttp/limits/limits.go#L53>)
 
 ```go
 func (t Timeouts) WithDefaults() Timeouts
 ```
 
-WithDefaults returns a copy with zero fields replaced by their defaults.
+WithDefaults returns a copy with zero read deadlines replaced by their defaults. Handler has no default and is returned as is.
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

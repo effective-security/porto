@@ -33,7 +33,7 @@ go get github.com/effective-security/porto@latest
 | `xhttp/header`                              | HTTP header name and content-type constants.                                                                                                                                    |
 | `xhttp/httperror`                           | Structured API errors with HTTP status, code, gRPC status and request ID, plus gRPC ↔ HTTP mapping.                                                                             |
 | `xhttp/identity`                            | Caller identity, client IP and user agent extraction into request contexts for HTTP and gRPC.                                                                                   |
-| `xhttp/limits`                              | Shared HTTP, protocol detection and TLS handshake timeout defaults and body-size defaults.                                                                                      |
+| `xhttp/limits`                              | Shared HTTP, protocol detection and TLS handshake timeout defaults, the optional handler deadline, and body-size defaults.                                                      |
 | `xhttp/marshal`                             | JSON response writing (errors, gzip, pretty print) and strict JSON request decoding.                                                                                            |
 | `pkg/retriable`                             | HTTP client with retry policy, JSON marshalling, header propagation, Bearer/DPoP auth, replay nonces and token storage. See [pkg/retriable/README.md](pkg/retriable/README.md). |
 | `pkg/rpcclient`                             | gRPC client builder: TLS bundle, per-RPC Bearer/DPoP tokens, keepalive, message limits, optional blocking dial.                                                                 |
@@ -192,8 +192,10 @@ rate_limit:
   enabled: true
   requests_per_second: 100
   # log_rejections: true
+timeouts:
+  handler: 2m # server-side bound on every request; an earlier client deadline is kept
 timeout:
-  request: 10s
+  shutdown: 10s # how long Close waits for in-flight requests (formerly timeout.request)
 identity_map:
   skip_auth: ["/healthz"]
   jwt:
@@ -442,19 +444,40 @@ header deadline. There is no response write deadline. Raise or disable
 read/body limits for large uploads and long request streams.
 
 `gserver.Config` accepts `timeouts: {header: 10s, read: 30s, idle: 60s,
-handshake: 10s}` and `max_request_body: 10485760` in YAML. The existing
-`timeout.request` still controls shutdown only. Native gRPC on plaintext
-listeners retains its per-message limits; HTTP body limits also apply to
-TLS gRPC/gRPC-Web streams. Native gRPC streams have no read deadline, so
-long-lived client and bidi streams work on both listener types; on TLS a
-stream fails with `Unavailable` once it has sent `max_request_body` bytes in
-total.
+handshake: 10s, handler: 2m}` and `max_request_body: 10485760` in YAML.
+`timeout.shutdown` (formerly `timeout.request`, which is still read) is how
+long `Close` waits for in-flight requests; it does not bound a request while
+the server is serving. Native gRPC on plaintext listeners retains its
+per-message limits; HTTP body limits also apply to TLS gRPC/gRPC-Web
+streams. Native gRPC streams have no read deadline, so long-lived client and
+bidi streams work on both listener types; on TLS a stream fails with
+`Unavailable` once it has sent `max_request_body` bytes in total.
+
+The read deadlines end when the request has been read; without
+`timeouts.handler` a request then runs as long as the client's deadline
+allows, and without one until the client goes away. `timeouts.handler` is
+the server-side maximum: the context of every REST request and of every
+gRPC and gRPC-Web call, streams included, expires after it unless the client
+asked for an earlier deadline, which is kept. It is off by default; set it
+above the longest operation the server performs. For gRPC it is also the
+transport stream deadline, so a stream handler blocked in `RecvMsg` or
+`SendMsg` behind a stalled client is released: with `DeadlineExceeded` on a
+plaintext listener, and on a TLS listener with `DeadlineExceeded` for a
+receive, while a send blocked on the client's flow-control window fails with
+`Unavailable` one second after the deadline, when the listener resets the
+stream and the client sees `Internal` (net/http cannot deliver trailers
+after aborting a write). A handler that returns its expired context error
+fails the call with `DeadlineExceeded` instead of `Unknown`. Handlers must
+honor their context otherwise: one that ignores it outlives the deadline, as
+it does a client deadline, and a REST handler blocked writing to a client
+that stopped reading is not released (there is no response write deadline).
 
 For REST, configure `WithTimeouts(limits.Timeouts{...})` and
 `WithMaxRequestBody(bytes)` before `StartHTTP`. Both default and custom muxes
-are bounded. Native net/http TLS uses the smaller positive header/read
-value for its handshake; the Handshake field is for cmux/eager listeners.
-`transport.TLSInfo.HandshakeTimeout` overrides the eager TLS deadline.
+are bounded, including by `Handler`. Native net/http TLS uses the smaller
+positive header/read value for its handshake; the Handshake field is for
+cmux/eager listeners. `transport.TLSInfo.HandshakeTimeout` overrides the
+eager TLS deadline.
 
 `marshal.DecodeBody` also enforces the body default when used alone.
 `marshal.LimitRequestBody(handler, bytes)` overrides it. The limiter writes
@@ -467,7 +490,10 @@ byte is read. `DecodeBody` answers it, and any oversized JSON body, with HTTP
 detail that `GRPCStatus` attaches.
 
 Prometheus accepts the same `timeouts` and `max_request_body` fields inside
-its metrics config block. `appinit.Metrics` returns bind errors synchronously;
+its metrics config block; its `timeouts.handler` is the scrape timeout: a
+slower scrape is answered 503 (promhttp gathers without consulting the
+request context, so the handler timeout of `promhttp` is used instead of
+the context deadline). `appinit.Metrics` returns bind errors synchronously;
 callers must handle them and close its returned closer to stop the endpoint.
 
 ## RELEASE NOTES

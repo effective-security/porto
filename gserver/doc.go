@@ -12,14 +12,18 @@
 // trailers are encoded into the gRPC-Web response body.
 //
 // Every REST request passes through a fixed middleware chain: rate limiting
-// (optional), correlation ID, request metrics, CORS (optional), identity
-// extraction (roles.IdentityProvider built from Config.IdentityMap), a nested
-// metrics handler that reports the caller role, request logging,
-// authorization (restserver/authz built from Config.Authz), and a readiness
-// check. gRPC and gRPC-Web calls go through the equivalent interceptor chain:
-// panic recovery, correlation ID, logging (streams: logging, then
-// correlation ID, which recovers panics), rate limiting and, for unary calls,
-// NewRequestValidationUnaryInterceptor before identity extraction.
+// (optional), correlation ID, the handler deadline (Config.Timeouts.Handler,
+// when set), request metrics, CORS (optional), identity extraction
+// (roles.IdentityProvider built from Config.IdentityMap), a nested metrics
+// handler that reports the caller role, request logging, authorization
+// (restserver/authz built from Config.Authz), and a readiness check. gRPC
+// and gRPC-Web calls go through the equivalent interceptor chain: panic
+// recovery, correlation ID, logging (streams: logging, then correlation ID,
+// which recovers panics), the handler deadline (when set), rate limiting
+// and, for unary calls, NewRequestValidationUnaryInterceptor before identity
+// extraction. Without Config.Timeouts.Handler a request or call runs as long
+// as the client's deadline allows; with it, the request context expires
+// after that duration unless the client asked for an earlier deadline.
 // Each listener has one limiter: a limited REST request gets
 // HTTP 429 and a limited call ResourceExhausted, logged and counted like any
 // other response of its protocol; with RateLimit.LogRejections set, a
