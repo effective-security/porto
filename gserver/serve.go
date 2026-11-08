@@ -120,12 +120,17 @@ func configureListeners(cfg *Config) (_ map[string]*serveCtx, _ *transport.TLSIn
 		if from.GetClientCertAuth() {
 			clientauthType = tls.RequireAndVerifyClientCert
 		}
+		var minVersion uint16
+		if minVersion, err = from.minVersion(); err != nil {
+			return nil, nil, err
+		}
 		tlsInfo = &transport.TLSInfo{
 			CertFile:         from.CertFile,
 			KeyFile:          from.KeyFile,
 			TrustedCAFile:    from.TrustedCAFile,
 			ClientCAFile:     from.ClientCAFile,
 			ClientAuthType:   clientauthType,
+			MinVersion:       minVersion,
 			CipherSuites:     from.CipherSuites,
 			HandshakeTimeout: cfg.Timeouts.Handshake,
 			// CRLVerifier : TODO

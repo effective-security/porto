@@ -8,7 +8,7 @@ import "github.com/effective-security/porto/pkg/transport"
 
 Package transport provides net.Listener wrappers for servers: a TLS listener that performs the handshake eagerly with optional CRL checking, and keepalive listeners that enable TCP keepalive on accepted connections.
 
-TLSInfo holds the file\-based TLS settings for a server and builds a tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader \(polling every 5 minutes\). A failed build caches nothing, so it can be retried. Client certificates are checked only by ClientAuthType and the optional CRLVerifier; for any other policy, set VerifyConnection on the config returned by ServerTLSWithReloader before serving \(again after Close, which drops the config\).
+TLSInfo holds the file\-based TLS settings for a server and builds a tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader \(polling every 5 minutes\). The minimum version is TLS 1.3 unless MinVersion is tls.VersionTLS12; an ML\-DSA \(post\-quantum\) certificate is served on TLS 1.3 only and rejected with TLS 1.2. A failed build caches nothing, so it can be retried. Client certificates are checked only by ClientAuthType and the optional CRLVerifier; for any other policy, set VerifyConnection on the config returned by ServerTLSWithReloader before serving \(again after Close, which drops the config\).
 
 Usage:
 
@@ -72,7 +72,7 @@ NewTLSListener wraps l so that every accepted connection is TLS\-handshaked in i
 An Accept error of l other than net.ErrClosed does not stop the listener: it is returned unchanged by the next Accept call, so the caller decides whether to retry \(net/http and grpc back off on temporary errors such as EMFILE\), and accepting continues after it. A wrapped listener that reports its closure with another error, such as a cmux listener, keeps the accept loop running until Close; net/http and grpc close the listener when such an error stops them.
 
 <a name="TLSInfo"></a>
-## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L25-L58>)
+## type [TLSInfo](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L26-L67>)
 
 TLSInfo is the file\-based TLS configuration of a server listener. ServerTLSWithReloader builds and caches the tls.Config; Close releases the reloader. It is not safe for concurrent use while being initialized.
 
@@ -104,17 +104,25 @@ type TLSInfo struct {
     // limits.DefaultHandshakeTimeout; a negative duration disables the deadline.
     HandshakeTimeout time.Duration
 
+    // MinVersion is the minimum TLS version offered: tls.VersionTLS12 or
+    // tls.VersionTLS13. Zero is tlsconfig.DefaultMinVersion (TLS 1.3). An
+    // ML-DSA (post-quantum) server certificate needs TLS 1.3, so
+    // ServerTLSWithReloader rejects it with TLS 1.2.
+    MinVersion uint16
+
     // CipherSuites optionally restricts the enabled TLS 1.2 cipher suites, by
     // crypto/tls name; if empty, Go uses its default list. The order is
     // ignored: Go picks the preferred mutually supported suite itself.
-    // tlsconfig.UpdateCipherSuites rejects insecure and TLS 1.3 names.
+    // tlsconfig.UpdateCipherSuites rejects insecure and TLS 1.3 names. The
+    // list has no effect unless MinVersion is tls.VersionTLS12: Go does not
+    // configure TLS 1.3 suites.
     CipherSuites []string
     // contains filtered or unexported fields
 }
 ```
 
 <a name="TLSInfo.Close"></a>
-### func \(\*TLSInfo\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L73>)
+### func \(\*TLSInfo\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L82>)
 
 ```go
 func (info *TLSInfo) Close()
@@ -123,7 +131,7 @@ func (info *TLSInfo) Close()
 Close stops the certificate reloader and drops the cached tls.Config. It is safe to call when ServerTLSWithReloader was never called.
 
 <a name="TLSInfo.Config"></a>
-### func \(\*TLSInfo\) [Config](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L85>)
+### func \(\*TLSInfo\) [Config](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L94>)
 
 ```go
 func (info *TLSInfo) Config() *tls.Config
@@ -132,7 +140,7 @@ func (info *TLSInfo) Config() *tls.Config
 Config returns the tls.Config built by ServerTLSWithReloader, or nil if it has not been called \(or after Close\).
 
 <a name="TLSInfo.Empty"></a>
-### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L67>)
+### func \(\*TLSInfo\) [Empty](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L76>)
 
 ```go
 func (info *TLSInfo) Empty() bool
@@ -141,16 +149,16 @@ func (info *TLSInfo) Empty() bool
 Empty reports whether CertFile or KeyFile is missing, i.e. TLS cannot be served.
 
 <a name="TLSInfo.ServerTLSWithReloader"></a>
-### func \(\*TLSInfo\) [ServerTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L94>)
+### func \(\*TLSInfo\) [ServerTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L104>)
 
 ```go
 func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error)
 ```
 
-ServerTLSWithReloader builds \(once\) and returns the server tls.Config from the files, applies CipherSuites, and installs a KeypairReloader polling every 5 minutes as GetCertificate. It returns an error if the certificate has already expired. Subsequent calls return the cached config. A call that fails caches nothing, so a later call loads the files again.
+ServerTLSWithReloader builds \(once\) and returns the server tls.Config from the files, applies MinVersion and CipherSuites, and installs a KeypairReloader polling every 5 minutes as GetCertificate. It returns an error if the certificate has already expired, or if MinVersion is TLS 1.2 and the certificate is ML\-DSA. Subsequent calls return the cached config. A call that fails caches nothing, so a later call loads the files again.
 
 <a name="TLSInfo.String"></a>
-### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L61>)
+### func \(\*TLSInfo\) [String](<https://github.com/effective-security/porto/blob/main/pkg/transport/tls.go#L70>)
 
 ```go
 func (info *TLSInfo) String() string

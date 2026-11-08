@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"crypto/mldsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -23,6 +24,11 @@ var (
 	serverCertFile string
 	serverKeyFile  string
 	serverRootFile string
+	// mldsa* are an ML-DSA-65 root and server chain (post-quantum
+	// certificates, which Go serves on TLS 1.3 only).
+	mldsaCertFile string
+	mldsaKeyFile  string
+	mldsaRootFile string
 )
 
 func TestMain(m *testing.M) {
@@ -91,6 +97,35 @@ func init() {
 	}
 	certutil.EncodeToPEM(fcert, true, ca1.Certificate)
 	fcert.Close()
+
+	//
+	// ML-DSA chain
+	//
+	mldsaCA := testca.NewEntity(
+		testca.Authority,
+		testca.MLDSAKey(mldsa.MLDSA65()),
+		testca.Subject(pkix.Name{
+			CommonName: "[TEST] ML-DSA Root CA",
+		}),
+		testca.KeyUsage(x509.KeyUsageCertSign|x509.KeyUsageCRLSign|x509.KeyUsageDigitalSignature),
+	)
+	mldsaSrv := mldsaCA.Issue(
+		testca.MLDSAKey(mldsa.MLDSA65()),
+		testca.Subject(pkix.Name{
+			CommonName: "localhost",
+		}),
+		testca.ExtKeyUsage(x509.ExtKeyUsageServerAuth),
+		testca.DNSName("localhost", "127.0.0.1"),
+	)
+	mldsaCertFile = filepath.Join(fixtureDir, "test-mldsa-server.pem")
+	mldsaKeyFile = filepath.Join(fixtureDir, "test-mldsa-server-key.pem")
+	mldsaRootFile = filepath.Join(fixtureDir, "test-mldsa-rootca.pem")
+	if err = mldsaSrv.SaveCertAndKey(mldsaCertFile, mldsaKeyFile, true); err != nil {
+		logger.Panic(err)
+	}
+	if err = os.WriteFile(mldsaRootFile, testca.ToPEM(mldsaCA.Certificate), 0600); err != nil {
+		logger.Panic(err)
+	}
 }
 
 func TestServerTLSWithReloader(t *testing.T) {

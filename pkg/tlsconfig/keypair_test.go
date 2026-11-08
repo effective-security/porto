@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -112,11 +113,22 @@ func TestX509KeyPairKeyTypes(t *testing.T) {
 	require.NoError(t, err)
 	x25519Key, err := ecdh.X25519().GenerateKey(rand.Reader)
 	require.NoError(t, err)
+	mldsa44Key, err := mldsa.GenerateKey(mldsa.MLDSA44())
+	require.NoError(t, err)
+	mldsa65Key, err := mldsa.GenerateKey(mldsa.MLDSA65())
+	require.NoError(t, err)
+	mldsa87Key, err := mldsa.GenerateKey(mldsa.MLDSA87())
+	require.NoError(t, err)
+	otherMLDSA65Key, err := mldsa.GenerateKey(mldsa.MLDSA65())
+	require.NoError(t, err)
 
 	rsaCert := certPEM(t, rsaKey.Public(), rsaKey, notAfter)
 	ecCert := certPEM(t, ecKey.Public(), ecKey, notAfter)
 	edCert := certPEM(t, edKey.Public(), edKey, notAfter)
 	x25519Cert := asX25519Cert(t, edCert)
+	mldsa44Cert := certPEM(t, mldsa44Key.Public(), mldsa44Key, notAfter)
+	mldsa65Cert := certPEM(t, mldsa65Key.Public(), mldsa65Key, notAfter)
+	mldsa87Cert := certPEM(t, mldsa87Key.Public(), mldsa87Key, notAfter)
 
 	garbageCert := pem.EncodeToMemory(&pem.Block{Type: pemTypeCertificate, Bytes: []byte("not a certificate")})
 	garbageKey := pem.EncodeToMemory(&pem.Block{Type: pemTypePrivateKey, Bytes: []byte("not a key")})
@@ -134,6 +146,13 @@ func TestX509KeyPairKeyTypes(t *testing.T) {
 		{name: "rsa pkcs8", cert: rsaCert, key: pkcs8PEM(t, rsaKey), wantKey: rsaKey},
 		{name: "ecdsa pkcs8", cert: ecCert, key: pkcs8PEM(t, ecKey), wantKey: ecKey},
 		{name: "ed25519 pkcs8", cert: edCert, key: pkcs8PEM(t, edKey), wantKey: edKey},
+		{name: "ml-dsa-44 pkcs8", cert: mldsa44Cert, key: pkcs8PEM(t, mldsa44Key), wantKey: mldsa44Key},
+		{name: "ml-dsa-65 pkcs8", cert: mldsa65Cert, key: pkcs8PEM(t, mldsa65Key), wantKey: mldsa65Key},
+		{name: "ml-dsa-87 pkcs8", cert: mldsa87Cert, key: pkcs8PEM(t, mldsa87Key), wantKey: mldsa87Key},
+		{name: "ml-dsa other key", cert: mldsa65Cert, key: pkcs8PEM(t, otherMLDSA65Key), err: "tls: private key does not match public key"},
+		{name: "ml-dsa other parameter set", cert: mldsa65Cert, key: pkcs8PEM(t, mldsa87Key), err: "tls: private key does not match public key"},
+		{name: "ml-dsa cert ecdsa key", cert: mldsa65Cert, key: pkcs8PEM(t, ecKey), err: "tls: private key type does not match public key type"},
+		{name: "ecdsa cert ml-dsa key", cert: ecCert, key: pkcs8PEM(t, mldsa65Key), err: "tls: private key type does not match public key type"},
 		{name: "rsa other key", cert: rsaCert, key: pkcs8PEM(t, otherRSAKey), err: "tls: private key does not match public key"},
 		{name: "ecdsa other key", cert: ecCert, key: pkcs8PEM(t, otherECKey), err: "tls: private key does not match public key"},
 		{name: "ed25519 other key", cert: edCert, key: pkcs8PEM(t, otherEdKey), err: "tls: private key does not match public key"},
@@ -266,7 +285,7 @@ func TestNewClientTLSFromFiles(t *testing.T) {
 
 	cfg, err := tlsconfig.NewClientTLSFromFiles(certFile, keyFile, certFile)
 	require.NoError(t, err)
-	assert.Equal(t, uint16(tls.VersionTLS12), cfg.MinVersion)
+	assert.Equal(t, uint16(tls.VersionTLS13), cfg.MinVersion)
 	assert.Equal(t, []string{"h2", "http/1.1"}, cfg.NextProtos)
 	require.Len(t, cfg.Certificates, 1)
 	require.NotNil(t, cfg.Certificates[0].Leaf)

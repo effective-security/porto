@@ -10,7 +10,8 @@ Package tlsconfig builds tls.Config values from PEM files and keeps the certific
 
 Entry points:
 
-- NewServerTLSFromFiles / NewClientTLSFromFiles build a tls.Config with MinVersion TLS 1.2 and ALPN "h2","http/1.1" from cert, key and optional CA bundle files. An optional "\<cert basename\>.ocsp" file next to the certificate is loaded as an OCSP staple if it is valid and not expired.
+- NewServerTLSFromFiles / NewClientTLSFromFiles build a tls.Config with MinVersion TLS 1.3 \(DefaultMinVersion\) and ALPN "h2","http/1.1" from cert, key and optional CA bundle files. Keys may be RSA, ECDSA, Ed25519 or ML\-DSA \(FIPS 204, PKCS\#8 seed form\). An optional "\<cert basename\>.ocsp" file next to the certificate is loaded as an OCSP staple if it is valid and not expired.
+- SetMinVersion lowers a config to TLS 1.2 for older peers, and ParseTLSVersion reads "1.2"/"1.3" from configuration. Go signs with ML\-DSA only in TLS 1.3, so SetMinVersion rejects TLS 1.2 for a config holding an ML\-DSA certificate \(IsMLDSACertificate\).
 - KeypairReloader polls the cert/key files' modification times on a ticker and reloads them \(also forced once per hour\). Use GetKeypairFunc as tls.Config.GetCertificate on servers and GetClientCertificateFunc as tls.Config.GetClientCertificate on clients.
 - NewHTTPTransportWithReloader returns an http.RoundTripper whose client certificate is swapped in on reload.
 - UpdateCipherSuites maps cipher suite names to tls.Config.CipherSuites. The names come from tls.CipherSuites; suites in tls.InsecureCipherSuites and TLS 1.3 suites \(not configurable in Go\) are rejected.
@@ -46,10 +47,14 @@ An expired certificate is rejected during reload. If the current certificate lat
 
 ## Index
 
+- [Constants](<#constants>)
 - [func GetCipherSuite\(s string\) \(uint16, bool\)](<#GetCipherSuite>)
+- [func IsMLDSACertificate\(cert \*tls.Certificate\) bool](<#IsMLDSACertificate>)
 - [func LoadX509KeyPairWithOCSP\(certFile, keyFile string\) \(\*tls.Certificate, error\)](<#LoadX509KeyPairWithOCSP>)
 - [func NewClientTLSFromFiles\(certFile, keyFile, rootsFile string\) \(\*tls.Config, error\)](<#NewClientTLSFromFiles>)
 - [func NewServerTLSFromFiles\(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType\) \(\*tls.Config, error\)](<#NewServerTLSFromFiles>)
+- [func ParseTLSVersion\(name string\) \(uint16, error\)](<#ParseTLSVersion>)
+- [func SetMinVersion\(cfg \*tls.Config, version uint16\) error](<#SetMinVersion>)
 - [func UpdateCipherSuites\(cfg \*tls.Config, ss \[\]string\) error](<#UpdateCipherSuites>)
 - [func X509KeyPair\(certPEMBlock, keyPEMBlock \[\]byte\) \(\*tls.Certificate, error\)](<#X509KeyPair>)
 - [func X509KeyPairWithOCSP\(certPEMBlock, keyPEMBlock, ocspStaple \[\]byte\) \(\*tls.Certificate, error\)](<#X509KeyPairWithOCSP>)
@@ -72,6 +77,14 @@ An expired certificate is rejected during reload. If the current certificate lat
 - [type OnReloadFunc](<#OnReloadFunc>)
 
 
+## Constants
+
+<a name="DefaultMinVersion"></a>DefaultMinVersion is the tls.Config.MinVersion the constructors set: TLS 1.3. It is the only version that can authenticate with an ML\-DSA certificate; SetMinVersion lowers a config to TLS 1.2 for older peers.
+
+```go
+const DefaultMinVersion = tls.VersionTLS13
+```
+
 <a name="GetCipherSuite"></a>
 ## func [GetCipherSuite](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L69>)
 
@@ -80,6 +93,15 @@ func GetCipherSuite(s string) (uint16, bool)
 ```
 
 GetCipherSuite returns the ID for a cipher suite name such as "TLS\_ECDHE\_RSA\_WITH\_AES\_128\_GCM\_SHA256" and whether UpdateCipherSuites accepts it: the name must be a TLS 1.0\-1.2 suite that crypto/tls implements and does not list in tls.InsecureCipherSuites.
+
+<a name="IsMLDSACertificate"></a>
+## func [IsMLDSACertificate](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L85>)
+
+```go
+func IsMLDSACertificate(cert *tls.Certificate) bool
+```
+
+IsMLDSACertificate reports whether the pair's leaf has an ML\-DSA public key. It reads Leaf when set, else the public key of the private key \(a crypto.Signer, so an HSM or KMS wrapper of an ML\-DSA key is recognised too\), and is false for a nil pair or one without a parsed leaf and a non\-signer key.
 
 <a name="LoadX509KeyPairWithOCSP"></a>
 ## func [LoadX509KeyPairWithOCSP](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tls.go#L34>)
@@ -91,22 +113,40 @@ func LoadX509KeyPairWithOCSP(certFile, keyFile string) (*tls.Certificate, error)
 LoadX509KeyPairWithOCSP reads a PEM certificate chain and private key from files and, if a file named "\<certFile without extension\>.ocsp" exists, uses its content as the OCSP staple \(see X509KeyPairWithOCSP\). A missing OCSP file is not an error. The certificate file may contain intermediates after the leaf.
 
 <a name="NewClientTLSFromFiles"></a>
-## func [NewClientTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L64>)
+## func [NewClientTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L150>)
 
 ```go
 func NewClientTLSFromFiles(certFile, keyFile, rootsFile string) (*tls.Config, error)
 ```
 
-NewClientTLSFromFiles builds a client tls.Config \(MinVersion TLS 1.2, ALPN h2/http1.1\) from PEM files. rootsFile \(optional\) sets RootCAs; when empty the OS roots are used. certFile/keyFile \(optional\) set the client certificate for mutual TLS. The certificate is loaded once; use NewClientTLSWithReloader for rotation.
+NewClientTLSFromFiles builds a client tls.Config \(MinVersion TLS 1.3, ALPN h2/http1.1\) from PEM files. rootsFile \(optional\) sets RootCAs; when empty the OS roots are used. certFile/keyFile \(optional\) set the client certificate for mutual TLS. The certificate is loaded once; use NewClientTLSWithReloader for rotation. Use SetMinVersion to reach servers limited to TLS 1.2; an ML\-DSA client certificate needs TLS 1.3.
 
 <a name="NewServerTLSFromFiles"></a>
-## func [NewServerTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L25>)
+## func [NewServerTLSFromFiles](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L110>)
 
 ```go
 func NewServerTLSFromFiles(certFile, keyFile, rootsFile, caFile string, clientauthType tls.ClientAuthType) (*tls.Config, error)
 ```
 
-NewServerTLSFromFiles builds a server tls.Config \(MinVersion TLS 1.2, ALPN h2/http1.1\) from PEM files. certFile and keyFile are required; an OCSP staple is loaded from "\<cert basename\>.ocsp" if present. rootsFile \(optional\) is used as both RootCAs and ClientCAs; caFile \(optional\) overrides ClientCAs. When both are empty the OS roots are used and client certificates cannot be verified. clientauthType is applied as\-is. CA files must contain at least one valid certificate. The returned config has no GetCertificate; pair it with KeypairReloader for rotation.
+NewServerTLSFromFiles builds a server tls.Config \(MinVersion TLS 1.3, ALPN h2/http1.1\) from PEM files. certFile and keyFile are required; an OCSP staple is loaded from "\<cert basename\>.ocsp" if present. rootsFile \(optional\) is used as both RootCAs and ClientCAs; caFile \(optional\) overrides ClientCAs. When both are empty the OS roots are used and client certificates cannot be verified. clientauthType is applied as\-is. CA files must contain at least one valid certificate. The returned config has no GetCertificate; pair it with KeypairReloader for rotation. Use SetMinVersion to admit TLS 1.2 clients; an ML\-DSA certificate needs TLS 1.3.
+
+<a name="ParseTLSVersion"></a>
+## func [ParseTLSVersion](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L38>)
+
+```go
+func ParseTLSVersion(name string) (uint16, error)
+```
+
+ParseTLSVersion returns the crypto/tls version constant for a configured minimum version: "1.2", "1.3", "TLS1.2", "TLS 1.3" and so on, ignoring case and spaces. An empty string is DefaultMinVersion. TLS 1.0 and 1.1 and unknown names return an error.
+
+<a name="SetMinVersion"></a>
+## func [SetMinVersion](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L57>)
+
+```go
+func SetMinVersion(cfg *tls.Config, version uint16) error
+```
+
+SetMinVersion sets cfg.MinVersion to version, or to DefaultMinVersion when version is zero. Only tls.VersionTLS12 and tls.VersionTLS13 are accepted. It returns an error, leaving cfg unchanged, when a version below TLS 1.3 is combined with an ML\-DSA certificate in cfg.Certificates: Go signs with ML\-DSA only in TLS 1.3, and a TLS 1.2 handshake with such a certificate fails with an internal error alert. A certificate installed later through GetCertificate \(a reloader rotating to an ML\-DSA pair\) is not checked, so keep TLS 1.3 when a rotation to ML\-DSA is planned. A nil cfg is an error.
 
 <a name="UpdateCipherSuites"></a>
 ## func [UpdateCipherSuites](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/cipher_suites.go#L98>)
@@ -127,16 +167,16 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (*tls.Certificate, error)
 X509KeyPair is X509KeyPairWithOCSP without an OCSP staple. Unlike tls.X509KeyPair it always populates Certificate.Leaf.
 
 <a name="X509KeyPairWithOCSP"></a>
-## func [X509KeyPairWithOCSP](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tls.go#L69>)
+## func [X509KeyPairWithOCSP](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tls.go#L72>)
 
 ```go
 func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Certificate, error)
 ```
 
-X509KeyPairWithOCSP parses a PEM certificate chain and private key \(PKCS\#1, PKCS\#8 or SEC1; RSA, ECDSA or Ed25519\), verifies the key matches the leaf, and sets Certificate.Leaf. Expired certificates are accepted. If ocspStaple is given and the chain has an issuer, the staple is validated against the leaf: a Revoked status is an error, an expired or unparsable staple is dropped with a warning, and a good staple is set as Certificate.OCSPStaple.
+X509KeyPairWithOCSP parses a PEM certificate chain and private key \(PKCS\#1, PKCS\#8 or SEC1; RSA, ECDSA, Ed25519 or ML\-DSA, the last only as a PKCS\#8 seed as x509.MarshalPKCS8PrivateKey writes it\), verifies the key matches the leaf, and sets Certificate.Leaf. Expired certificates are accepted. An ML\-DSA pair is served only on TLS 1.3 connections \(see SetMinVersion\). If ocspStaple is given and the chain has an issuer, the staple is validated against the leaf: a Revoked status is an error, an expired or unparsable staple is dropped with a warning, and a good staple is set as Certificate.OCSPStaple.
 
 <a name="HTTPTransport"></a>
-## type [HTTPTransport](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L183-L187>)
+## type [HTTPTransport](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L269-L273>)
 
 HTTPTransport is an http.RoundTripper that uses the current client certificate for each new TLS handshake. Create it with NewHTTPTransportWithReloader.
 
@@ -147,7 +187,7 @@ type HTTPTransport struct {
 ```
 
 <a name="NewHTTPTransportWithReloader"></a>
-### func [NewHTTPTransportWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L137-L140>)
+### func [NewHTTPTransportWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L223-L226>)
 
 ```go
 func NewHTTPTransportWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration, HTTPUserTransport *http.Transport) (*HTTPTransport, error)
@@ -156,7 +196,7 @@ func NewHTTPTransportWithReloader(certFile, keyFile, rootsFile string, checkInte
 NewHTTPTransportWithReloader returns an HTTPTransport with a fixed TLS client config that obtains the current certificate for each handshake. Reloads close idle connections so new dials use the new pair. The supplied transport is cloned before use. When HTTPUserTransport is nil a clone of http.DefaultTransport with 100 max idle/per\-host connections is used. The caller must Close the returned transport to stop the reloader.
 
 <a name="HTTPTransport.Close"></a>
-### func \(\*HTTPTransport\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L201>)
+### func \(\*HTTPTransport\) [Close](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L287>)
 
 ```go
 func (t *HTTPTransport) Close() error
@@ -165,7 +205,7 @@ func (t *HTTPTransport) Close() error
 Close stops the certificate reloader and closes idle connections on the wrapped transport. It returns an error on a second call.
 
 <a name="HTTPTransport.RoundTrip"></a>
-### func \(\*HTTPTransport\) [RoundTrip](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L190>)
+### func \(\*HTTPTransport\) [RoundTrip](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L276>)
 
 ```go
 func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error)
@@ -185,7 +225,7 @@ type KeypairReloader struct {
 ```
 
 <a name="NewClientTLSWithReloader"></a>
-### func [NewClientTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L116>)
+### func [NewClientTLSWithReloader](<https://github.com/effective-security/porto/blob/main/pkg/tlsconfig/tlsconfig.go#L202>)
 
 ```go
 func NewClientTLSWithReloader(certFile, keyFile, rootsFile string, checkInterval time.Duration) (*tls.Config, *KeypairReloader, error)

@@ -1,6 +1,7 @@
 package gserver
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"net"
@@ -278,6 +279,10 @@ func TestConfigureListenersSchemes(t *testing.T) {
 	requireClientCert.ClientCertAuth = &required
 	missingCert := *lifecycleTLS
 	missingCert.CertFile = "testdata/missing-cert.pem"
+	tls12 := *lifecycleTLS
+	tls12.MinVersion = "TLS 1.2"
+	badVersion := *lifecycleTLS
+	badVersion.MinVersion = "1.1"
 	addr := testutils.CreateBindAddr("127.0.0.1")
 
 	tests := []struct {
@@ -288,7 +293,23 @@ func TestConfigureListenersSchemes(t *testing.T) {
 		// wantSecure and wantInsecure are the modes of the single address
 		wantSecure, wantInsecure bool
 		wantClientAuth           tls.ClientAuthType
+		// wantMinVersion is the TLS config's MinVersion; zero is TLS 1.3
+		wantMinVersion uint16
 	}{
+		{
+			name:    "unsupported TLS minimum",
+			urls:    []string{"https://127.0.0.1:0"},
+			tls:     &badVersion,
+			wantErr: `server_tls: min_version: unsupported TLS version "1.1": use 1.2 or 1.3`,
+		},
+		{
+			name:           "TLS 1.2 minimum",
+			urls:           []string{"https://127.0.0.1:0"},
+			tls:            &tls12,
+			wantSecure:     true,
+			wantClientAuth: tls.VerifyClientCertIfGiven,
+			wantMinVersion: tls.VersionTLS12,
+		},
 		{
 			name:    "malformed URL",
 			urls:    []string{"http://[::1"},
@@ -360,6 +381,7 @@ func TestConfigureListenersSchemes(t *testing.T) {
 			}
 			if tt.wantSecure {
 				require.NotNil(t, tlsInfo)
+				assert.Equal(t, cmp.Or(tt.wantMinVersion, uint16(tls.VersionTLS13)), tlsInfo.Config().MinVersion)
 				assert.Equal(t, tt.wantClientAuth, tlsInfo.ClientAuthType)
 			}
 		})

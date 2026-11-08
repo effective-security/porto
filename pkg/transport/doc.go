@@ -4,7 +4,10 @@
 //
 // TLSInfo holds the file-based TLS settings for a server and builds a
 // tls.Config whose certificate is rotated by a tlsconfig.KeypairReloader
-// (polling every 5 minutes). A failed build caches nothing, so it can be
+// (polling every 5 minutes). The minimum version is TLS 1.3 unless
+// MinVersion is tls.VersionTLS12; an ML-DSA (post-quantum) certificate is
+// served on TLS 1.3 only and rejected with TLS 1.2. A failed build caches
+// nothing, so it can be
 // retried. Client certificates are checked only by ClientAuthType and the
 // optional CRLVerifier; for any other policy, set VerifyConnection on the
 // config returned by ServerTLSWithReloader before serving (again after

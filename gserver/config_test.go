@@ -297,6 +297,19 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "timeout: set shutdown or its former name request, not both",
 		},
 		{
+			name: "TLS 1.2 minimum",
+			cfg: &Config{
+				ServerTLS: &TLSInfo{MinVersion: "1.2"},
+			},
+		},
+		{
+			name: "unsupported TLS minimum",
+			cfg: &Config{
+				ServerTLS: &TLSInfo{MinVersion: "1.1"},
+			},
+			wantErr: `server_tls: min_version: unsupported TLS version "1.1": use 1.2 or 1.3`,
+		},
+		{
 			name: "invalid CORS block",
 			cfg: &Config{
 				CORS: &CORS{
