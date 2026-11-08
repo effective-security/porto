@@ -56,3 +56,15 @@ that carry `application/grpc` to `grpc.Server.Serve`, using credentials that
 report the TLS state of the connection that is already established. The same
 listener also carries REST and gRPC-Web, so the design must handle clients
 or proxies that send REST and gRPC over one HTTP/2 connection.
+
+## 13. Dual certificates for the post-quantum transition
+
+`pkg/tlsconfig` and `pkg/transport` serve one certificate pair. An ML-DSA
+pair (xpki v1.1) authenticates TLS 1.3 clients only, and `SetMinVersion`
+refuses TLS 1.2 for it, so a server cannot serve TLS 1.2 clients with a
+classical certificate and TLS 1.3 clients with an ML-DSA one at the same
+time. A second `CertFile`/`KeyFile` pair in `transport.TLSInfo`, selected in
+`GetCertificate` with `tls.ClientHelloInfo.SupportsCertificate`, would allow
+that, with a second `KeypairReloader` and the same expiry rules. Clients
+(`pkg/retriable`, `pkg/redisclient`) have the same single pair for mutual
+TLS. Not planned until a deployment needs both.

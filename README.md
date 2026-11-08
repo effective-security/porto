@@ -42,7 +42,7 @@ go get github.com/effective-security/porto@latest
 | `pkg/revocation`                            | JWT revocation list over `cache.Provider`: `Validate` and `Revoke` for `jwt.Revocation`.                                                                                        |
 | `pkg/location`                              | Client location (city, region, country) from an IP: `Provider` interface, ipwho.is lookup and an LRU cache shared per IPv4 /24 or IPv6 /48 network.                             |
 | `pkg/tasks`                                 | In-process cron-like scheduler: run functions every N units, daily at hh:mm, or weekly, with overlap protection.                                                                |
-| `pkg/tlsconfig`                             | Build `tls.Config` from PEM files (TLS 1.2+, h2) with OCSP staple support and a file-polling certificate reloader.                                                              |
+| `pkg/tlsconfig`                             | Build `tls.Config` from PEM files (TLS 1.3 by default, TLS 1.2 on request, h2; RSA, ECDSA, Ed25519 and ML-DSA keys) with OCSP staple support and a file-polling certificate reloader. |
 | `pkg/transport`                             | TLS listener with eager handshake and CRL checks, keepalive listeners, and file-based `TLSInfo` server config.                                                                  |
 | `pkg/appinit`                               | Service bootstrap: logging flags and rotation, Prometheus/CloudWatch metrics, CPU profiling.                                                                                    |
 | `pkg/appinit/config`                        | YAML/JSON config struct for the metrics pipeline.                                                                                                                               |
@@ -184,6 +184,7 @@ server_tls:
   cert: /etc/tls/server.pem
   key: /etc/tls/server-key.pem
   client_ca: /etc/tls/ca.pem
+  # min_version: "1.2"  # TLS 1.3 by default; ML-DSA certificates need 1.3
 cors:
   enabled: true
   allowed_origins: ["https://app.example.com"]

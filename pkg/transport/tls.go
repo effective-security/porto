@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/pkg/crlcache"
 	"github.com/effective-security/porto/pkg/tlsconfig"
+	"github.com/effective-security/xlog"
 )
 
 // reloadInterval is how often the server key pair files are polled.
@@ -47,10 +48,18 @@ type TLSInfo struct {
 	// limits.DefaultHandshakeTimeout; a negative duration disables the deadline.
 	HandshakeTimeout time.Duration
 
+	// MinVersion is the minimum TLS version offered: tls.VersionTLS12 or
+	// tls.VersionTLS13. Zero is tlsconfig.DefaultMinVersion (TLS 1.3). An
+	// ML-DSA (post-quantum) server certificate needs TLS 1.3, so
+	// ServerTLSWithReloader rejects it with TLS 1.2.
+	MinVersion uint16
+
 	// CipherSuites optionally restricts the enabled TLS 1.2 cipher suites, by
 	// crypto/tls name; if empty, Go uses its default list. The order is
 	// ignored: Go picks the preferred mutually supported suite itself.
-	// tlsconfig.UpdateCipherSuites rejects insecure and TLS 1.3 names.
+	// tlsconfig.UpdateCipherSuites rejects insecure and TLS 1.3 names. The
+	// list has no effect unless MinVersion is tls.VersionTLS12: Go does not
+	// configure TLS 1.3 suites.
 	CipherSuites []string
 
 	tlsCfg      *tls.Config
@@ -87,10 +96,11 @@ func (info *TLSInfo) Config() *tls.Config {
 }
 
 // ServerTLSWithReloader builds (once) and returns the server tls.Config from
-// the files, applies CipherSuites, and installs a KeypairReloader polling
-// every 5 minutes as GetCertificate. It returns an error if the certificate
-// has already expired. Subsequent calls return the cached config. A call
-// that fails caches nothing, so a later call loads the files again.
+// the files, applies MinVersion and CipherSuites, and installs a
+// KeypairReloader polling every 5 minutes as GetCertificate. It returns an
+// error if the certificate has already expired, or if MinVersion is TLS 1.2
+// and the certificate is ML-DSA. Subsequent calls return the cached config. A
+// call that fails caches nothing, so a later call loads the files again.
 func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 	if info.tlsCfg != nil {
 		return info.tlsCfg, nil
@@ -113,8 +123,19 @@ func (info *TLSInfo) ServerTLSWithReloader() (*tls.Config, error) {
 		return nil, errors.New("tls: certificate has expired")
 	}
 
+	if err = tlsconfig.SetMinVersion(cfg, info.MinVersion); err != nil {
+		return nil, err
+	}
+
 	if err = tlsconfig.UpdateCipherSuites(cfg, info.CipherSuites); err != nil {
 		return nil, err
+	}
+	if len(info.CipherSuites) > 0 && cfg.MinVersion >= tls.VersionTLS13 {
+		logger.KV(xlog.WARNING,
+			"reason", "cipher_suites_ignored",
+			"min_version", tls.VersionName(cfg.MinVersion),
+			"cert", info.CertFile,
+		)
 	}
 
 	reloader, err := tlsconfig.NewKeypairReloader(

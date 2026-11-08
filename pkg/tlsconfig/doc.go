@@ -4,9 +4,15 @@
 // Entry points:
 //
 //   - NewServerTLSFromFiles / NewClientTLSFromFiles build a tls.Config with
-//     MinVersion TLS 1.2 and ALPN "h2","http/1.1" from cert, key and optional
-//     CA bundle files. An optional "<cert basename>.ocsp" file next to the
-//     certificate is loaded as an OCSP staple if it is valid and not expired.
+//     MinVersion TLS 1.3 (DefaultMinVersion) and ALPN "h2","http/1.1" from
+//     cert, key and optional CA bundle files. Keys may be RSA, ECDSA, Ed25519
+//     or ML-DSA (FIPS 204, PKCS#8 seed form). An optional
+//     "<cert basename>.ocsp" file next to the certificate is loaded as an
+//     OCSP staple if it is valid and not expired.
+//   - SetMinVersion lowers a config to TLS 1.2 for older peers, and
+//     ParseTLSVersion reads "1.2"/"1.3" from configuration. Go signs with
+//     ML-DSA only in TLS 1.3, so SetMinVersion rejects TLS 1.2 for a config
+//     holding an ML-DSA certificate (IsMLDSACertificate).
 //   - KeypairReloader polls the cert/key files' modification times on a ticker
 //     and reloads them (also forced once per hour). Use GetKeypairFunc as
 //     tls.Config.GetCertificate on servers and GetClientCertificateFunc as

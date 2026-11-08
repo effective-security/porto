@@ -11,6 +11,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/porto/gserver/roles"
+	"github.com/effective-security/porto/pkg/tlsconfig"
 	"github.com/effective-security/porto/restserver/authz"
 	"github.com/effective-security/porto/restserver/telemetry"
 	"github.com/effective-security/porto/xhttp/header"
@@ -192,10 +193,17 @@ type TLSInfo struct {
 	// OCSPFile specifies location of the OCSP response
 	OCSPFile string `json:"ocsp,omitempty" yaml:"ocsp,omitempty"`
 
+	// MinVersion is the minimum TLS version the listeners offer: "1.2" or
+	// "1.3" (also "TLS1.2", "TLS 1.3"; case and spaces are ignored). Empty
+	// means TLS 1.3. An ML-DSA (post-quantum) server certificate needs TLS
+	// 1.3, so Start rejects it with "1.2".
+	MinVersion string `json:"min_version,omitempty" yaml:"min_version,omitempty"`
+
 	// CipherSuites optionally restricts the enabled TLS 1.2 cipher suites, by
 	// crypto/tls name. The order is ignored: Go picks the preferred mutually
 	// supported suite itself. Names Go lists as insecure and TLS 1.3 suites
-	// (not configurable in Go) are rejected.
+	// (not configurable in Go) are rejected. The list has no effect unless
+	// MinVersion is "1.2": Go does not configure TLS 1.3 suites.
 	CipherSuites []string `json:"cipher_suites,omitempty" yaml:"cipher_suites,omitempty"`
 
 	// ClientCertAuth, when true, requires and verifies a client certificate;
@@ -289,6 +297,9 @@ func (c *Config) validate() (*identity.TrustedProxies, error) {
 	if c.Timeout.Shutdown != 0 && c.Timeout.Request != 0 {
 		return nil, errors.New("timeout: set shutdown or its former name request, not both")
 	}
+	if _, err := c.ServerTLS.minVersion(); err != nil {
+		return nil, err
+	}
 	if c.CORS.GetEnabled() {
 		for _, name := range slices.Sorted(maps.Keys(c.HTTPHeaders)) {
 			if strings.HasPrefix(strings.ToLower(name), corsHeaderPrefix) {
@@ -313,6 +324,19 @@ func (info *TLSInfo) Empty() bool {
 // GetClientCertAuth returns true when ClientCertAuth is set and true.
 func (info *TLSInfo) GetClientCertAuth() bool {
 	return info.ClientCertAuth != nil && *info.ClientCertAuth
+}
+
+// minVersion parses MinVersion; a nil receiver or an empty value is
+// tlsconfig.DefaultMinVersion (TLS 1.3).
+func (info *TLSInfo) minVersion() (uint16, error) {
+	if info == nil {
+		return tlsconfig.DefaultMinVersion, nil
+	}
+	v, err := tlsconfig.ParseTLSVersion(info.MinVersion)
+	if err != nil {
+		return 0, errors.WithMessage(err, "server_tls: min_version")
+	}
+	return v, nil
 }
 
 // String returns a loggable summary of the TLS file locations; safe on a nil receiver.

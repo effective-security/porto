@@ -1,10 +1,10 @@
 package tlsconfig
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -61,8 +61,11 @@ func X509KeyPair(certPEMBlock, keyPEMBlock []byte) (*tls.Certificate, error) {
 }
 
 // X509KeyPairWithOCSP parses a PEM certificate chain and private key (PKCS#1,
-// PKCS#8 or SEC1; RSA, ECDSA or Ed25519), verifies the key matches the leaf,
-// and sets Certificate.Leaf. Expired certificates are accepted. If ocspStaple
+// PKCS#8 or SEC1; RSA, ECDSA, Ed25519 or ML-DSA, the last only as a PKCS#8
+// seed as x509.MarshalPKCS8PrivateKey writes it), verifies the key matches
+// the leaf, and sets Certificate.Leaf. Expired certificates are accepted.
+// An ML-DSA pair is served only on TLS 1.3 connections (see SetMinVersion).
+// If ocspStaple
 // is given and the chain has an issuer, the staple is validated against the
 // leaf: a Revoked status is an error, an expired or unparsable staple is
 // dropped with a warning, and a good staple is set as Certificate.OCSPStaple.
@@ -135,7 +138,7 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 		if !ok {
 			return nil, errors.New("tls: private key type does not match public key type")
 		}
-		if pub.N.Cmp(priv.N) != 0 {
+		if !priv.PublicKey.Equal(pub) {
 			return nil, errors.New("tls: private key does not match public key")
 		}
 	case *ecdsa.PublicKey:
@@ -143,7 +146,7 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 		if !ok {
 			return nil, errors.New("tls: private key type does not match public key type")
 		}
-		if !pub.Equal(&priv.PublicKey) {
+		if !priv.PublicKey.Equal(pub) {
 			return nil, errors.New("tls: private key does not match public key")
 		}
 	case ed25519.PublicKey:
@@ -151,7 +154,15 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 		if !ok {
 			return nil, errors.New("tls: private key type does not match public key type")
 		}
-		if !bytes.Equal(priv.Public().(ed25519.PublicKey), pub) {
+		if !priv.Public().(ed25519.PublicKey).Equal(pub) {
+			return nil, errors.New("tls: private key does not match public key")
+		}
+	case *mldsa.PublicKey:
+		priv, ok := cert.PrivateKey.(*mldsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("tls: private key type does not match public key type")
+		}
+		if !priv.PublicKey().Equal(pub) {
 			return nil, errors.New("tls: private key does not match public key")
 		}
 	default:
@@ -196,13 +207,15 @@ func X509KeyPairWithOCSP(certPEMBlock, keyPEMBlock, ocspStaple []byte) (*tls.Cer
 // Attempt to parse the given private key DER block. OpenSSL 0.9.8 generates
 // PKCS #1 private keys by default, while OpenSSL 1.0.0 generates PKCS #8 keys.
 // OpenSSL ecparam generates SEC1 EC private keys for ECDSA. We try all three.
+// ML-DSA keys are PKCS#8 only, in the seed form (an OpenSSL seed-and-expanded
+// key does not parse).
 func parsePrivateKey(der []byte) (crypto.PrivateKey, error) {
 	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
 		return key, nil
 	}
 	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
 		switch key := key.(type) {
-		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey:
+		case *rsa.PrivateKey, *ecdsa.PrivateKey, ed25519.PrivateKey, *mldsa.PrivateKey:
 			return key, nil
 		default:
 			return nil, errors.New("tls: found unknown private key type in PKCS#8 wrapping")
