@@ -9,7 +9,7 @@ require (
 	github.com/effective-security/x v1.0.111
 	github.com/effective-security/xdb v1.0.169
 	github.com/effective-security/xlog v1.0.70
-	github.com/effective-security/xpki v1.1.321
+	github.com/effective-security/xpki v1.1.322
 	github.com/gigawattio/awsarn v0.0.0-20180317190237-a28d04d20421
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
