@@ -151,6 +151,13 @@ New credentials folders use mode `0700`; existing folder permissions are kept.
 An empty storage path uses the working directory. Token and key files use `0600`.
 DPoP proofs are signed separately for each retry attempt.
 
+A DPoP key is an RSA, ECDSA or ML-DSA private JWK; an ML-DSA key is an `AKP`
+JWK (RFC 9964) and signs with `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`.
+`Storage.ListKeys` reports each key's type, size and algorithm (`KeyInfo`).
+An ML-DSA proof carries its public key and is about 6 KB (ML-DSA-44) to 11 KB
+(ML-DSA-87), which can exceed the header limit of a proxy in front of the
+server.
+
 ## Nonces
 
 `client.WithNonce("/nonce", retriable.DefaultReplayNonceHeader)` installs a

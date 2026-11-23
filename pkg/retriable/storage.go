@@ -1,11 +1,10 @@
 package retriable
 
 import (
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rsa"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -21,6 +20,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/effective-security/x/configloader"
 	"github.com/effective-security/xlog"
+	"github.com/effective-security/xpki/certutil"
 	"github.com/effective-security/xpki/jwt/dpop"
 	jose "github.com/go-jose/go-jose/v4"
 )
@@ -355,13 +355,24 @@ func (c *Storage) ListKeys() ([]*KeyInfo, error) {
 	return list, nil
 }
 
+// FIPS 204 parameter set numbers, which KeyInfo reports as the size of an
+// ML-DSA key, as xpki's certutil.KeyInfo does.
+const (
+	mldsa44Size = 44
+	mldsa65Size = 65
+	mldsa87Size = 87
+)
+
 // KeyInfo describes a stored DPoP private key.
 type KeyInfo struct {
-	// KeySize is the modulus size (RSA) or curve size (ECDSA) in bits.
+	// KeySize is the modulus size (RSA) or curve size (ECDSA) in bits, or
+	// the ML-DSA parameter set number (44, 65 or 87).
 	KeySize int
-	// Type is "RSA" or "ECDSA".
+	// Type is "RSA", "ECDSA" or "ML-DSA" (xpki's certutil.KeyType* values).
 	Type string
-	// Algo is the JWS algorithm matched to the key size: RS256/384/512 or ES256/384/512.
+	// Algo is the JWS algorithm matched to the key: RS256/384/512 by modulus
+	// size, ES256/384/512 by curve, or ML-DSA-44/65/87 (RFC 9964) by
+	// parameter set.
 	Algo string
 	// Thumbprint is the base64url SHA-256 JWK thumbprint (the dpop_jkt value).
 	Thumbprint string
@@ -369,41 +380,54 @@ type KeyInfo struct {
 	Key *jose.JSONWebKey
 }
 
-// NewKeyInfo computes KeyInfo for an RSA or ECDSA private JWK;
-// other key types return an error.
+// NewKeyInfo computes KeyInfo for an RSA, ECDSA or ML-DSA private JWK, the
+// key types a DPoP proof can be signed with. A nil or invalid key (one that
+// dpop.Thumbprint rejects, such as an RSA key without its private part or an
+// uninitialized ML-DSA key) and other key types return an error.
 func NewKeyInfo(k *jose.JSONWebKey) (*KeyInfo, error) {
-	tp, err := k.Thumbprint(crypto.SHA256)
+	tp, err := dpop.Thumbprint(k)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithMessage(err, "unable to compute key thumbprint")
 	}
 	si := &KeyInfo{
 		Key:        k,
-		Thumbprint: base64.RawURLEncoding.EncodeToString(tp),
+		Thumbprint: tp,
 	}
 
 	switch typ := k.Key.(type) {
 	case *rsa.PrivateKey:
 		si.KeySize = typ.N.BitLen()
-		si.Type = "RSA"
+		si.Type = certutil.KeyTypeRSA
 		switch {
 		case si.KeySize >= 4096:
-			si.Algo = "RS512"
+			si.Algo = string(jose.RS512)
 		case si.KeySize >= 3072:
-			si.Algo = "RS384"
+			si.Algo = string(jose.RS384)
 		default:
-			si.Algo = "RS256"
+			si.Algo = string(jose.RS256)
 		}
 	case *ecdsa.PrivateKey:
-		si.Type = "ECDSA"
+		si.Type = certutil.KeyTypeECDSA
 		switch typ.Curve {
 		case elliptic.P521():
-			si.Algo = "ES512"
+			si.Algo = string(jose.ES512)
 		case elliptic.P384():
-			si.Algo = "ES384"
+			si.Algo = string(jose.ES384)
 		default:
-			si.Algo = "ES256"
+			si.Algo = string(jose.ES256)
 		}
 		si.KeySize = typ.Curve.Params().BitSize
+	case *mldsa.PrivateKey:
+		si.Type = certutil.KeyTypeMLDSA
+		// crypto/mldsa has exactly three parameter sets
+		switch typ.PublicKey().Parameters() {
+		case mldsa.MLDSA44():
+			si.KeySize, si.Algo = mldsa44Size, string(jose.MLDSA44)
+		case mldsa.MLDSA65():
+			si.KeySize, si.Algo = mldsa65Size, string(jose.MLDSA65)
+		default:
+			si.KeySize, si.Algo = mldsa87Size, string(jose.MLDSA87)
+		}
 	default:
 		return nil, errors.Errorf("key not supported: %T", typ)
 	}
