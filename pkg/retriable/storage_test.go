@@ -4,10 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,18 +23,29 @@ import (
 
 const tokenFile = ".auth_token"
 
-// fakeRSAKey returns an RSA private key whose modulus has the given bit
-// length; only the public part is set, which is all NewKeyInfo and the
-// JWK thumbprint read, so tests avoid generating large keys.
-func fakeRSAKey(bits int) *rsa.PrivateKey {
-	n := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
-	n.SetBit(n, 0, 1)
-	return &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: n, E: 65537}}
+// thumbprintErr is the error of NewKeyInfo for a key that dpop.Thumbprint
+// rejects as invalid.
+const thumbprintErr = "unable to compute key thumbprint: dpop: unable to get thumbprint"
+
+// mustRSA generates a real RSA key: dpop.Thumbprint, and so NewKeyInfo,
+// rejects a key without its private part and primes.
+func mustRSA(t *testing.T, bits int) *rsa.PrivateKey {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, bits)
+	require.NoError(t, err)
+	return k
 }
 
 func mustECDSA(t *testing.T, curve elliptic.Curve) *ecdsa.PrivateKey {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(curve, rand.Reader)
+	require.NoError(t, err)
+	return k
+}
+
+func mustMLDSA(t *testing.T, params mldsa.Parameters) *mldsa.PrivateKey {
+	t.Helper()
+	k, err := mldsa.GenerateKey(params)
 	require.NoError(t, err)
 	return k
 }
@@ -67,6 +78,8 @@ func TestNewKeyInfo(t *testing.T) {
 	_, edKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	p256 := mustECDSA(t, elliptic.P256())
+	rsa2048 := mustRSA(t, 2048)
+	mldsa65 := mustMLDSA(t, mldsa.MLDSA65())
 
 	tcases := []struct {
 		name    string
@@ -75,19 +88,26 @@ func TestNewKeyInfo(t *testing.T) {
 		algo    string
 		keySize int
 		err     string
-		// errPart is matched instead of err for go-jose messages
-		errPart string
 	}{
-		{name: "rsa2048", key: fakeRSAKey(2048), typ: "RSA", algo: "RS256", keySize: 2048},
-		{name: "rsa3071", key: fakeRSAKey(3071), typ: "RSA", algo: "RS256", keySize: 3071},
-		{name: "rsa3072", key: fakeRSAKey(3072), typ: "RSA", algo: "RS384", keySize: 3072},
-		{name: "rsa4096", key: fakeRSAKey(4096), typ: "RSA", algo: "RS512", keySize: 4096},
+		{name: "rsa2048", key: rsa2048, typ: "RSA", algo: "RS256", keySize: 2048},
+		{name: "rsa3071", key: mustRSA(t, 3071), typ: "RSA", algo: "RS256", keySize: 3071},
+		{name: "rsa3072", key: mustRSA(t, 3072), typ: "RSA", algo: "RS384", keySize: 3072},
+		{name: "rsa4096", key: mustRSA(t, 4096), typ: "RSA", algo: "RS512", keySize: 4096},
 		{name: "p256", key: p256, typ: "ECDSA", algo: "ES256", keySize: 256},
 		{name: "p384", key: mustECDSA(t, elliptic.P384()), typ: "ECDSA", algo: "ES384", keySize: 384},
 		{name: "p521", key: mustECDSA(t, elliptic.P521()), typ: "ECDSA", algo: "ES512", keySize: 521},
+		{name: "mldsa44", key: mustMLDSA(t, mldsa.MLDSA44()), typ: "ML-DSA", algo: "ML-DSA-44", keySize: 44},
+		{name: "mldsa65", key: mldsa65, typ: "ML-DSA", algo: "ML-DSA-65", keySize: 65},
+		{name: "mldsa87", key: mustMLDSA(t, mldsa.MLDSA87()), typ: "ML-DSA", algo: "ML-DSA-87", keySize: 87},
 		{name: "ecdsa_public", key: &p256.PublicKey, err: "key not supported: *ecdsa.PublicKey"},
+		{name: "mldsa_public", key: mldsa65.PublicKey(), err: "key not supported: *mldsa.PublicKey"},
 		{name: "ed25519", key: edKey, err: "key not supported: ed25519.PrivateKey"},
-		{name: "symmetric", key: []byte("secret"), errPart: "unknown key type"},
+		// invalid keys: go-jose panics on the thumbprint of an uninitialized
+		// ML-DSA key, and computes one for an RSA key without its private part
+		{name: "mldsa_uninitialized", key: &mldsa.PrivateKey{}, err: thumbprintErr},
+		{name: "rsa_public_part_only", key: &rsa.PrivateKey{PublicKey: rsa2048.PublicKey}, err: thumbprintErr},
+		{name: "symmetric", key: []byte("secret"), err: thumbprintErr},
+		{name: "no_key", key: nil, err: thumbprintErr},
 	}
 	for _, tc := range tcases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,12 +115,8 @@ func TestNewKeyInfo(t *testing.T) {
 
 			k := &jose.JSONWebKey{Key: tc.key}
 			ki, err := retriable.NewKeyInfo(k)
-			if tc.err != "" || tc.errPart != "" {
-				if tc.err != "" {
-					assert.EqualError(t, err, tc.err)
-				} else {
-					assert.ErrorContains(t, err, tc.errPart)
-				}
+			if tc.err != "" {
+				assert.EqualError(t, err, tc.err)
 				assert.Nil(t, ki)
 				return
 			}
@@ -113,6 +129,14 @@ func TestNewKeyInfo(t *testing.T) {
 			assert.Equal(t, thumbprint(t, k), ki.Thumbprint)
 		})
 	}
+
+	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
+
+		ki, err := retriable.NewKeyInfo(nil)
+		assert.EqualError(t, err, thumbprintErr)
+		assert.Nil(t, ki)
+	})
 }
 
 func TestStorageListKeys(t *testing.T) {
@@ -127,6 +151,8 @@ func TestStorageListKeys(t *testing.T) {
 	require.NoError(t, err)
 	p384 := &jose.JSONWebKey{Key: mustECDSA(t, elliptic.P384())}
 	rsaJWK := &jose.JSONWebKey{Key: rsaKey}
+	// saved as an AKP JWK (RFC 9964) holding the seed, and read back
+	mldsaJWK := &jose.JSONWebKey{Key: mustMLDSA(t, mldsa.MLDSA65())}
 
 	type expected struct {
 		typ     string
@@ -134,13 +160,14 @@ func TestStorageListKeys(t *testing.T) {
 		keySize int
 	}
 	want := map[string]expected{}
-	for _, k := range []*jose.JSONWebKey{p256, p384, rsaJWK} {
+	for _, k := range []*jose.JSONWebKey{p256, p384, rsaJWK, mldsaJWK} {
 		_, err := storage.SaveKey(k)
 		require.NoError(t, err)
 	}
 	want[thumbprint(t, p256)] = expected{typ: "ECDSA", algo: "ES256", keySize: 256}
 	want[thumbprint(t, p384)] = expected{typ: "ECDSA", algo: "ES384", keySize: 384}
 	want[thumbprint(t, rsaJWK)] = expected{typ: "RSA", algo: "RS256", keySize: 2048}
+	want[thumbprint(t, mldsaJWK)] = expected{typ: "ML-DSA", algo: "ML-DSA-65", keySize: 65}
 
 	// keys in sub-folders are listed too
 	p521 := &jose.JSONWebKey{Key: mustECDSA(t, elliptic.P521())}

@@ -2,6 +2,7 @@ package retriable
 
 import (
 	"context"
+	"crypto/mldsa"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/effective-security/porto/gserver/credentials"
 	"github.com/effective-security/porto/xhttp/header"
 	"github.com/effective-security/xpki/jwt/dpop"
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -255,6 +257,62 @@ func TestDPoPProofChangesOnRetry(t *testing.T) {
 	assert.NotEmpty(t, first)
 	assert.NotEmpty(t, second)
 	assert.NotEqual(t, first, second)
+}
+
+// TestDPoPProofWithMLDSAKey checks that a stored ML-DSA key (an AKP JWK,
+// RFC 9964) signs DPoP proofs that xpki verifies and binds to its dpop_jkt.
+func TestDPoPProofWithMLDSAKey(t *testing.T) {
+	t.Parallel()
+
+	const path = "/v1/resource"
+	type received struct {
+		auth  string
+		proof string
+	}
+	got := make(chan received, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- received{
+			auth:  r.Header.Get(header.Authorization),
+			proof: r.Header.Get(header.DPoP),
+		}
+	}))
+	defer server.Close()
+
+	storage := NewStorage(t.TempDir())
+	priv, err := mldsa.GenerateKey(mldsa.MLDSA65())
+	require.NoError(t, err)
+	key := &jose.JSONWebKey{Key: priv}
+	jkt, err := dpop.Thumbprint(key)
+	require.NoError(t, err)
+	_, err = storage.SaveKey(key)
+	require.NoError(t, err)
+	token := url.Values{
+		"access_token": {"test-token"},
+		"dpop_jkt":     {jkt},
+	}
+	_, err = storage.SaveAuthToken(token.Encode())
+	require.NoError(t, err)
+
+	client, err := New(ClientConfig{Host: server.URL})
+	require.NoError(t, err)
+	client.WithTransport(server.Client().Transport).WithStorage(storage)
+	require.NoError(t, client.SetAuthorization())
+
+	req := httptest.NewRequest(http.MethodPost, server.URL+path, nil)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	r := <-got
+	assert.Equal(t, "DPoP test-token", r.auth)
+	res, err := dpop.VerifyClaims(dpop.VerifyConfig{}, r.proof, http.MethodPost, server.URL+path)
+	require.NoError(t, err)
+	assert.Equal(t, jkt, res.Thumbprint)
+	proof, err := jose.ParseSigned(r.proof, []jose.SignatureAlgorithm{jose.MLDSA65})
+	require.NoError(t, err)
+	require.Len(t, proof.Signatures, 1)
+	assert.Equal(t, string(jose.MLDSA65), proof.Signatures[0].Header.Algorithm)
 }
 
 func TestDPoPRequiresSigner(t *testing.T) {

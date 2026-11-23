@@ -1023,17 +1023,20 @@ type HeadRequester interface {
 ```
 
 <a name="KeyInfo"></a>
-## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L359-L370>)
+## type [KeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L367-L381>)
 
 KeyInfo describes a stored DPoP private key.
 
 ```go
 type KeyInfo struct {
-    // KeySize is the modulus size (RSA) or curve size (ECDSA) in bits.
+    // KeySize is the modulus size (RSA) or curve size (ECDSA) in bits, or
+    // the ML-DSA parameter set number (44, 65 or 87).
     KeySize int
-    // Type is "RSA" or "ECDSA".
+    // Type is "RSA", "ECDSA" or "ML-DSA" (xpki's certutil.KeyType* values).
     Type string
-    // Algo is the JWS algorithm matched to the key size: RS256/384/512 or ES256/384/512.
+    // Algo is the JWS algorithm matched to the key: RS256/384/512 by modulus
+    // size, ES256/384/512 by curve, or ML-DSA-44/65/87 (RFC 9964) by
+    // parameter set.
     Algo string
     // Thumbprint is the base64url SHA-256 JWK thumbprint (the dpop_jkt value).
     Thumbprint string
@@ -1043,13 +1046,13 @@ type KeyInfo struct {
 ```
 
 <a name="NewKeyInfo"></a>
-### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L374>)
+### func [NewKeyInfo](<https://github.com/effective-security/porto/blob/main/pkg/retriable/storage.go#L387>)
 
 ```go
 func NewKeyInfo(k *jose.JSONWebKey) (*KeyInfo, error)
 ```
 
-NewKeyInfo computes KeyInfo for an RSA or ECDSA private JWK; other key types return an error.
+NewKeyInfo computes KeyInfo for an RSA, ECDSA or ML\-DSA private JWK, the key types a DPoP proof can be signed with. A nil or invalid key \(one that dpop.Thumbprint rejects, such as an RSA key without its private part or an uninitialized ML\-DSA key\) and other key types return an error.
 
 <a name="NonceProvider"></a>
 ## type [NonceProvider](<https://github.com/effective-security/porto/blob/main/pkg/retriable/nonce.go#L23-L34>)
