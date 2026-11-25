@@ -2,6 +2,7 @@ package redisclient_test
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
@@ -310,6 +311,31 @@ func TestNewRedisClientTLS(t *testing.T) {
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 	})
 	assert.NoError(t, err, "the client certificate is the one from the files")
+	assert.Equal(t, uint16(tls.VersionTLS13), tlsCfg.MinVersion, "TLS 1.3 is the default minimum")
+
+	// min_version lets the client reach a server limited to TLS 1.2
+	tls12, err := redisclient.NewRedisClient(&redisclient.Config{
+		Server: "redis://127.0.0.1:1/0",
+		ClientTLS: &gserver.TLSInfo{
+			TrustedCAFile: certFile,
+			MinVersion:    "1.2",
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, tls12.Close()) })
+	require.NotNil(t, tls12.Options().TLSConfig)
+	assert.Equal(t, uint16(tls.VersionTLS12), tls12.Options().TLSConfig.MinVersion)
+
+	badVersion, err := redisclient.NewRedisClient(&redisclient.Config{
+		Server: "redis://127.0.0.1:1/0",
+		ClientTLS: &gserver.TLSInfo{
+			TrustedCAFile: certFile,
+			MinVersion:    "1.1",
+		},
+	})
+	require.EqualError(t, err,
+		`redis: client_tls: min_version: unsupported TLS version "1.1": use 1.2 or 1.3`)
+	assert.Nil(t, badVersion)
 
 	missing := filepath.Join(dir, "missing-ca.pem")
 	failed, err := redisclient.NewRedisClient(&redisclient.Config{

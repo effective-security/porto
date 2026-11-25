@@ -61,6 +61,13 @@ func NewRedisProvider(cfg RedisConfig, prefix string) (Provider, error) {
 		if err != nil {
 			return nil, errors.WithMessage(err, "unable to build TLS configuration")
 		}
+		minVersion, err := tlsconfig.ParseTLSVersion(cfg.ClientTLS.MinVersion)
+		if err == nil {
+			err = tlsconfig.SetMinVersion(tlscfg, minVersion)
+		}
+		if err != nil {
+			return nil, errors.WithMessage(err, "client_tls: min_version")
+		}
 
 		options.TLSConfig = tlscfg
 	}

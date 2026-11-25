@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/gserver"
 	"github.com/effective-security/porto/pkg/cache"
 	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/xpki/certutil"
@@ -510,6 +511,27 @@ func TestRedisProviderConfigSecrets(t *testing.T) {
 		Server: "redis://user:s3cret-pass@127.0.0.1:bad/0",
 	}, "")
 	require.EqualError(t, err, `invalid redis address: invalid port ":bad" after host`)
+}
+
+// client_tls.min_version reaches the Redis TLS config: "1.2" is accepted for
+// a server limited to TLS 1.2, an unsupported version fails the provider.
+func TestRedisProviderClientTLSMinVersion(t *testing.T) {
+	t.Parallel()
+
+	p, err := cache.NewRedisProvider(cache.RedisConfig{
+		Server:    "redis://127.0.0.1:1/0",
+		ClientTLS: &gserver.TLSInfo{MinVersion: "1.2"},
+	}, "")
+	require.NoError(t, err)
+	require.NoError(t, p.Close())
+
+	p, err = cache.NewRedisProvider(cache.RedisConfig{
+		Server:    "redis://127.0.0.1:1/0",
+		ClientTLS: &gserver.TLSInfo{MinVersion: "1.1"},
+	}, "")
+	require.EqualError(t, err,
+		`client_tls: min_version: unsupported TLS version "1.1": use 1.2 or 1.3`)
+	assert.Nil(t, p)
 }
 
 func provTest(t *testing.T, p cache.Provider, root string) {
