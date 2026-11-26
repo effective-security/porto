@@ -20,8 +20,9 @@ offers TLS 1.3 by default.
     tls.VersionTLS12)` on a config from `NewServerTLSFromFiles`.
   - Clients: call `tlsconfig.SetMinVersion` on the config from
     `NewClientTLSFromFiles` before use, or pass a prepared `*tls.Config` to
-    `retriable.WithTLS`. The Redis clients have no setting; a Redis server
-    must accept TLS 1.3 (Redis 6+ built against OpenSSL 1.1.1+ does).
+    `retriable.WithTLS`. The Redis clients (`redisclient`, `cache`) read
+    `client_tls.min_version` ("1.2" or "1.3", empty is TLS 1.3); set "1.2"
+    for a Redis server limited to TLS 1.2 (ElastiCache Redis OSS 7.0).
   - `server_tls.cipher_suites` (`transport.TLSInfo.CipherSuites`) names TLS
     1.2 suites only. With the default minimum it has no effect and
     `ServerTLSWithReloader` logs WARNING `cipher_suites_ignored`; it applies

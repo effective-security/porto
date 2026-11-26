@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"net"
 	"runtime"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/effective-security/porto/gserver"
 	"github.com/effective-security/porto/pkg/cache"
 	"github.com/effective-security/porto/tests/testutils"
 	"github.com/effective-security/xpki/certutil"
@@ -510,6 +512,62 @@ func TestRedisProviderConfigSecrets(t *testing.T) {
 		Server: "redis://user:s3cret-pass@127.0.0.1:bad/0",
 	}, "")
 	require.EqualError(t, err, `invalid redis address: invalid port ":bad" after host`)
+}
+
+// client_tls.min_version reaches the Redis TLS config: TLS 1.3 is the
+// default, "1.2" allows a server limited to TLS 1.2, and an unsupported
+// version fails the provider. The provider connects lazily, so the test
+// inspects the client's TLS config instead of dialing.
+func TestRedisProviderClientTLSMinVersion(t *testing.T) {
+	t.Parallel()
+
+	tcases := []struct {
+		name       string
+		minVersion string
+		exp        uint16
+		expErr     string
+	}{
+		{
+			name: "default",
+			exp:  tls.VersionTLS13,
+		},
+		{
+			name:       "tls12",
+			minVersion: "1.2",
+			exp:        tls.VersionTLS12,
+		},
+		{
+			name:       "tls13",
+			minVersion: "1.3",
+			exp:        tls.VersionTLS13,
+		},
+		{
+			name:       "unsupported",
+			minVersion: "1.1",
+			expErr:     `client_tls: min_version: unsupported TLS version "1.1": use 1.2 or 1.3`,
+		},
+	}
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p, err := cache.NewRedisProvider(cache.RedisConfig{
+				Server:    "redis://127.0.0.1:1/0",
+				ClientTLS: &gserver.TLSInfo{MinVersion: tc.minVersion},
+			}, "")
+			if tc.expErr != "" {
+				require.EqualError(t, err, tc.expErr)
+				assert.Nil(t, p)
+				return
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, p.Close()) })
+
+			got, ok := cache.RedisTLSMinVersion(p)
+			require.True(t, ok, "ClientTLS must produce a TLS config")
+			assert.Equal(t, tc.exp, got)
+		})
+	}
 }
 
 func provTest(t *testing.T, p cache.Provider, root string) {
